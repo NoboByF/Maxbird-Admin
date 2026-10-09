@@ -82,17 +82,20 @@ class AdminPreferences(context: Context) {
         val saved = prefs.getString(KEY_SUPABASE_KEY, "")
         if (!saved.isNullOrBlank()) return saved
 
-        return try {
-            val buildConfigField = BuildConfig::class.java.getField("SUPABASE_KEY")
-            val value = buildConfigField.get(null) as? String
-            if (!value.isNullOrBlank() && !value.contains("your-supabase-key")) {
-                value
-            } else {
-                DEFAULT_FALLBACK_KEY
+        // Check SERVICE_ROLE first (highest priority for Admin operations), then SUPABASE_ANON_KEY, then SUPABASE_KEY
+        val candidateKeys = listOf("SERVICE_ROLE", "SUPABASE_ANON_KEY", "SUPABASE_KEY")
+        for (fieldKey in candidateKeys) {
+            try {
+                val field = BuildConfig::class.java.getField(fieldKey)
+                val value = field.get(null) as? String
+                if (!value.isNullOrBlank() && !value.contains("your-") && !value.contains("fake_key")) {
+                    return value
+                }
+            } catch (_: Exception) {
+                // Ignore and try next
             }
-        } catch (_: Exception) {
-            DEFAULT_FALLBACK_KEY
         }
+        return DEFAULT_FALLBACK_KEY
     }
 
     fun setSupabaseKey(key: String) {
