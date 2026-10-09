@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -75,7 +76,7 @@ fun DashboardScreen(
     isLoading: Boolean,
     onRefresh: () -> Unit,
     onNavigate: (Screen) -> Unit,
-    onLockAdmin: () -> Unit,
+    onOpenSettings: () -> Unit,
     onShowToast: (String) -> Unit
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
@@ -145,16 +146,16 @@ fun DashboardScreen(
                     }
 
                     IconButton(
-                        onClick = onLockAdmin,
+                        onClick = onOpenSettings,
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(Slate800)
-                            .testTag("btn_lock_admin")
+                            .testTag("btn_settings_dashboard")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = "Lock Admin",
-                            tint = CoralDanger
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = Slate400
                         )
                     }
                 }

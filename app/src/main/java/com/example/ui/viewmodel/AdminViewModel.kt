@@ -29,13 +29,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentScreen = MutableStateFlow<Screen>(Screen.Dashboard)
     val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
 
-    // PIN Lock State
-    private val _isUnlocked = MutableStateFlow(adminPreferences.isSessionUnlocked.value)
-    val isUnlocked: StateFlow<Boolean> = _isUnlocked.asStateFlow()
-
-    private val _pinError = MutableStateFlow<String?>(null)
-    val pinError: StateFlow<String?> = _pinError.asStateFlow()
-
     // Dashboard State
     private val _stats = MutableStateFlow(DashboardStats())
     val stats: StateFlow<DashboardStats> = _stats.asStateFlow()
@@ -126,32 +119,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     fun navigateTo(screen: Screen) {
         _currentScreen.value = screen
-    }
-
-    fun unlockWithPin(pin: String): Boolean {
-        val success = adminPreferences.verifyPin(pin)
-        if (success) {
-            _isUnlocked.value = true
-            _pinError.value = null
-            loadAllData()
-        } else {
-            _pinError.value = "ভুল পিন কোড! সঠিক অ্যাডমিন পিন দিন। (Incorrect PIN)"
-        }
-        return success
-    }
-
-    fun lockAdmin() {
-        adminPreferences.lockSession()
-        _isUnlocked.value = false
-    }
-
-    fun changeAdminPin(newPin: String) {
-        if (newPin.length >= 4) {
-            adminPreferences.setAdminPin(newPin)
-            showToast("অ্যাডমিন পিন সফলভাবে পরিবর্তন করা হয়েছে! (PIN changed)")
-        } else {
-            showToast("পিন কমপক্ষে ৪ সংখ্যার হতে হবে। (PIN must be at least 4 digits)")
-        }
     }
 
     fun loadAllData() {

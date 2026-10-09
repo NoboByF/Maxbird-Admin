@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -42,7 +41,6 @@ import com.example.ui.screens.CodeGeneratorScreen
 import com.example.ui.screens.CodeManagementScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.DeviceManagementScreen
-import com.example.ui.screens.PinLockScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.MyApplicationTheme
@@ -64,9 +62,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyApplicationTheme {
                 val context = LocalContext.current
-                val isUnlocked by viewModel.isUnlocked.collectAsStateWithLifecycle()
                 val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
-                val pinError by viewModel.pinError.collectAsStateWithLifecycle()
                 val toastMessage by viewModel.toastMessage.collectAsStateWithLifecycle()
 
                 val snackbarHostState = remember { SnackbarHostState() }
@@ -83,150 +79,139 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                if (!isUnlocked) {
-                    PinLockScreen(
-                        errorMessage = pinError,
-                        onPinSubmit = { pin ->
-                            viewModel.unlockWithPin(pin)
-                        }
-                    )
-                } else {
-                    // Handle system back gesture
-                    BackHandler(enabled = currentScreen != Screen.Dashboard) {
-                        viewModel.navigateTo(Screen.Dashboard)
-                    }
+                // Directly open Admin Control Center (No PIN gate / barrier)
+                BackHandler(enabled = currentScreen != Screen.Dashboard) {
+                    viewModel.navigateTo(Screen.Dashboard)
+                }
 
-                    Scaffold(
-                        contentWindowInsets = WindowInsets.safeDrawing,
-                        snackbarHost = { SnackbarHost(snackbarHostState) },
-                        bottomBar = {
-                            AdminBottomNavigationBar(
-                                currentScreen = currentScreen,
-                                onNavigate = { screen -> viewModel.navigateTo(screen) }
-                            )
-                        },
-                        containerColor = Slate900
-                    ) { innerPadding ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(innerPadding)
-                                .background(Slate900)
-                        ) {
-                            when (currentScreen) {
-                                Screen.Dashboard -> {
-                                    val stats by viewModel.stats.collectAsStateWithLifecycle()
-                                    val codes by viewModel.codes.collectAsStateWithLifecycle()
-                                    val isLoadingStats by viewModel.isLoadingStats.collectAsStateWithLifecycle()
+                Scaffold(
+                    contentWindowInsets = WindowInsets.safeDrawing,
+                    snackbarHost = { SnackbarHost(snackbarHostState) },
+                    bottomBar = {
+                        AdminBottomNavigationBar(
+                            currentScreen = currentScreen,
+                            onNavigate = { screen -> viewModel.navigateTo(screen) }
+                        )
+                    },
+                    containerColor = Slate900
+                ) { innerPadding ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .background(Slate900)
+                    ) {
+                        when (currentScreen) {
+                            Screen.Dashboard -> {
+                                val stats by viewModel.stats.collectAsStateWithLifecycle()
+                                val codes by viewModel.codes.collectAsStateWithLifecycle()
+                                val isLoadingStats by viewModel.isLoadingStats.collectAsStateWithLifecycle()
 
-                                    DashboardScreen(
-                                        stats = stats,
-                                        recentCodes = codes,
-                                        isLoading = isLoadingStats,
-                                        onRefresh = { viewModel.refreshStats() },
-                                        onNavigate = { screen -> viewModel.navigateTo(screen) },
-                                        onLockAdmin = { viewModel.lockAdmin() },
-                                        onShowToast = { msg -> viewModel.showToast(msg) }
-                                    )
-                                }
+                                DashboardScreen(
+                                    stats = stats,
+                                    recentCodes = codes,
+                                    isLoading = isLoadingStats,
+                                    onRefresh = { viewModel.refreshStats() },
+                                    onNavigate = { screen -> viewModel.navigateTo(screen) },
+                                    onOpenSettings = { viewModel.navigateTo(Screen.Settings) },
+                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                )
+                            }
 
-                                Screen.Generator -> {
-                                    val studentName by viewModel.genStudentName.collectAsStateWithLifecycle()
-                                    val code by viewModel.genCode.collectAsStateWithLifecycle()
-                                    val maxDevices by viewModel.genMaxDevices.collectAsStateWithLifecycle()
-                                    val note by viewModel.genNote.collectAsStateWithLifecycle()
-                                    val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
-                                    val generatorError by viewModel.generatorError.collectAsStateWithLifecycle()
-                                    val successCode by viewModel.generatedSuccessCode.collectAsStateWithLifecycle()
+                            Screen.Generator -> {
+                                val studentName by viewModel.genStudentName.collectAsStateWithLifecycle()
+                                val code by viewModel.genCode.collectAsStateWithLifecycle()
+                                val maxDevices by viewModel.genMaxDevices.collectAsStateWithLifecycle()
+                                val note by viewModel.genNote.collectAsStateWithLifecycle()
+                                val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
+                                val generatorError by viewModel.generatorError.collectAsStateWithLifecycle()
+                                val successCode by viewModel.generatedSuccessCode.collectAsStateWithLifecycle()
 
-                                    CodeGeneratorScreen(
-                                        studentName = studentName,
-                                        code = code,
-                                        maxDevices = maxDevices,
-                                        note = note,
-                                        isGenerating = isGenerating,
-                                        errorMessage = generatorError,
-                                        successCode = successCode,
-                                        onNameChange = { viewModel.setGenStudentName(it) },
-                                        onCodeChange = { viewModel.setGenCode(it) },
-                                        onMaxDevicesChange = { viewModel.setGenMaxDevices(it) },
-                                        onNoteChange = { viewModel.setGenNote(it) },
-                                        onGenerateRandom = { prefix -> viewModel.generateRandomCode(prefix) },
-                                        onSubmit = { viewModel.submitCreateCode() },
-                                        onDismissSuccess = { viewModel.dismissSuccessDialog() },
-                                        onShowToast = { msg -> viewModel.showToast(msg) }
-                                    )
-                                }
+                                CodeGeneratorScreen(
+                                    studentName = studentName,
+                                    code = code,
+                                    maxDevices = maxDevices,
+                                    note = note,
+                                    isGenerating = isGenerating,
+                                    errorMessage = generatorError,
+                                    successCode = successCode,
+                                    onNameChange = { viewModel.setGenStudentName(it) },
+                                    onCodeChange = { viewModel.setGenCode(it) },
+                                    onMaxDevicesChange = { viewModel.setGenMaxDevices(it) },
+                                    onNoteChange = { viewModel.setGenNote(it) },
+                                    onGenerateRandom = { prefix -> viewModel.generateRandomCode(prefix) },
+                                    onSubmit = { viewModel.submitCreateCode() },
+                                    onDismissSuccess = { viewModel.dismissSuccessDialog() },
+                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                )
+                            }
 
-                                Screen.Codes -> {
-                                    val codes by viewModel.codes.collectAsStateWithLifecycle()
-                                    val searchQuery by viewModel.codeSearchQuery.collectAsStateWithLifecycle()
-                                    val filter by viewModel.codeFilter.collectAsStateWithLifecycle()
-                                    val isLoadingCodes by viewModel.isLoadingCodes.collectAsStateWithLifecycle()
-                                    val selectedCodeForDevices by viewModel.selectedCodeForDevices.collectAsStateWithLifecycle()
-                                    val linkedDevices by viewModel.linkedDevices.collectAsStateWithLifecycle()
-                                    val isLoadingLinkedDevices by viewModel.isLoadingLinkedDevices.collectAsStateWithLifecycle()
+                            Screen.Codes -> {
+                                val codes by viewModel.codes.collectAsStateWithLifecycle()
+                                val searchQuery by viewModel.codeSearchQuery.collectAsStateWithLifecycle()
+                                val filter by viewModel.codeFilter.collectAsStateWithLifecycle()
+                                val isLoadingCodes by viewModel.isLoadingCodes.collectAsStateWithLifecycle()
+                                val selectedCodeForDevices by viewModel.selectedCodeForDevices.collectAsStateWithLifecycle()
+                                val linkedDevices by viewModel.linkedDevices.collectAsStateWithLifecycle()
+                                val isLoadingLinkedDevices by viewModel.isLoadingLinkedDevices.collectAsStateWithLifecycle()
 
-                                    CodeManagementScreen(
-                                        codes = codes,
-                                        searchQuery = searchQuery,
-                                        filter = filter,
-                                        isLoading = isLoadingCodes,
-                                        selectedCodeForDevices = selectedCodeForDevices,
-                                        linkedDevices = linkedDevices,
-                                        isLoadingLinkedDevices = isLoadingLinkedDevices,
-                                        onSearchChange = { viewModel.setCodeSearchQuery(it) },
-                                        onFilterChange = { viewModel.setCodeFilter(it) },
-                                        onRefresh = { viewModel.loadCodes() },
-                                        onToggleActive = { target -> viewModel.toggleCodeStatus(target) },
-                                        onDeleteCode = { target -> viewModel.deleteCode(target) },
-                                        onOpenLinkedDevices = { target -> viewModel.openLinkedDevices(target) },
-                                        onCloseLinkedDevices = { viewModel.closeLinkedDevices() },
-                                        onShowToast = { msg -> viewModel.showToast(msg) }
-                                    )
-                                }
+                                CodeManagementScreen(
+                                    codes = codes,
+                                    searchQuery = searchQuery,
+                                    filter = filter,
+                                    isLoading = isLoadingCodes,
+                                    selectedCodeForDevices = selectedCodeForDevices,
+                                    linkedDevices = linkedDevices,
+                                    isLoadingLinkedDevices = isLoadingLinkedDevices,
+                                    onSearchChange = { viewModel.setCodeSearchQuery(it) },
+                                    onFilterChange = { viewModel.setCodeFilter(it) },
+                                    onRefresh = { viewModel.loadCodes() },
+                                    onToggleActive = { target -> viewModel.toggleCodeStatus(target) },
+                                    onDeleteCode = { target -> viewModel.deleteCode(target) },
+                                    onOpenLinkedDevices = { target -> viewModel.openLinkedDevices(target) },
+                                    onCloseLinkedDevices = { viewModel.closeLinkedDevices() },
+                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                )
+                            }
 
-                                Screen.Devices -> {
-                                    val joinedDevices by viewModel.joinedDevices.collectAsStateWithLifecycle()
-                                    val searchQuery by viewModel.deviceSearchQuery.collectAsStateWithLifecycle()
-                                    val filter by viewModel.deviceFilter.collectAsStateWithLifecycle()
-                                    val isLoadingDevices by viewModel.isLoadingDevices.collectAsStateWithLifecycle()
+                            Screen.Devices -> {
+                                val joinedDevices by viewModel.joinedDevices.collectAsStateWithLifecycle()
+                                val searchQuery by viewModel.deviceSearchQuery.collectAsStateWithLifecycle()
+                                val filter by viewModel.deviceFilter.collectAsStateWithLifecycle()
+                                val isLoadingDevices by viewModel.isLoadingDevices.collectAsStateWithLifecycle()
 
-                                    DeviceManagementScreen(
-                                        devices = joinedDevices,
-                                        searchQuery = searchQuery,
-                                        filter = filter,
-                                        isLoading = isLoadingDevices,
-                                        onSearchChange = { viewModel.setDeviceSearchQuery(it) },
-                                        onFilterChange = { viewModel.setDeviceFilter(it) },
-                                        onRefresh = { viewModel.loadJoinedDevices() },
-                                        onToggleBlocked = { target -> viewModel.toggleDeviceBlocked(target) },
-                                        onUnbindDevice = { target -> viewModel.unbindDevice(target) }
-                                    )
-                                }
+                                DeviceManagementScreen(
+                                    devices = joinedDevices,
+                                    searchQuery = searchQuery,
+                                    filter = filter,
+                                    isLoading = isLoadingDevices,
+                                    onSearchChange = { viewModel.setDeviceSearchQuery(it) },
+                                    onFilterChange = { viewModel.setDeviceFilter(it) },
+                                    onRefresh = { viewModel.loadJoinedDevices() },
+                                    onToggleBlocked = { target -> viewModel.toggleDeviceBlocked(target) },
+                                    onUnbindDevice = { target -> viewModel.unbindDevice(target) }
+                                )
+                            }
 
-                                Screen.Settings -> {
-                                    val supabaseUrl by viewModel.supabaseUrl.collectAsStateWithLifecycle()
-                                    val supabaseKey by viewModel.supabaseKey.collectAsStateWithLifecycle()
-                                    val isTestingConnection by viewModel.isTestingConnection.collectAsStateWithLifecycle()
-                                    val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
-                                    val isConnectionSuccess by viewModel.isConnectionSuccess.collectAsStateWithLifecycle()
+                            Screen.Settings -> {
+                                val supabaseUrl by viewModel.supabaseUrl.collectAsStateWithLifecycle()
+                                val supabaseKey by viewModel.supabaseKey.collectAsStateWithLifecycle()
+                                val isTestingConnection by viewModel.isTestingConnection.collectAsStateWithLifecycle()
+                                val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
+                                val isConnectionSuccess by viewModel.isConnectionSuccess.collectAsStateWithLifecycle()
 
-                                    SettingsScreen(
-                                        supabaseUrl = supabaseUrl,
-                                        supabaseKey = supabaseKey,
-                                        isTestingConnection = isTestingConnection,
-                                        connectionStatus = connectionStatus,
-                                        isConnectionSuccess = isConnectionSuccess,
-                                        onUrlChange = { viewModel.updateSupabaseUrl(it) },
-                                        onKeyChange = { viewModel.updateSupabaseKey(it) },
-                                        onSaveSettings = { viewModel.saveSupabaseSettings() },
-                                        onTestConnection = { viewModel.testSupabaseConnection() },
-                                        onChangePin = { pin -> viewModel.changeAdminPin(pin) },
-                                        onLockAdmin = { viewModel.lockAdmin() },
-                                        onShowToast = { msg -> viewModel.showToast(msg) }
-                                    )
-                                }
+                                SettingsScreen(
+                                    supabaseUrl = supabaseUrl,
+                                    supabaseKey = supabaseKey,
+                                    isTestingConnection = isTestingConnection,
+                                    connectionStatus = connectionStatus,
+                                    isConnectionSuccess = isConnectionSuccess,
+                                    onUrlChange = { viewModel.updateSupabaseUrl(it) },
+                                    onKeyChange = { viewModel.updateSupabaseKey(it) },
+                                    onSaveSettings = { viewModel.saveSupabaseSettings() },
+                                    onTestConnection = { viewModel.testSupabaseConnection() },
+                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                )
                             }
                         }
                     }

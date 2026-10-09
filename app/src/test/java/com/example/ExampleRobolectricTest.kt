@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.preferences.AdminPreferences
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNotNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -22,10 +22,9 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `default admin pin verifies correctly`() {
+    fun `supabase url configured properly`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = AdminPreferences(context)
-        assertEquals("8899", prefs.getAdminPin())
-        assertTrue(prefs.verifyPin("8899"))
+        assertNotNull(prefs.getSupabaseUrl())
     }
 }

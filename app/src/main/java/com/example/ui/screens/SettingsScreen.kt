@@ -109,12 +109,9 @@ fun SettingsScreen(
     onKeyChange: (String) -> Unit,
     onSaveSettings: () -> Unit,
     onTestConnection: () -> Unit,
-    onChangePin: (String) -> Unit,
-    onLockAdmin: () -> Unit,
     onShowToast: (String) -> Unit
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
-    var newPinInput by remember { mutableStateOf("") }
 
     LazyColumn(
         modifier = Modifier
@@ -298,98 +295,6 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("সেভ করুন", fontWeight = FontWeight.Bold)
                         }
-                    }
-                }
-            }
-        }
-
-        // Security / PIN Settings
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Slate800),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, Slate700, RoundedCornerShape(16.dp))
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Security,
-                            contentDescription = null,
-                            tint = ElectricBlueLight,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Admin Master PIN Security",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        )
-                    }
-
-                    Text(
-                        text = "ডিফল্ট মাস্টার পিন: 8899। আপনি এখান থেকে যেকোনো ৪-৬ সংখ্যার পিন নির্ধারণ করতে পারেন।",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = newPinInput,
-                            onValueChange = { if (it.length <= 6) newPinInput = it },
-                            placeholder = { Text("নতুন পিন (যেমন: 4567)", color = Slate400) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = ElectricBlue,
-                                unfocusedBorderColor = Slate600,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("input_new_pin")
-                        )
-
-                        Button(
-                            onClick = {
-                                if (newPinInput.length >= 4) {
-                                    onChangePin(newPinInput)
-                                    newPinInput = ""
-                                } else {
-                                    onShowToast("পিন কমপক্ষে ৪ সংখ্যার হতে হবে")
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.height(52.dp)
-                        ) {
-                            Text("পিন সেট করুন")
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Button(
-                        onClick = onLockAdmin,
-                        colors = ButtonDefaults.buttonColors(containerColor = CoralDanger.copy(alpha = 0.2f)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, CoralDanger, RoundedCornerShape(10.dp))
-                    ) {
-                        Icon(Icons.Default.Lock, contentDescription = null, tint = CoralDanger, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("অ্যাডমিন অ্যাপ লক করুন (Lock Admin Now)", color = CoralDanger, fontWeight = FontWeight.Bold)
                     }
                 }
             }
