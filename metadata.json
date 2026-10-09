@@ -1,0 +1,7 @@
+{
+  "name": "MaxBird Admin",
+  "description": "Official control center for MaxBird student access codes, device management, and remote security kill-switch.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
