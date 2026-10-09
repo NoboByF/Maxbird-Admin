@@ -44,16 +44,22 @@ class SupabaseClient(private val adminPreferences: AdminPreferences) {
     }
 
     fun getApi(): SupabaseApi {
-        var rawUrl = adminPreferences.getSupabaseUrl().trimEnd('/')
-        if (!rawUrl.endsWith("/")) {
-            rawUrl += "/"
-        }
+        val urlToUse = adminPreferences.getNormalizedSupabaseUrl()
 
-        return Retrofit.Builder()
-            .baseUrl(rawUrl)
-            .client(createOkHttpClient())
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-            .create(SupabaseApi::class.java)
+        return try {
+            Retrofit.Builder()
+                .baseUrl(urlToUse)
+                .client(createOkHttpClient())
+                .addConverterFactory(MoshiConverterFactory.create(moshi))
+                .build()
+                .create(SupabaseApi::class.java)
+        } catch (_: Exception) {
+            Retrofit.Builder()
+                .baseUrl(AdminPreferences.DEFAULT_FALLBACK_URL)
+                .client(createOkHttpClient())
+                .addConverterFactory(MoshiConverterFactory.create(moshi))
+                .build()
+                .create(SupabaseApi::class.java)
+        }
     }
 }

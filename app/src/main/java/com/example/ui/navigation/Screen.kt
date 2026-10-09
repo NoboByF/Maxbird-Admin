@@ -20,7 +20,7 @@ sealed class Screen(
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector
 ) {
-    object Dashboard : Screen(
+    data object Dashboard : Screen(
         route = "dashboard",
         titleEn = "Dashboard",
         titleBn = "ড্যাশবোর্ড",
@@ -28,7 +28,7 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Dashboard
     )
 
-    object Generator : Screen(
+    data object Generator : Screen(
         route = "generator",
         titleEn = "New Code",
         titleBn = "নতুন কোড",
@@ -36,7 +36,7 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.AddModerator
     )
 
-    object Codes : Screen(
+    data object Codes : Screen(
         route = "codes",
         titleEn = "Students",
         titleBn = "শিক্ষার্থী তালিকা",
@@ -44,7 +44,7 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Group
     )
 
-    object Devices : Screen(
+    data object Devices : Screen(
         route = "devices",
         titleEn = "Kill-Switch",
         titleBn = "ডিভাইস কন্ট্রোল",
@@ -52,7 +52,7 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Devices
     )
 
-    object Settings : Screen(
+    data object Settings : Screen(
         route = "settings",
         titleEn = "Settings",
         titleBn = "সেটিংস",
@@ -61,6 +61,8 @@ sealed class Screen(
     )
 
     companion object {
-        val bottomNavItems = listOf(Dashboard, Generator, Codes, Devices, Settings)
+        // Use custom getter to prevent Kotlin static initialization circular dependency null-reference
+        val bottomNavItems: List<Screen>
+            get() = listOf(Dashboard, Generator, Codes, Devices, Settings)
     }
 }

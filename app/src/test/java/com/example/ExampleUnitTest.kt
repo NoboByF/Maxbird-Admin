@@ -1,16 +1,24 @@
 package com.example
 
-import org.junit.Assert.*
+import com.example.ui.navigation.Screen
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Example local unit test, which will execute on the development machine (host).
- *
- * See [testing documentation](http://d.android.com/tools/testing).
- */
 class ExampleUnitTest {
-  @Test
-  fun addition_isCorrect() {
-    assertEquals(4, 2 + 2)
-  }
+
+    @Test
+    fun `navigation bottom items are initialized and not null`() {
+        val items = Screen.bottomNavItems
+        assertNotNull(items)
+        assertEquals(5, items.size)
+        items.forEach { screen ->
+            assertNotNull(screen)
+            assertNotNull(screen.route)
+            assertTrue(screen.route.isNotBlank())
+            assertNotNull(screen.selectedIcon)
+            assertNotNull(screen.unselectedIcon)
+        }
+    }
 }

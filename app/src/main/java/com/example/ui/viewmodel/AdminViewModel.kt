@@ -129,12 +129,17 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshStats() {
         viewModelScope.launch {
-            _isLoadingStats.value = true
-            val result = repository.getDashboardStats()
-            if (result.isSuccess) {
-                _stats.value = result.getOrNull() ?: DashboardStats()
+            try {
+                _isLoadingStats.value = true
+                val result = repository.getDashboardStats()
+                if (result.isSuccess) {
+                    _stats.value = result.getOrNull() ?: DashboardStats()
+                }
+            } catch (e: Throwable) {
+                // Ignore and keep current stats
+            } finally {
+                _isLoadingStats.value = false
             }
-            _isLoadingStats.value = false
         }
     }
 
@@ -174,33 +179,36 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            _isGenerating.value = true
-            _generatorError.value = null
+            try {
+                _isGenerating.value = true
+                _generatorError.value = null
 
-            val payload = CreateAccessCodePayload(
-                code = code,
-                studentName = name,
-                maxDevices = _genMaxDevices.value,
-                isActive = true,
-                note = _genNote.value.ifBlank { null }
-            )
+                val payload = CreateAccessCodePayload(
+                    code = code,
+                    studentName = name,
+                    maxDevices = _genMaxDevices.value,
+                    isActive = true,
+                    note = _genNote.value.ifBlank { null }
+                )
 
-            val result = repository.createAccessCode(payload)
-            if (result.isSuccess) {
-                val created = result.getOrNull()
-                _generatedSuccessCode.value = created
-                // Reset form
-                _genStudentName.value = ""
-                _genNote.value = ""
-                generateRandomCode("MAX")
-                // Refresh list and stats
-                loadCodes()
-                refreshStats()
-                showToast("এক্সেস কোড তৈরি সম্পন্ন হয়েছে! (Code created successfully)")
-            } else {
-                _generatorError.value = result.exceptionOrNull()?.message ?: "কোড তৈরি করতে ব্যর্থ হয়েছে।"
+                val result = repository.createAccessCode(payload)
+                if (result.isSuccess) {
+                    val created = result.getOrNull()
+                    _generatedSuccessCode.value = created
+                    _genStudentName.value = ""
+                    _genNote.value = ""
+                    generateRandomCode("MAX")
+                    loadCodes()
+                    refreshStats()
+                    showToast("এক্সেস কোড তৈরি সম্পন্ন হয়েছে! (Code created successfully)")
+                } else {
+                    _generatorError.value = result.exceptionOrNull()?.message ?: "কোড তৈরি করতে ব্যর্থ হয়েছে।"
+                }
+            } catch (e: Throwable) {
+                _generatorError.value = e.message ?: "ত্রুটি ঘটেছে।"
+            } finally {
+                _isGenerating.value = false
             }
-            _isGenerating.value = false
         }
     }
 
@@ -219,36 +227,49 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadCodes() {
         viewModelScope.launch {
-            _isLoadingCodes.value = true
-            val result = repository.getAccessCodes(forceRefresh = true)
-            if (result.isSuccess) {
-                _codes.value = result.getOrNull() ?: emptyList()
+            try {
+                _isLoadingCodes.value = true
+                val result = repository.getAccessCodes(forceRefresh = true)
+                if (result.isSuccess) {
+                    _codes.value = result.getOrNull() ?: emptyList()
+                }
+            } catch (e: Throwable) {
+                // Silently fallback
+            } finally {
+                _isLoadingCodes.value = false
             }
-            _isLoadingCodes.value = false
         }
     }
 
     fun toggleCodeStatus(code: AccessCode) {
         val newStatus = !code.isActive
         viewModelScope.launch {
-            val result = repository.toggleCodeStatus(code.id, newStatus)
-            if (result.isSuccess) {
-                loadCodes()
-                refreshStats()
-                val statusText = if (newStatus) "সক্রিয় (Active)" else "নিষ্ক্রিয় (Disabled)"
-                showToast("${code.code} এখন $statusText")
+            try {
+                val result = repository.toggleCodeStatus(code.id, newStatus)
+                if (result.isSuccess) {
+                    loadCodes()
+                    refreshStats()
+                    val statusText = if (newStatus) "সক্রিয় (Active)" else "নিষ্ক্রিয় (Disabled)"
+                    showToast("${code.code} এখন $statusText")
+                }
+            } catch (e: Throwable) {
+                showToast("স্ট্যাটাস আপডেট ব্যর্থ হয়েছে।")
             }
         }
     }
 
     fun deleteCode(code: AccessCode) {
         viewModelScope.launch {
-            val result = repository.deleteAccessCode(code.id)
-            if (result.isSuccess) {
-                loadCodes()
-                loadJoinedDevices()
-                refreshStats()
-                showToast("${code.code} কোডটি মুছে ফেলা হয়েছে। (Code deleted)")
+            try {
+                val result = repository.deleteAccessCode(code.id)
+                if (result.isSuccess) {
+                    loadCodes()
+                    loadJoinedDevices()
+                    refreshStats()
+                    showToast("${code.code} কোডটি মুছে ফেলা হয়েছে। (Code deleted)")
+                }
+            } catch (e: Throwable) {
+                showToast("মুছে ফেলতে ব্যর্থ হয়েছে।")
             }
         }
     }
@@ -256,10 +277,15 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     fun openLinkedDevices(code: AccessCode) {
         _selectedCodeForDevices.value = code
         viewModelScope.launch {
-            _isLoadingLinkedDevices.value = true
-            val result = repository.getDevicesForCode(code.id)
-            _linkedDevices.value = result.getOrNull() ?: emptyList()
-            _isLoadingLinkedDevices.value = false
+            try {
+                _isLoadingLinkedDevices.value = true
+                val result = repository.getDevicesForCode(code.id)
+                _linkedDevices.value = result.getOrNull() ?: emptyList()
+            } catch (e: Throwable) {
+                _linkedDevices.value = emptyList()
+            } finally {
+                _isLoadingLinkedDevices.value = false
+            }
         }
     }
 
@@ -279,37 +305,49 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadJoinedDevices() {
         viewModelScope.launch {
-            _isLoadingDevices.value = true
-            val result = repository.getJoinedDevices()
-            if (result.isSuccess) {
-                _joinedDevices.value = result.getOrNull() ?: emptyList()
+            try {
+                _isLoadingDevices.value = true
+                val result = repository.getJoinedDevices()
+                if (result.isSuccess) {
+                    _joinedDevices.value = result.getOrNull() ?: emptyList()
+                }
+            } catch (e: Throwable) {
+                // Silently fallback
+            } finally {
+                _isLoadingDevices.value = false
             }
-            _isLoadingDevices.value = false
         }
     }
 
     fun toggleDeviceBlocked(item: DeviceWithStudent) {
         val newBlockedState = !item.device.isBlocked
         viewModelScope.launch {
-            val result = repository.toggleDeviceBlocked(item.device.id, newBlockedState)
-            if (result.isSuccess) {
-                loadJoinedDevices()
-                refreshStats()
-                val action = if (newBlockedState) "ব্লক করা হয়েছে! কিল-সুইচ সক্রিয় (Device Blocked!)" else "আনব্লক করা হয়েছে (Device Unblocked)"
-                showToast("${item.device.deviceModel}: $action")
+            try {
+                val result = repository.toggleDeviceBlocked(item.device.id, newBlockedState)
+                if (result.isSuccess) {
+                    loadJoinedDevices()
+                    refreshStats()
+                    val action = if (newBlockedState) "ব্লক করা হয়েছে! কিল-সুইচ সক্রিয় (Device Blocked!)" else "আনব্লক করা হয়েছে (Device Unblocked)"
+                    showToast("${item.device.deviceModel}: $action")
+                }
+            } catch (e: Throwable) {
+                showToast("ডিভাইস স্ট্যাটাস আপডেট ব্যর্থ হয়েছে।")
             }
         }
     }
 
     fun unbindDevice(item: DeviceWithStudent) {
         viewModelScope.launch {
-            val result = repository.unbindDevice(item.device.id)
-            if (result.isSuccess) {
-                loadJoinedDevices()
-                refreshStats()
-                // If linked dialog open, refresh it as well
-                _selectedCodeForDevices.value?.let { openLinkedDevices(it) }
-                showToast("${item.device.deviceModel} আনবাইন্ড সম্পন্ন হয়েছে। নতুন ডিভাইস যুক্ত করা যাবে।")
+            try {
+                val result = repository.unbindDevice(item.device.id)
+                if (result.isSuccess) {
+                    loadJoinedDevices()
+                    refreshStats()
+                    _selectedCodeForDevices.value?.let { openLinkedDevices(it) }
+                    showToast("${item.device.deviceModel} আনবাইন্ড সম্পন্ন হয়েছে। নতুন ডিভাইস যুক্ত করা যাবে।")
+                }
+            } catch (e: Throwable) {
+                showToast("আনবাইন্ড ব্যর্থ হয়েছে।")
             }
         }
     }
@@ -326,27 +364,35 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSupabaseSettings() {
         adminPreferences.setSupabaseUrl(_supabaseUrl.value)
         adminPreferences.setSupabaseKey(_supabaseKey.value)
+        _supabaseUrl.value = adminPreferences.getSupabaseUrl()
+        _supabaseKey.value = adminPreferences.getSupabaseKey()
         showToast("সুপাবেস কনফিগারেশন সেভ হয়েছে! (Supabase config saved)")
         testSupabaseConnection()
     }
 
     fun testSupabaseConnection() {
         viewModelScope.launch {
-            _isTestingConnection.value = true
-            _connectionStatus.value = "কানেকশন পরীক্ষা করা হচ্ছে... (Testing connection)"
-            _isConnectionSuccess.value = null
+            try {
+                _isTestingConnection.value = true
+                _connectionStatus.value = "কানেকশন পরীক্ষা করা হচ্ছে... (Testing connection)"
+                _isConnectionSuccess.value = null
 
-            val result = repository.testConnection()
-            if (result.isSuccess) {
-                _isConnectionSuccess.value = true
-                _connectionStatus.value = "সফল! সুপাবেস ডাটাবেজের সাথে সংযোগ স্থাপিত হয়েছে। (Connected)"
-                loadAllData()
-            } else {
+                val result = repository.testConnection()
+                if (result.isSuccess) {
+                    _isConnectionSuccess.value = true
+                    _connectionStatus.value = "সফল! সুপাবেস ডাটাবেজের সাথে সংযোগ স্থাপিত হয়েছে। (Connected)"
+                    loadAllData()
+                } else {
+                    _isConnectionSuccess.value = false
+                    val err = result.exceptionOrNull()?.message ?: "সংযোগ ব্যর্থ হয়েছে।"
+                    _connectionStatus.value = "সংযোগ ব্যর্থ: $err (Connection Failed)"
+                }
+            } catch (e: Throwable) {
                 _isConnectionSuccess.value = false
-                val err = result.exceptionOrNull()?.message ?: "সংযোগ ব্যর্থ হয়েছে।"
-                _connectionStatus.value = "সংযোগ ব্যর্থ: $err (Connection Failed)"
+                _connectionStatus.value = "ত্রুটি: ${e.message}"
+            } finally {
+                _isTestingConnection.value = false
             }
-            _isTestingConnection.value = false
         }
     }
 

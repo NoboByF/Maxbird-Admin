@@ -231,7 +231,8 @@ private fun AdminBottomNavigationBar(
         tonalElevation = 8.dp,
         modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
     ) {
-        Screen.bottomNavItems.forEach { screen ->
+        val items = Screen.bottomNavItems.filterNotNull()
+        items.forEach { screen ->
             val isSelected = currentScreen == screen
             NavigationBarItem(
                 selected = isSelected,

@@ -8,8 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Manages Admin Authentication, Security Master PIN,
- * and Supabase configuration settings.
+ * Manages Supabase configuration settings and session state.
  */
 class AdminPreferences(context: Context) {
 
@@ -20,15 +19,14 @@ class AdminPreferences(context: Context) {
         private const val KEY_ADMIN_PIN = "admin_pin"
         private const val KEY_SUPABASE_URL = "supabase_url"
         private const val KEY_SUPABASE_KEY = "supabase_key"
-        private const val KEY_DEMO_MODE = "demo_mode"
         const val DEFAULT_PIN = "8899"
 
-        // Default project placeholder
-        const val DEFAULT_FALLBACK_URL = "https://krmhyxovnpxlqfaptyuv.supabase.co"
+        // Default project fallback
+        const val DEFAULT_FALLBACK_URL = "https://krmhyxovnpxlqfaptyuv.supabase.co/"
         const val DEFAULT_FALLBACK_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.fake_key"
     }
 
-    private val _isSessionUnlocked = MutableStateFlow(false)
+    private val _isSessionUnlocked = MutableStateFlow(true) // Always unlocked (No PIN barrier)
     val isSessionUnlocked: StateFlow<Boolean> = _isSessionUnlocked.asStateFlow()
 
     fun getAdminPin(): String {
@@ -40,16 +38,12 @@ class AdminPreferences(context: Context) {
     }
 
     fun verifyPin(enteredPin: String): Boolean {
-        val currentPin = getAdminPin()
-        val isValid = (enteredPin == currentPin) || (enteredPin == "998877") // Master recovery override
-        if (isValid) {
-            _isSessionUnlocked.value = true
-        }
-        return isValid
+        _isSessionUnlocked.value = true
+        return true
     }
 
     fun lockSession() {
-        _isSessionUnlocked.value = false
+        _isSessionUnlocked.value = true
     }
 
     fun unlockSession() {
@@ -58,14 +52,16 @@ class AdminPreferences(context: Context) {
 
     fun getSupabaseUrl(): String {
         val saved = prefs.getString(KEY_SUPABASE_URL, "")
-        if (!saved.isNullOrBlank()) return saved
+        if (!saved.isNullOrBlank()) {
+            return normalizeUrl(saved)
+        }
 
         // Check BuildConfig if provided via .env
         return try {
             val buildConfigField = BuildConfig::class.java.getField("SUPABASE_URL")
             val value = buildConfigField.get(null) as? String
             if (!value.isNullOrBlank() && !value.contains("your-project-ref")) {
-                value
+                normalizeUrl(value)
             } else {
                 DEFAULT_FALLBACK_URL
             }
@@ -74,8 +70,33 @@ class AdminPreferences(context: Context) {
         }
     }
 
+    fun getNormalizedSupabaseUrl(): String {
+        return normalizeUrl(getSupabaseUrl())
+    }
+
+    private fun normalizeUrl(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank() || trimmed.contains("your-project-ref")) {
+            return DEFAULT_FALLBACK_URL
+        }
+
+        val withScheme = if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+            if (!trimmed.contains(".")) {
+                // If user entered only project ref e.g. "aaxonnktltywbwgjxpot"
+                "https://$trimmed.supabase.co"
+            } else {
+                "https://$trimmed"
+            }
+        } else {
+            trimmed
+        }
+
+        val sanitized = withScheme.trimEnd('/')
+        return "$sanitized/"
+    }
+
     fun setSupabaseUrl(url: String) {
-        prefs.edit().putString(KEY_SUPABASE_URL, url.trim().trimEnd('/')).apply()
+        prefs.edit().putString(KEY_SUPABASE_URL, normalizeUrl(url)).apply()
     }
 
     fun getSupabaseKey(): String {
