@@ -6,11 +6,13 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.AddModerator
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.ui.graphics.vector.ImageVector
 
 sealed class Screen(
@@ -52,6 +54,14 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Devices
     )
 
+    data object Updates : Screen(
+        route = "updates",
+        titleEn = "Updates",
+        titleBn = "অ্যাপ আপডেট",
+        selectedIcon = Icons.Filled.SystemUpdate,
+        unselectedIcon = Icons.Outlined.SystemUpdate
+    )
+
     data object Settings : Screen(
         route = "settings",
         titleEn = "Settings",
@@ -63,6 +73,6 @@ sealed class Screen(
     companion object {
         // Use custom getter to prevent Kotlin static initialization circular dependency null-reference
         val bottomNavItems: List<Screen>
-            get() = listOf(Dashboard, Generator, Codes, Devices, Settings)
+            get() = listOf(Dashboard, Generator, Codes, Devices, Updates, Settings)
     }
 }

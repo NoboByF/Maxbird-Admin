@@ -42,6 +42,7 @@ import com.example.ui.screens.CodeManagementScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.DeviceManagementScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.UpdatesManagementScreen
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NeonCyan
@@ -193,6 +194,55 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
+                            Screen.Updates -> {
+                                val updates by viewModel.appUpdates.collectAsStateWithLifecycle()
+                                val isLoadingUpdates by viewModel.isLoadingUpdates.collectAsStateWithLifecycle()
+                                val isDialogOpen by viewModel.isUpdateDialogOpen.collectAsStateWithLifecycle()
+                                val editingId by viewModel.editingUpdateId.collectAsStateWithLifecycle()
+                                val versionName by viewModel.updateVersionName.collectAsStateWithLifecycle()
+                                val versionCode by viewModel.updateVersionCode.collectAsStateWithLifecycle()
+                                val minVersionCode by viewModel.updateMinVersionCode.collectAsStateWithLifecycle()
+                                val isForce by viewModel.updateIsForce.collectAsStateWithLifecycle()
+                                val title by viewModel.updateTitle.collectAsStateWithLifecycle()
+                                val changelog by viewModel.updateChangelog.collectAsStateWithLifecycle()
+                                val downloadUrl by viewModel.updateDownloadUrl.collectAsStateWithLifecycle()
+                                val buttonText by viewModel.updateButtonText.collectAsStateWithLifecycle()
+                                val isActive by viewModel.updateIsActive.collectAsStateWithLifecycle()
+
+                                UpdatesManagementScreen(
+                                    updates = updates,
+                                    isLoading = isLoadingUpdates,
+                                    isDialogOpen = isDialogOpen,
+                                    editingId = editingId,
+                                    versionName = versionName,
+                                    versionCode = versionCode,
+                                    minVersionCode = minVersionCode,
+                                    isForce = isForce,
+                                    title = title,
+                                    changelog = changelog,
+                                    downloadUrl = downloadUrl,
+                                    buttonText = buttonText,
+                                    isActive = isActive,
+                                    onOpenCreateDialog = { viewModel.openCreateUpdateDialog() },
+                                    onOpenEditDialog = { update -> viewModel.openEditUpdateDialog(update) },
+                                    onCloseDialog = { viewModel.closeUpdateDialog() },
+                                    onVersionNameChange = { viewModel.setUpdateVersionName(it) },
+                                    onVersionCodeChange = { viewModel.setUpdateVersionCode(it) },
+                                    onMinVersionCodeChange = { viewModel.setUpdateMinVersionCode(it) },
+                                    onIsForceChange = { viewModel.setUpdateIsForce(it) },
+                                    onTitleChange = { viewModel.setUpdateTitle(it) },
+                                    onChangelogChange = { viewModel.setUpdateChangelog(it) },
+                                    onDownloadUrlChange = { viewModel.setUpdateDownloadUrl(it) },
+                                    onButtonTextChange = { viewModel.setUpdateButtonText(it) },
+                                    onIsActiveChange = { viewModel.setUpdateIsActive(it) },
+                                    onSaveUpdate = { viewModel.saveAppUpdate() },
+                                    onToggleStatus = { update -> viewModel.toggleAppUpdateStatus(update) },
+                                    onDeleteUpdate = { update -> viewModel.deleteAppUpdate(update) },
+                                    onRefresh = { viewModel.loadAppUpdates() },
+                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                )
+                            }
+
                             Screen.Settings -> {
                                 val supabaseUrl by viewModel.supabaseUrl.collectAsStateWithLifecycle()
                                 val supabaseKey by viewModel.supabaseKey.collectAsStateWithLifecycle()
@@ -246,7 +296,7 @@ private fun AdminBottomNavigationBar(
                 label = {
                     Text(
                         text = screen.titleEn,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                     )
                 },

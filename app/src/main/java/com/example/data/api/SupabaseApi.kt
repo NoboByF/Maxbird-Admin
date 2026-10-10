@@ -2,9 +2,12 @@ package com.example.data.api
 
 import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
+import com.example.data.model.AppUpdate
 import com.example.data.model.CreateAccessCodePayload
+import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.UpdateCodeStatusPayload
 import com.example.data.model.UpdateDeviceBlockedPayload
+import com.example.data.model.UpdateAppUpdateStatusPayload
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -70,4 +73,34 @@ interface SupabaseApi {
         @Query("select") select: String = "id",
         @Query("limit") limit: Int = 1
     ): Response<List<Any>>
+
+    @GET("rest/v1/app_updates")
+    suspend fun getAppUpdates(
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "latest_version_code.desc"
+    ): List<AppUpdate>
+
+    @POST("rest/v1/app_updates")
+    suspend fun createAppUpdate(
+        @Body payload: CreateAppUpdatePayload,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): List<AppUpdate>
+
+    @PATCH("rest/v1/app_updates")
+    suspend fun updateAppUpdate(
+        @Query("id") idQuery: String,
+        @Body payload: CreateAppUpdatePayload,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): List<AppUpdate>
+
+    @PATCH("rest/v1/app_updates")
+    suspend fun updateAppUpdateStatus(
+        @Query("id") idQuery: String,
+        @Body payload: UpdateAppUpdateStatusPayload
+    ): Response<Unit>
+
+    @DELETE("rest/v1/app_updates")
+    suspend fun deleteAppUpdate(
+        @Query("id") idQuery: String
+    ): Response<Unit>
 }

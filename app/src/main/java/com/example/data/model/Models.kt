@@ -80,3 +80,47 @@ data class DashboardStats(
     val blockedDevices: Int = 0,
     val availableSlots: Int = 0
 )
+
+/**
+ * App Update release record.
+ * Matches Supabase table: `app_updates`
+ */
+@JsonClass(generateAdapter = true)
+data class AppUpdate(
+    @Json(name = "id") val id: String = "",
+    @Json(name = "latest_version_name") val latestVersionName: String,
+    @Json(name = "latest_version_code") val latestVersionCode: Int,
+    @Json(name = "min_supported_version_code") val minSupportedVersionCode: Int,
+    @Json(name = "is_force_update") val isForceUpdate: Boolean = false,
+    @Json(name = "title") val title: String,
+    @Json(name = "changelog") val changelog: String,
+    @Json(name = "download_url") val downloadUrl: String,
+    @Json(name = "button_text") val buttonText: String = "এখনই আপডেট করুন",
+    @Json(name = "is_active") val isActive: Boolean = true,
+    @Json(name = "created_at") val createdAt: String = "",
+    @Json(name = "updated_at") val updatedAt: String = ""
+)
+
+/**
+ * Request payload to create or update an app update release.
+ */
+@JsonClass(generateAdapter = true)
+data class CreateAppUpdatePayload(
+    @Json(name = "latest_version_name") val latestVersionName: String,
+    @Json(name = "latest_version_code") val latestVersionCode: Int,
+    @Json(name = "min_supported_version_code") val minSupportedVersionCode: Int,
+    @Json(name = "is_force_update") val isForceUpdate: Boolean,
+    @Json(name = "title") val title: String,
+    @Json(name = "changelog") val changelog: String,
+    @Json(name = "download_url") val downloadUrl: String,
+    @Json(name = "button_text") val buttonText: String,
+    @Json(name = "is_active") val isActive: Boolean
+)
+
+/**
+ * Request payload to update app update active status.
+ */
+@JsonClass(generateAdapter = true)
+data class UpdateAppUpdateStatusPayload(
+    @Json(name = "is_active") val isActive: Boolean
+)

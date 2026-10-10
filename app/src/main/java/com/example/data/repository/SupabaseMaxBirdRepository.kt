@@ -1,13 +1,16 @@
 package com.example.data.repository
 
-import com.example.data.api.SupabaseClient
 import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
+import com.example.data.model.AppUpdate
 import com.example.data.model.CreateAccessCodePayload
+import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
 import com.example.data.model.UpdateCodeStatusPayload
 import com.example.data.model.UpdateDeviceBlockedPayload
+import com.example.data.model.UpdateAppUpdateStatusPayload
+import com.example.data.api.SupabaseClient
 import com.example.data.preferences.AdminPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -120,6 +123,40 @@ class SupabaseMaxBirdRepository(
                     )
                 )
             )
+
+            cachedUpdates.addAll(
+                listOf(
+                    AppUpdate(
+                        id = UUID.randomUUID().toString(),
+                        latestVersionName = "v6.1.0",
+                        latestVersionCode = 60100,
+                        minSupportedVersionCode = 60000,
+                        isForceUpdate = false,
+                        title = "MaxBird v6.1.0 আপডেট প্রকাশিত হয়েছে!",
+                        changelog = "• নতুন ভিডিও প্লেয়ার ইঞ্জিন যুক্ত হয়েছে\n• লাইভ চ্যাট ফিচারের বাগ ফিক্স\n• ইউজার ইন্টারফেস আরও আকর্ষণীয় করা হয়েছে",
+                        downloadUrl = "https://t.me/maxbird_updates",
+                        buttonText = "এখনই আপডেট করুন",
+                        isActive = true,
+                        createdAt = now,
+                        updatedAt = now
+                    ),
+                    AppUpdate(
+                        id = UUID.randomUUID().toString(),
+                        latestVersionName = "v6.0.0",
+                        latestVersionCode = 60000,
+                        minSupportedVersionCode = 50900,
+                        isForceUpdate = true,
+                        title = "জরুরি সিকিউরিটি আপডেট",
+                        changelog = "• বাধ্যতামূলক সিকিউরিটি প্যাচ\n• সার্ভার সংযোগ উন্নত করা হয়েছে",
+                        downloadUrl = "https://play.google.com/store/apps/details?id=com.maxbird.app",
+                        buttonText = "আবশ্যক আপডেট",
+                        isActive = true,
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                )
+            )
+
             isInitializedWithSampleData = true
         }
     }
@@ -298,6 +335,129 @@ class SupabaseMaxBirdRepository(
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private val cachedUpdates = mutableListOf<AppUpdate>()
+
+    override suspend fun getAppUpdates(forceRefresh: Boolean): Result<List<AppUpdate>> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val remoteUpdates = api.getAppUpdates()
+            cachedUpdates.clear()
+            cachedUpdates.addAll(remoteUpdates)
+            Result.success(remoteUpdates)
+        } catch (e: Exception) {
+            initSampleDataIfNeeded()
+            Result.success(cachedUpdates.toList())
+        }
+    }
+
+    override suspend fun createAppUpdate(payload: CreateAppUpdatePayload): Result<AppUpdate> = withContext(Dispatchers.IO) {
+        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val localNewUpdate = AppUpdate(
+            id = UUID.randomUUID().toString(),
+            latestVersionName = payload.latestVersionName.trim(),
+            latestVersionCode = payload.latestVersionCode,
+            minSupportedVersionCode = payload.minSupportedVersionCode,
+            isForceUpdate = payload.isForceUpdate,
+            title = payload.title.trim(),
+            changelog = payload.changelog.trim(),
+            downloadUrl = payload.downloadUrl.trim(),
+            buttonText = payload.buttonText.trim().ifBlank { "এখনই আপডেট করুন" },
+            isActive = payload.isActive,
+            createdAt = now,
+            updatedAt = now
+        )
+
+        try {
+            val api = supabaseClient.getApi()
+            val createdList = api.createAppUpdate(payload)
+            val created = createdList.firstOrNull() ?: localNewUpdate
+            cachedUpdates.add(0, created)
+            Result.success(created)
+        } catch (e: Exception) {
+            cachedUpdates.add(0, localNewUpdate)
+            Result.success(localNewUpdate)
+        }
+    }
+
+    override suspend fun updateAppUpdate(id: String, payload: CreateAppUpdatePayload): Result<AppUpdate> = withContext(Dispatchers.IO) {
+        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val index = cachedUpdates.indexOfFirst { it.id == id }
+        val updatedLocal = if (index != -1) {
+            val existing = cachedUpdates[index]
+            existing.copy(
+                latestVersionName = payload.latestVersionName.trim(),
+                latestVersionCode = payload.latestVersionCode,
+                minSupportedVersionCode = payload.minSupportedVersionCode,
+                isForceUpdate = payload.isForceUpdate,
+                title = payload.title.trim(),
+                changelog = payload.changelog.trim(),
+                downloadUrl = payload.downloadUrl.trim(),
+                buttonText = payload.buttonText.trim().ifBlank { "এখনই আপডেট করুন" },
+                isActive = payload.isActive,
+                updatedAt = now
+            )
+        } else {
+            AppUpdate(
+                id = id,
+                latestVersionName = payload.latestVersionName,
+                latestVersionCode = payload.latestVersionCode,
+                minSupportedVersionCode = payload.minSupportedVersionCode,
+                isForceUpdate = payload.isForceUpdate,
+                title = payload.title,
+                changelog = payload.changelog,
+                downloadUrl = payload.downloadUrl,
+                buttonText = payload.buttonText,
+                isActive = payload.isActive,
+                createdAt = now,
+                updatedAt = now
+            )
+        }
+
+        if (index != -1) {
+            cachedUpdates[index] = updatedLocal
+        } else {
+            cachedUpdates.add(0, updatedLocal)
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            val updatedList = api.updateAppUpdate("eq.$id", payload)
+            val updated = updatedList.firstOrNull() ?: updatedLocal
+            val idx = cachedUpdates.indexOfFirst { it.id == id }
+            if (idx != -1) cachedUpdates[idx] = updated
+            Result.success(updated)
+        } catch (e: Exception) {
+            Result.success(updatedLocal)
+        }
+    }
+
+    override suspend fun toggleAppUpdateStatus(id: String, isActive: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+        val index = cachedUpdates.indexOfFirst { it.id == id }
+        if (index != -1) {
+            cachedUpdates[index] = cachedUpdates[index].copy(isActive = isActive)
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            api.updateAppUpdateStatus("eq.$id", UpdateAppUpdateStatusPayload(isActive = isActive))
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun deleteAppUpdate(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+        cachedUpdates.removeAll { it.id == id }
+
+        try {
+            val api = supabaseClient.getApi()
+            api.deleteAppUpdate("eq.$id")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
         }
     }
 }

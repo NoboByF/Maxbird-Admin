@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.api.SupabaseClient
 import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
+import com.example.data.model.AppUpdate
 import com.example.data.model.CreateAccessCodePayload
+import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
 import com.example.data.preferences.AdminPreferences
@@ -94,6 +96,46 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLoadingDevices = MutableStateFlow(false)
     val isLoadingDevices: StateFlow<Boolean> = _isLoadingDevices.asStateFlow()
 
+    // App Updates Management State
+    private val _appUpdates = MutableStateFlow<List<AppUpdate>>(emptyList())
+    val appUpdates: StateFlow<List<AppUpdate>> = _appUpdates.asStateFlow()
+
+    private val _isLoadingUpdates = MutableStateFlow(false)
+    val isLoadingUpdates: StateFlow<Boolean> = _isLoadingUpdates.asStateFlow()
+
+    private val _isUpdateDialogOpen = MutableStateFlow(false)
+    val isUpdateDialogOpen: StateFlow<Boolean> = _isUpdateDialogOpen.asStateFlow()
+
+    private val _editingUpdateId = MutableStateFlow<String?>(null)
+    val editingUpdateId: StateFlow<String?> = _editingUpdateId.asStateFlow()
+
+    private val _updateVersionName = MutableStateFlow("v6.1.0")
+    val updateVersionName: StateFlow<String> = _updateVersionName.asStateFlow()
+
+    private val _updateVersionCode = MutableStateFlow("60100")
+    val updateVersionCode: StateFlow<String> = _updateVersionCode.asStateFlow()
+
+    private val _updateMinVersionCode = MutableStateFlow("60000")
+    val updateMinVersionCode: StateFlow<String> = _updateMinVersionCode.asStateFlow()
+
+    private val _updateIsForce = MutableStateFlow(false)
+    val updateIsForce: StateFlow<Boolean> = _updateIsForce.asStateFlow()
+
+    private val _updateTitle = MutableStateFlow("নতুন আপডেট উপলভ্য!")
+    val updateTitle: StateFlow<String> = _updateTitle.asStateFlow()
+
+    private val _updateChangelog = MutableStateFlow("• বাগ ফিক্স এবং পারফরম্যান্স উন্নতি\n• নতুন সিকিউরিটি ফিচার")
+    val updateChangelog: StateFlow<String> = _updateChangelog.asStateFlow()
+
+    private val _updateDownloadUrl = MutableStateFlow("")
+    val updateDownloadUrl: StateFlow<String> = _updateDownloadUrl.asStateFlow()
+
+    private val _updateButtonText = MutableStateFlow("এখনই আপডেট করুন")
+    val updateButtonText: StateFlow<String> = _updateButtonText.asStateFlow()
+
+    private val _updateIsActive = MutableStateFlow(true)
+    val updateIsActive: StateFlow<Boolean> = _updateIsActive.asStateFlow()
+
     // Settings State
     private val _supabaseUrl = MutableStateFlow(adminPreferences.getSupabaseUrl())
     val supabaseUrl: StateFlow<String> = _supabaseUrl.asStateFlow()
@@ -125,6 +167,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         refreshStats()
         loadCodes()
         loadJoinedDevices()
+        loadAppUpdates()
     }
 
     fun refreshStats() {
@@ -348,6 +391,148 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Throwable) {
                 showToast("আনবাইন্ড ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    // App Updates Management Functions
+    fun loadAppUpdates() {
+        viewModelScope.launch {
+            try {
+                _isLoadingUpdates.value = true
+                val result = repository.getAppUpdates(forceRefresh = true)
+                if (result.isSuccess) {
+                    _appUpdates.value = result.getOrNull() ?: emptyList()
+                }
+            } catch (e: Throwable) {
+                // Silently fallback
+            } finally {
+                _isLoadingUpdates.value = false
+            }
+        }
+    }
+
+    fun openCreateUpdateDialog() {
+        _editingUpdateId.value = null
+        _updateVersionName.value = "v6.1.0"
+        _updateVersionCode.value = "60100"
+        _updateMinVersionCode.value = "60000"
+        _updateIsForce.value = false
+        _updateTitle.value = "নতুন আপডেট উপলভ্য!"
+        _updateChangelog.value = "• বাগ ফিক্স এবং পারফরম্যান্স উন্নতি\n• নতুন সিকিউরিটি ফিচার"
+        _updateDownloadUrl.value = ""
+        _updateButtonText.value = "এখনই আপডেট করুন"
+        _updateIsActive.value = true
+        _isUpdateDialogOpen.value = true
+    }
+
+    fun openEditUpdateDialog(update: AppUpdate) {
+        _editingUpdateId.value = update.id
+        _updateVersionName.value = update.latestVersionName
+        _updateVersionCode.value = update.latestVersionCode.toString()
+        _updateMinVersionCode.value = update.minSupportedVersionCode.toString()
+        _updateIsForce.value = update.isForceUpdate
+        _updateTitle.value = update.title
+        _updateChangelog.value = update.changelog
+        _updateDownloadUrl.value = update.downloadUrl
+        _updateButtonText.value = update.buttonText
+        _updateIsActive.value = update.isActive
+        _isUpdateDialogOpen.value = true
+    }
+
+    fun closeUpdateDialog() {
+        _isUpdateDialogOpen.value = false
+        _editingUpdateId.value = null
+    }
+
+    fun setUpdateVersionName(v: String) { _updateVersionName.value = v }
+    fun setUpdateVersionCode(v: String) { _updateVersionCode.value = v }
+    fun setUpdateMinVersionCode(v: String) { _updateMinVersionCode.value = v }
+    fun setUpdateIsForce(v: Boolean) { _updateIsForce.value = v }
+    fun setUpdateTitle(v: String) { _updateTitle.value = v }
+    fun setUpdateChangelog(v: String) { _updateChangelog.value = v }
+    fun setUpdateDownloadUrl(v: String) { _updateDownloadUrl.value = v }
+    fun setUpdateButtonText(v: String) { _updateButtonText.value = v }
+    fun setUpdateIsActive(v: Boolean) { _updateIsActive.value = v }
+
+    fun saveAppUpdate() {
+        val versionName = _updateVersionName.value.trim()
+        val versionCodeInt = _updateVersionCode.value.trim().toIntOrNull()
+        val minVersionCodeInt = _updateMinVersionCode.value.trim().toIntOrNull()
+        val title = _updateTitle.value.trim()
+        val changelog = _updateChangelog.value.trim()
+        val downloadUrl = _updateDownloadUrl.value.trim()
+        val buttonText = _updateButtonText.value.trim().ifBlank { "এখনই আপডেট করুন" }
+
+        if (versionName.isBlank()) {
+            showToast("ভার্সন নাম লিখুন (e.g. v6.1.0)")
+            return
+        }
+        if (versionCodeInt == null) {
+            showToast("সঠিক ভার্সন কোড (ইনটিজার) দিন")
+            return
+        }
+        if (minVersionCodeInt == null) {
+            showToast("সঠিক সর্বনিম্ন সমর্থিত ভার্সন কোড দিন")
+            return
+        }
+        if (downloadUrl.isBlank() || (!downloadUrl.startsWith("http://") && !downloadUrl.startsWith("https://"))) {
+            showToast("সঠিক ডাউনলোড URL দিন (http:// বা https://)")
+            return
+        }
+
+        viewModelScope.launch {
+            val payload = CreateAppUpdatePayload(
+                latestVersionName = versionName,
+                latestVersionCode = versionCodeInt,
+                minSupportedVersionCode = minVersionCodeInt,
+                isForceUpdate = _updateIsForce.value,
+                title = title.ifBlank { "নতুন আপডেট উপলভ্য!" },
+                changelog = changelog,
+                downloadUrl = downloadUrl,
+                buttonText = buttonText,
+                isActive = _updateIsActive.value
+            )
+
+            val editId = _editingUpdateId.value
+            val result = if (editId == null) {
+                repository.createAppUpdate(payload)
+            } else {
+                repository.updateAppUpdate(editId, payload)
+            }
+
+            if (result.isSuccess) {
+                closeUpdateDialog()
+                loadAppUpdates()
+                showToast("অ্যাপ আপডেট সফলভাবে সংরক্ষণ করা হয়েছে! (Saved)")
+            } else {
+                showToast("আপডেট সংরক্ষণ করতে ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    fun toggleAppUpdateStatus(update: AppUpdate) {
+        val newStatus = !update.isActive
+        viewModelScope.launch {
+            val result = repository.toggleAppUpdateStatus(update.id, newStatus)
+            if (result.isSuccess) {
+                loadAppUpdates()
+                val statusText = if (newStatus) "সক্রিয় (Active)" else "নিষ্ক্রিয় (Inactive)"
+                showToast("আপডেট ${update.latestVersionName} এখন $statusText")
+            } else {
+                showToast("স্ট্যাটাস পরিবর্তন ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    fun deleteAppUpdate(update: AppUpdate) {
+        viewModelScope.launch {
+            val result = repository.deleteAppUpdate(update.id)
+            if (result.isSuccess) {
+                loadAppUpdates()
+                showToast("আপডেট ${update.latestVersionName} মুছে ফেলা হয়েছে। (Deleted)")
+            } else {
+                showToast("মুছে ফেলতে ব্যর্থ হয়েছে।")
             }
         }
     }
