@@ -4,11 +4,14 @@ import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
+import com.example.data.model.ActivationSupportLink
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
+import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.UserDevice
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -58,4 +61,21 @@ interface MaxBirdRepository {
     suspend fun toggleAppNoticeStatus(id: String, isActive: Boolean): Result<Unit>
 
     suspend fun deleteAppNotice(id: String): Result<Unit>
+
+    suspend fun getActivationSupportLinks(forceRefresh: Boolean = false): Result<List<ActivationSupportLink>>
+
+    suspend fun createActivationSupportLink(payload: CreateSupportLinkPayload): Result<ActivationSupportLink>
+
+    suspend fun updateActivationSupportLink(id: String, payload: CreateSupportLinkPayload): Result<ActivationSupportLink>
+
+    suspend fun toggleActivationSupportLinkStatus(id: String, isActive: Boolean): Result<Unit>
+
+    suspend fun deleteActivationSupportLink(id: String): Result<Unit>
+
+    suspend fun getUserDevices(forceRefresh: Boolean = false): Result<List<UserDevice>>
+
+    suspend fun toggleUserDeviceBan(deviceId: String, isBanned: Boolean, banReason: String?): Result<Unit>
+
+    suspend fun deleteUserDevice(deviceId: String): Result<Unit>
 }
+

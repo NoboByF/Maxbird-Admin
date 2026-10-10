@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.HeadsetMic
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.FilterChip
@@ -59,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.navigation.Screen
+import com.example.ui.screens.ActivationSupportLinksScreen
 import com.example.ui.screens.CodeGeneratorScreen
 import com.example.ui.screens.CodeManagementScreen
 import com.example.ui.screens.DashboardScreen
@@ -66,6 +68,7 @@ import com.example.ui.screens.DeviceManagementScreen
 import com.example.ui.screens.NoticeManagementScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.UpdatesManagementScreen
+
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NeonCyan
@@ -207,21 +210,22 @@ class MainActivity : ComponentActivity() {
                             }
 
                             Screen.Devices -> {
-                                val joinedDevices by viewModel.joinedDevices.collectAsStateWithLifecycle()
+                                val userDevices by viewModel.userDevices.collectAsStateWithLifecycle()
                                 val searchQuery by viewModel.deviceSearchQuery.collectAsStateWithLifecycle()
                                 val filter by viewModel.deviceFilter.collectAsStateWithLifecycle()
                                 val isLoadingDevices by viewModel.isLoadingDevices.collectAsStateWithLifecycle()
 
                                 DeviceManagementScreen(
-                                    devices = joinedDevices,
+                                    devices = userDevices,
                                     searchQuery = searchQuery,
                                     filter = filter,
                                     isLoading = isLoadingDevices,
                                     onSearchChange = { viewModel.setDeviceSearchQuery(it) },
                                     onFilterChange = { viewModel.setDeviceFilter(it) },
-                                    onRefresh = { viewModel.loadJoinedDevices() },
-                                    onToggleBlocked = { target -> viewModel.toggleDeviceBlocked(target) },
-                                    onUnbindDevice = { target -> viewModel.unbindDevice(target) }
+                                    onRefresh = { viewModel.loadUserDevices(forceRefresh = true) },
+                                    onToggleBan = { device, reason -> viewModel.toggleUserDeviceBan(device, reason) },
+                                    onDeleteDevice = { device -> viewModel.deleteUserDevice(device) },
+                                    onShowToast = { msg -> viewModel.showToast(msg) }
                                 )
                             }
 
@@ -330,6 +334,55 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
+                            Screen.SupportLinks -> {
+                                val supportLinks by viewModel.supportLinks.collectAsStateWithLifecycle()
+                                val isLoadingSupportLinks by viewModel.isLoadingSupportLinks.collectAsStateWithLifecycle()
+                                val searchQuery by viewModel.supportLinkSearchQuery.collectAsStateWithLifecycle()
+                                val filter by viewModel.supportLinkFilter.collectAsStateWithLifecycle()
+                                val isDialogOpen by viewModel.isSupportLinkDialogOpen.collectAsStateWithLifecycle()
+                                val editingId by viewModel.editingSupportLinkId.collectAsStateWithLifecycle()
+                                val title by viewModel.supportLinkTitle.collectAsStateWithLifecycle()
+                                val subtitle by viewModel.supportLinkSubtitle.collectAsStateWithLifecycle()
+                                val iconType by viewModel.supportLinkIconType.collectAsStateWithLifecycle()
+                                val url by viewModel.supportLinkUrl.collectAsStateWithLifecycle()
+                                val colorHex by viewModel.supportLinkColorHex.collectAsStateWithLifecycle()
+                                val priority by viewModel.supportLinkPriority.collectAsStateWithLifecycle()
+                                val isActive by viewModel.supportLinkIsActive.collectAsStateWithLifecycle()
+
+                                ActivationSupportLinksScreen(
+                                    supportLinks = supportLinks,
+                                    isLoading = isLoadingSupportLinks,
+                                    searchQuery = searchQuery,
+                                    filter = filter,
+                                    isDialogOpen = isDialogOpen,
+                                    editingId = editingId,
+                                    title = title,
+                                    subtitle = subtitle,
+                                    iconType = iconType,
+                                    url = url,
+                                    colorHex = colorHex,
+                                    priority = priority,
+                                    isActive = isActive,
+                                    onSearchChange = { viewModel.setSupportLinkSearchQuery(it) },
+                                    onFilterChange = { viewModel.setSupportLinkFilter(it) },
+                                    onOpenCreateDialog = { viewModel.openCreateSupportLinkDialog() },
+                                    onOpenEditDialog = { link -> viewModel.openEditSupportLinkDialog(link) },
+                                    onCloseDialog = { viewModel.closeSupportLinkDialog() },
+                                    onTitleChange = { viewModel.setSupportLinkTitle(it) },
+                                    onSubtitleChange = { viewModel.setSupportLinkSubtitle(it) },
+                                    onIconTypeChange = { viewModel.setSupportLinkIconType(it) },
+                                    onUrlChange = { viewModel.setSupportLinkUrl(it) },
+                                    onColorHexChange = { viewModel.setSupportLinkColorHex(it) },
+                                    onPriorityChange = { viewModel.setSupportLinkPriority(it) },
+                                    onIsActiveChange = { viewModel.setSupportLinkIsActive(it) },
+                                    onSaveLink = { viewModel.saveSupportLink() },
+                                    onToggleStatus = { link -> viewModel.toggleSupportLinkStatus(link) },
+                                    onDeleteLink = { link -> viewModel.deleteSupportLink(link) },
+                                    onRefresh = { viewModel.loadActivationSupportLinks(forceRefresh = true) },
+                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                )
+                            }
+
                             Screen.Settings -> {
                                 val supabaseUrl by viewModel.supabaseUrl.collectAsStateWithLifecycle()
                                 val supabaseKey by viewModel.supabaseKey.collectAsStateWithLifecycle()
@@ -433,6 +486,21 @@ private fun AdminTopHeaderBar(
                 }
 
                 androidx.compose.material3.IconButton(
+                    onClick = { onNavigate(Screen.SupportLinks) },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(if (currentScreen == Screen.SupportLinks) ElectricBlue else Slate800)
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.HeadsetMic,
+                        contentDescription = "Support Links",
+                        tint = if (currentScreen == Screen.SupportLinks) Color.White else NeonCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                androidx.compose.material3.IconButton(
                     onClick = { onNavigate(Screen.Updates) },
                     modifier = Modifier
                         .size(36.dp)
@@ -458,6 +526,7 @@ private fun AdminTopHeaderBar(
         ) {
             val allScreens = listOf(
                 Screen.Dashboard,
+                Screen.SupportLinks,
                 Screen.Notices,
                 Screen.Updates,
                 Screen.Generator,

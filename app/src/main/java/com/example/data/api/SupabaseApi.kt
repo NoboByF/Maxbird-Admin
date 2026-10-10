@@ -11,6 +11,11 @@ import com.example.data.model.UpdateCodeStatusPayload
 import com.example.data.model.UpdateDeviceBlockedPayload
 import com.example.data.model.UpdateAppUpdateStatusPayload
 import com.example.data.model.UpdateAppNoticeStatusPayload
+import com.example.data.model.ActivationSupportLink
+import com.example.data.model.CreateSupportLinkPayload
+import com.example.data.model.UpdateSupportLinkStatusPayload
+import com.example.data.model.UserDevice
+import com.example.data.model.UpdateDeviceBanPayload
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -24,6 +29,7 @@ import retrofit2.http.Query
  * Retrofit interface communicating with Supabase PostgREST endpoints.
  */
 interface SupabaseApi {
+
 
     @GET("rest/v1/access_codes")
     suspend fun getAccessCodes(
@@ -136,4 +142,53 @@ interface SupabaseApi {
     suspend fun deleteAppNotice(
         @Query("id") idQuery: String
     ): Response<Unit>
+
+    @GET("rest/v1/activation_support_links")
+    suspend fun getActivationSupportLinks(
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "priority.desc,created_at.desc"
+    ): List<ActivationSupportLink>
+
+    @POST("rest/v1/activation_support_links")
+    suspend fun createActivationSupportLink(
+        @Body payload: CreateSupportLinkPayload,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): List<ActivationSupportLink>
+
+    @PATCH("rest/v1/activation_support_links")
+    suspend fun updateActivationSupportLink(
+        @Query("id") idQuery: String,
+        @Body payload: CreateSupportLinkPayload,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): List<ActivationSupportLink>
+
+    @PATCH("rest/v1/activation_support_links")
+    suspend fun updateActivationSupportLinkStatus(
+        @Query("id") idQuery: String,
+        @Body payload: UpdateSupportLinkStatusPayload
+    ): Response<Unit>
+
+    @DELETE("rest/v1/activation_support_links")
+    suspend fun deleteActivationSupportLink(
+        @Query("id") idQuery: String
+    ): Response<Unit>
+
+    @GET("rest/v1/devices")
+    suspend fun getDevices(
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "last_seen.desc.nullslast"
+    ): List<UserDevice>
+
+    @PATCH("rest/v1/devices")
+    suspend fun updateDeviceBan(
+        @Query("id") idQuery: String,
+        @Body payload: UpdateDeviceBanPayload,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): List<UserDevice>
+
+    @DELETE("rest/v1/devices")
+    suspend fun deleteDeviceRecord(
+        @Query("id") idQuery: String
+    ): Response<Unit>
 }
+

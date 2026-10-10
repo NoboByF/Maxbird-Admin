@@ -1,10 +1,13 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,19 +21,23 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -39,15 +46,16 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,12 +65,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.DeviceWithStudent
+import com.example.data.model.UserDevice
 import com.example.ui.theme.CoralDanger
 import com.example.ui.theme.CoralDark
 import com.example.ui.theme.ElectricBlue
@@ -75,34 +85,61 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
+/**
+ * Clean & modern Material 3 screen for managing real user devices
+ * connected to Supabase table `public.devices`.
+ */
 @Composable
 fun DeviceManagementScreen(
-    devices: List<DeviceWithStudent>,
+    devices: List<UserDevice>,
     searchQuery: String,
     filter: String,
     isLoading: Boolean,
     onSearchChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
     onRefresh: () -> Unit,
-    onToggleBlocked: (DeviceWithStudent) -> Unit,
-    onUnbindDevice: (DeviceWithStudent) -> Unit
+    onToggleBan: (UserDevice, String?) -> Unit,
+    onDeleteDevice: (UserDevice) -> Unit,
+    onShowToast: (String) -> Unit
 ) {
-    var deviceToUnbind by remember { mutableStateOf<DeviceWithStudent?>(null) }
+    val clipboardManager = LocalClipboardManager.current
 
-    val filteredDevices = devices.filter { item ->
-        val matchesSearch = item.studentName.contains(searchQuery, ignoreCase = true) ||
-                item.accessCode.contains(searchQuery, ignoreCase = true) ||
-                item.device.deviceModel.contains(searchQuery, ignoreCase = true) ||
-                item.device.deviceId.contains(searchQuery, ignoreCase = true)
+    // Dialog state for banning a device with custom reason
+    var deviceToBan by remember { mutableStateOf<UserDevice?>(null) }
+    var banReasonInput by remember { mutableStateOf("অ্যাডমিন কর্তৃক ব্যান করা হয়েছে") }
 
-        val matchesFilter = when (filter) {
-            "ACTIVE" -> !item.device.isBlocked
-            "BLOCKED" -> item.device.isBlocked
-            else -> true
+    // Dialog state for deleting a device record
+    var deviceToDelete by remember { mutableStateOf<UserDevice?>(null) }
+
+    // Filter and search logic
+    val filteredDevices = remember(devices, searchQuery, filter) {
+        devices.filter { dev ->
+            val matchesSearch = if (searchQuery.isBlank()) true else {
+                dev.displayDeviceId.contains(searchQuery, ignoreCase = true) ||
+                        dev.deviceModel.contains(searchQuery, ignoreCase = true) ||
+                        (dev.deviceBrand?.contains(searchQuery, ignoreCase = true) == true) ||
+                        (dev.appliedCode?.contains(searchQuery, ignoreCase = true) == true) ||
+                        dev.deviceHash.contains(searchQuery, ignoreCase = true)
+            }
+
+            val matchesFilter = when (filter) {
+                "ACTIVE" -> !dev.isBanned
+                "BANNED" -> dev.isBanned
+                else -> true
+            }
+
+            matchesSearch && matchesFilter
         }
-        matchesSearch && matchesFilter
     }
+
+    val totalCount = devices.size
+    val activeCount = devices.count { !it.isBanned }
+    val bannedCount = devices.count { it.isBanned }
 
     LazyColumn(
         modifier = Modifier
@@ -111,7 +148,7 @@ fun DeviceManagementScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Header
+        // Screen Header
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -120,33 +157,43 @@ fun DeviceManagementScreen(
             ) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = null,
-                            tint = CoralDanger,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(ElectricBlue),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PhoneAndroid,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "রিমোট কিল-সুইচ ও ডিভাইস",
-                            style = MaterialTheme.typography.headlineSmall.copy(
+                            text = "ডিভাইস নিয়ন্ত্রণ ও হার্ডওয়্যার সুরক্ষা",
+                            style = MaterialTheme.typography.titleLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                         )
                     }
                     Text(
-                        text = "Hardware Lockout & Remote Device Control",
+                        text = "Supabase `public.devices` টেলিমেট্রি ও ব্যান কন্ট্রোল",
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = NeonCyan,
                             fontWeight = FontWeight.Medium
-                        )
+                        ),
+                        modifier = Modifier.padding(start = 40.dp)
                     )
                 }
 
                 IconButton(
                     onClick = onRefresh,
                     modifier = Modifier
+                        .size(40.dp)
                         .clip(CircleShape)
                         .background(Slate800)
                         .testTag("btn_refresh_devices")
@@ -154,26 +201,33 @@ fun DeviceManagementScreen(
                     if (isLoading) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
-                            color = ElectricBlueLight,
+                            color = NeonCyan,
                             strokeWidth = 2.dp
                         )
                     } else {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = NeonCyan)
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh Devices",
+                            tint = NeonCyan
+                        )
                     }
                 }
             }
         }
 
-        // Real-Time Supabase Sync & Device Summary Metrics
+        // Live Telemetry & Quick Metrics Banner
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Slate800),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Slate700, RoundedCornerShape(14.dp))
+                    .border(1.dp, Slate700, RoundedCornerShape(16.dp))
             ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -188,7 +242,7 @@ fun DeviceManagementScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Supabase লাইভ ডাটাবেজ সিঙ্ক (Real Database)",
+                                text = "Supabase লাইভ ডিভাইস টেলিমেট্রি",
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     color = EmeraldSuccess,
                                     fontWeight = FontWeight.Bold
@@ -197,171 +251,163 @@ fun DeviceManagementScreen(
                         }
 
                         Surface(
+                            shape = RoundedCornerShape(6.dp),
                             color = Slate950,
-                            shape = RoundedCornerShape(6.dp)
+                            border = androidx.compose.foundation.BorderStroke(0.5.dp, Slate700)
                         ) {
                             Text(
-                                text = "public.activated_devices",
+                                text = "TABLE: public.devices",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = NeonCyan,
+                                    color = Slate400,
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 10.sp
-                                ),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
                             )
                         }
                     }
 
+                    // 3 Metric Pills
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Surface(
-                            color = Slate900,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Text("মোট ডিভাইস", style = MaterialTheme.typography.labelSmall.copy(color = Slate400))
-                                Text(
-                                    text = "${devices.size}",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                )
-                            }
-                        }
-
-                        Surface(
-                            color = Slate900,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Text("সক্রিয় অনুমোদিত", style = MaterialTheme.typography.labelSmall.copy(color = EmeraldSuccess))
-                                Text(
-                                    text = "${devices.count { !it.device.isBlocked }}",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        color = EmeraldSuccess,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                )
-                            }
-                        }
-
-                        Surface(
-                            color = Slate900,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Text("কিল-সুইচ ব্লকড", style = MaterialTheme.typography.labelSmall.copy(color = CoralDanger))
-                                Text(
-                                    text = "${devices.count { it.device.isBlocked }}",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        color = CoralDanger,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                )
-                            }
-                        }
+                        DeviceMetricPill(
+                            modifier = Modifier.weight(1f),
+                            label = "মোট ডিভাইস",
+                            count = totalCount.toString(),
+                            accentColor = ElectricBlueLight
+                        )
+                        DeviceMetricPill(
+                            modifier = Modifier.weight(1f),
+                            label = "সক্রিয়",
+                            count = activeCount.toString(),
+                            accentColor = EmeraldSuccess
+                        )
+                        DeviceMetricPill(
+                            modifier = Modifier.weight(1f),
+                            label = "ব্যান করা",
+                            count = bannedCount.toString(),
+                            accentColor = CoralDanger
+                        )
                     }
                 }
             }
         }
 
-        // Info Banner
+        // Search Bar & Filter Tabs
         item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Slate800),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, Slate700, RoundedCornerShape(12.dp))
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Search Input
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_search_devices"),
+                    placeholder = {
+                        Text(
+                            text = "ডিভাইস আইডি, মডেল বা কোড দিয়ে খুঁজুন...",
+                            color = Slate400,
+                            fontSize = 13.sp
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = NeonCyan
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { onSearchChange("") }) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = Slate400
+                                )
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Slate800,
+                        unfocusedContainerColor = Slate800,
+                        focusedBorderColor = ElectricBlue,
+                        unfocusedBorderColor = Slate700,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                // Filter Tabs: All, Active, Banned
                 Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Block,
-                        contentDescription = null,
-                        tint = CoralDanger,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "কোনো ডিভাইস ব্লক করলে MaxBird অ্যাপে পরবর্তী হার্টবিট বা ওপেন হওয়ার সাথে সাথেই অ্যাপ লক হয়ে যাবে।",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
-                    )
-                }
-            }
-        }
-
-        // Search Bar
-        item {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = onSearchChange,
-                placeholder = { Text("শিক্ষার্থী, ডিভাইস মডেল অথবা HW-ID দিয়ে খুঁজুন...", color = Slate400) },
-                singleLine = true,
-                leadingIcon = {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = Slate400)
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { onSearchChange("") }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Slate400)
-                        }
-                    }
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = CoralDanger,
-                    unfocusedBorderColor = Slate700,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("search_devices_input")
-            )
-        }
-
-        // Filter Chips
-        item {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf(
-                    "ALL" to "সব ডিভাইস (${devices.size})",
-                    "ACTIVE" to "সক্রিয় (${devices.count { !it.device.isBlocked }})",
-                    "BLOCKED" to "ব্লকড (${devices.count { it.device.isBlocked }})"
-                ).forEach { (key, label) ->
-                    val isSelected = filter == key
-                    val chipColor = if (key == "BLOCKED") CoralDanger else ElectricBlue
                     FilterChip(
-                        selected = isSelected,
-                        onClick = { onFilterChange(key) },
-                        label = { Text(label, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                        selected = filter == "ALL",
+                        onClick = { onFilterChange("ALL") },
+                        label = { Text("সকল ডিভাইস ($totalCount)") },
+                        modifier = Modifier.testTag("filter_all_devices"),
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = chipColor,
+                            selectedContainerColor = ElectricBlue,
                             selectedLabelColor = Color.White,
                             containerColor = Slate800,
                             labelColor = Slate400
                         ),
                         border = FilterChipDefaults.filterChipBorder(
-                            borderColor = if (isSelected) chipColor else Slate700,
-                            selectedBorderColor = chipColor,
                             enabled = true,
-                            selected = isSelected
+                            selected = filter == "ALL",
+                            borderColor = Slate700,
+                            selectedBorderColor = ElectricBlue
+                        )
+                    )
+
+                    FilterChip(
+                        selected = filter == "ACTIVE",
+                        onClick = { onFilterChange("ACTIVE") },
+                        label = { Text("সক্রিয় ($activeCount)") },
+                        modifier = Modifier.testTag("filter_active_devices"),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = EmeraldSuccess,
+                            selectedLabelColor = Color.White,
+                            containerColor = Slate800,
+                            labelColor = Slate400
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = filter == "ACTIVE",
+                            borderColor = Slate700,
+                            selectedBorderColor = EmeraldSuccess
+                        )
+                    )
+
+                    FilterChip(
+                        selected = filter == "BANNED",
+                        onClick = { onFilterChange("BANNED") },
+                        label = { Text("🚫 ব্যান করা ($bannedCount)") },
+                        modifier = Modifier.testTag("filter_banned_devices"),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = CoralDanger,
+                            selectedLabelColor = Color.White,
+                            containerColor = Slate800,
+                            labelColor = Slate400
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = filter == "BANNED",
+                            borderColor = Slate700,
+                            selectedBorderColor = CoralDanger
                         )
                     )
                 }
             }
         }
 
+        // Device List Section
         if (filteredDevices.isEmpty()) {
             item {
                 Card(
@@ -374,292 +420,626 @@ fun DeviceManagementScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                            .padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Devices,
-                            contentDescription = null,
-                            tint = Slate600,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(Slate700),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Devices,
+                                contentDescription = null,
+                                tint = Slate400,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
                         Text(
-                            text = "কোনো সক্রিয় ডিভাইস রেকর্ড পাওয়া যায়নি",
+                            text = if (searchQuery.isNotEmpty()) "কোনো ডিভাইস খুঁজে পাওয়া যায়নি" else "কোনো ডিভাইস ডাটাবেজে নেই",
                             style = MaterialTheme.typography.titleMedium.copy(
-                                color = Color.White,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
                             )
                         )
                         Text(
-                            text = "শিক্ষার্থী কোড দিয়ে লগইন করলে ডিভাইস তালিকা প্রদর্শিত হবে।",
-                            style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
+                            text = if (searchQuery.isNotEmpty()) "অনুগ্রহ করে অন্য শব্দ দিয়ে অনুসন্ধান করুন।" else "শিক্ষার্থী যখন অ্যাপ ইনস্টল করে অ্যাক্টিভেট করবে, এখানে তার হার্ডওয়্যার তথ্য যুক্ত হবে।",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = Slate400
+                            ),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
                 }
             }
         } else {
-            items(filteredDevices, key = { it.device.id }) { item ->
-                DeviceCard(
-                    item = item,
-                    onToggleBlocked = { onToggleBlocked(item) },
-                    onUnbindClick = { deviceToUnbind = item }
+            items(filteredDevices, key = { it.id.ifBlank { it.deviceHash } }) { device ->
+                RealDeviceCard(
+                    device = device,
+                    onCopyId = {
+                        val toCopy = device.displayDeviceId.ifBlank { device.deviceHash }
+                        clipboardManager.setText(AnnotatedString(toCopy))
+                        onShowToast("ডিভাইস আইডি কপি করা হয়েছে: $toCopy")
+                    },
+                    onBanClick = {
+                        banReasonInput = "অ্যাডমিন কর্তৃক ব্যান করা হয়েছে"
+                        deviceToBan = device
+                    },
+                    onUnbanClick = {
+                        onToggleBan(device, null)
+                    },
+                    onDeleteClick = {
+                        deviceToDelete = device
+                    }
                 )
             }
         }
-
-        item {
-            Spacer(modifier = Modifier.height(24.dp))
-        }
     }
 
-    // Unbind Confirmation Dialog
-    deviceToUnbind?.let { target ->
+    // Ban Confirmation Modal with Custom Reason Input
+    deviceToBan?.let { dev ->
         AlertDialog(
-            onDismissRequest = { deviceToUnbind = null },
-            containerColor = Slate800,
-            shape = RoundedCornerShape(16.dp),
+            onDismissRequest = { deviceToBan = null },
+            containerColor = Slate850Color,
+            titleContentColor = Color.White,
+            textContentColor = Slate400,
+            shape = RoundedCornerShape(20.dp),
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(CoralDanger.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Block,
+                        contentDescription = null,
+                        tint = CoralDanger,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            },
             title = {
                 Text(
-                    text = "ডিভাইস আনবাইন্ড (Unbind) করবেন?",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
+                    text = "ডিভাইস ব্যান নিশ্চিতকরণ (Ban Device)",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
                 )
             },
             text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "আপনি কি নিশ্চিত যে নিচের ডিভাইসটিকে ব্যান করতে চান? ব্যান করলে এই ডিভাইস থেকে ম্যাক্সবার্ড অ্যাপ অবিলম্বে লক হয়ে যাবে।",
+                        fontSize = 13.sp,
+                        color = Color.White
+                    )
+
+                    // Target summary box
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Slate950,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate700)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "📱 মডেল: ${dev.deviceBrand ?: ""} ${dev.deviceModel}",
+                                fontSize = 12.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "🆔 ডিসপ্লে আইডি: ${dev.displayDeviceId}",
+                                fontSize = 11.sp,
+                                color = NeonCyan,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            if (!dev.appliedCode.isNullOrBlank()) {
+                                Text(
+                                    text = "🔑 ব্যবহৃত কোড: ${dev.appliedCode}",
+                                    fontSize = 11.sp,
+                                    color = EmeraldSuccess
+                                )
+                            }
+                        }
+                    }
+
+                    // Ban Reason Input
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "ব্যানের কারণ লিখুন (ব্যবহারকারী দেখতে পাবে):",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = NeonCyan
+                        )
+                        OutlinedTextField(
+                            value = banReasonInput,
+                            onValueChange = { banReasonInput = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("input_ban_reason"),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Slate800,
+                                unfocusedContainerColor = Slate800,
+                                focusedBorderColor = CoralDanger,
+                                unfocusedBorderColor = Slate700,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            placeholder = { Text("যেমন: একাধিক ডিভাইসে শেয়ার করা হয়েছে", fontSize = 12.sp, color = Slate400) }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val reason = banReasonInput.trim().ifBlank { "অ্যাডমিন কর্তৃক ব্যান করা হয়েছে" }
+                        onToggleBan(dev, reason)
+                        deviceToBan = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CoralDanger),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("btn_confirm_ban")
+                ) {
+                    Text("হ্যাঁ, ব্যান করুন", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { deviceToBan = null },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Slate400)
+                ) {
+                    Text("বাতিল")
+                }
+            }
+        )
+    }
+
+    // Delete Record Confirmation Modal
+    deviceToDelete?.let { dev ->
+        AlertDialog(
+            onDismissRequest = { deviceToDelete = null },
+            containerColor = Slate850Color,
+            titleContentColor = Color.White,
+            textContentColor = Slate400,
+            shape = RoundedCornerShape(20.dp),
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = CoralDanger,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text("ডিভাইস রেকর্ড মুছে ফেলবেন?", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            },
+            text = {
                 Text(
-                    text = "${target.studentName}-এর ${target.device.deviceModel} ডিভাইসটি সিস্টেম থেকে অপসারণ করা হবে। এর ফলে শিক্ষার্থী প্রয়োজনে নতুন ফোনে আবার লগইন করতে পারবে।",
-                    color = Slate400
+                    text = "আপনি কি নিশ্চিত যে '${dev.displayDeviceId}' (${dev.deviceModel}) এর টেলিমেট্রি রেকর্ড ডাটাবেজ থেকে স্থায়ীভাবে মুছে ফেলতে চান?",
+                    fontSize = 13.sp,
+                    color = Color.White
                 )
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        onUnbindDevice(target)
-                        deviceToUnbind = null
+                        onDeleteDevice(dev)
+                        deviceToDelete = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-                    shape = RoundedCornerShape(10.dp)
+                    colors = ButtonDefaults.buttonColors(containerColor = CoralDanger),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("btn_confirm_delete_device")
                 ) {
-                    Text("আনবাইন্ড করুন (Unbind)", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("মুছে ফেলুন", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                Button(
-                    onClick = { deviceToUnbind = null },
-                    colors = ButtonDefaults.buttonColors(containerColor = Slate700),
-                    shape = RoundedCornerShape(10.dp)
+                TextButton(
+                    onClick = { deviceToDelete = null },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Slate400)
                 ) {
-                    Text("বাতিল", color = Color.White)
+                    Text("বাতিল")
                 }
             }
         )
     }
 }
 
+/**
+ * Clean & modern Material 3 device card displaying real user device hardware & telemetry.
+ */
 @Composable
-private fun DeviceCard(
-    item: DeviceWithStudent,
-    onToggleBlocked: () -> Unit,
-    onUnbindClick: () -> Unit
+private fun RealDeviceCard(
+    device: UserDevice,
+    onCopyId: () -> Unit,
+    onBanClick: () -> Unit,
+    onUnbanClick: () -> Unit,
+    onDeleteClick: () -> Unit
 ) {
-    val isBlocked = item.device.isBlocked
+    val isBanned = device.isBanned || device.status.equals("banned", ignoreCase = true)
+    val cardBorder = if (isBanned) CoralDanger.copy(alpha = 0.6f) else Slate700
 
     Card(
         colors = CardDefaults.cardColors(containerColor = Slate800),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(
-                1.5.dp,
-                if (isBlocked) CoralDanger else Slate700,
-                RoundedCornerShape(14.dp)
-            )
+            .border(1.2.dp, cardBorder, RoundedCornerShape(16.dp))
+            .testTag("card_device_${device.displayDeviceId}")
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            // Top Row: Model & Kill-Switch Switch
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Header: Phone Model & Status Indicator
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(if (isBlocked) CoralDanger.copy(alpha = 0.2f) else EmeraldSuccess.copy(alpha = 0.2f)),
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isBanned) CoralDanger.copy(alpha = 0.2f) else ElectricBlue.copy(alpha = 0.2f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.PhoneAndroid,
                             contentDescription = null,
-                            tint = if (isBlocked) CoralDanger else EmeraldSuccess,
+                            tint = if (isBanned) CoralDanger else ElectricBlueLight,
                             modifier = Modifier.size(20.dp)
                         )
                     }
-
-                    Spacer(modifier = Modifier.width(10.dp))
-
+                    Spacer(modifier = Modifier.width(8.dp))
                     Column {
                         Text(
-                            text = item.device.deviceModel,
+                            text = "${device.deviceBrand?.let { "$it " } ?: ""}${device.deviceModel}",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
+                            ),
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "${device.androidVersion ?: "Android"} • v${device.appVersion ?: "1.0.0"}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Slate400
                             )
                         )
-                        Surface(
-                            color = if (isBlocked) CoralDanger.copy(alpha = 0.25f) else EmeraldSuccess.copy(alpha = 0.25f),
-                            shape = RoundedCornerShape(4.dp)
+                    }
+                }
+
+                // Status Badge: Green chip for Active, Red chip for Banned
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isBanned) CoralDanger.copy(alpha = 0.15f) else EmeraldSuccess.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isBanned) CoralDanger else EmeraldSuccess
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (isBanned) Icons.Default.Block else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = if (isBanned) CoralDanger else EmeraldSuccess,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isBanned) "🚫 ব্যান করা (Banned)" else "সক্রিয় (Active)",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = if (isBanned) CoralDanger else EmeraldSuccess,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = Slate700, thickness = 0.8.dp)
+
+            // Display Device ID Box with 1-Click Copy
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Slate950,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Slate700),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onCopyId() }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "DISPLAY DEVICE ID",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Slate400,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        Text(
+                            text = device.displayDeviceId.ifBlank { device.deviceHash.take(16) },
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = NeonCyan,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp
+                            )
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Slate800,
+                        border = androidx.compose.foundation.BorderStroke(0.5.dp, Slate700)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copy ID",
+                                tint = NeonCyan,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (isBlocked) "⛔ কিল-সুইচ সক্রিয় (LOCKED OUT)" else "✓ সক্রিয় (ACTIVE)",
-                                color = if (isBlocked) CoralDanger else EmeraldSuccess,
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                text = "কপি",
+                                fontSize = 11.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
                 }
-
-                // Instant Remote Kill-Switch Switch
-                Column(horizontalAlignment = Alignment.End) {
-                    Switch(
-                        checked = isBlocked,
-                        onCheckedChange = { onToggleBlocked() },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = CoralDanger,
-                            uncheckedThumbColor = Slate400,
-                            uncheckedTrackColor = Slate700
-                        ),
-                        modifier = Modifier.testTag("kill_switch_${item.device.id}")
-                    )
-                    Text(
-                        text = if (isBlocked) "ব্লকড" else "অনুমোদিত",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = if (isBlocked) CoralDanger else Slate400,
-                            fontSize = 10.sp
-                        )
-                    )
-                }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Student & Code Info
+            // Applied Code & Last Active Timestamp Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null,
-                        tint = Slate400,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = item.studentName,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold
+                // Applied Access Code badge
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = ElectricBlue.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(0.8.dp, ElectricBlue)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VpnKey,
+                            contentDescription = null,
+                            tint = NeonCyan,
+                            modifier = Modifier.size(13.dp)
                         )
-                    )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "কোড: ${device.appliedCode ?: "নেই"}",
+                            fontSize = 11.sp,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
 
-                Surface(
-                    color = Slate900,
-                    shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier.border(1.dp, Slate700, RoundedCornerShape(6.dp))
-                ) {
-                    Text(
-                        text = item.accessCode,
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            color = NeonCyan,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                // Last active relative timestamp
+                Text(
+                    text = "সর্বশেষ সক্রিয়: ${formatRelativeTime(device.lastSeen)}",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = Slate400,
+                        fontSize = 11.sp
                     )
+                )
+            }
+
+            // If device is Banned, show Ban Reason Banner
+            if (isBanned && !device.banReason.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = CoralDanger.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(0.8.dp, CoralDanger)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = CoralDanger,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "ব্যানের কারণ: ${device.banReason}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Hardware ID
-            Surface(
-                color = Slate900,
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth()
+            // Action Buttons: Ban / Unban & Delete
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Hardware ID: ",
-                        style = MaterialTheme.typography.labelSmall.copy(color = Slate400)
-                    )
-                    Text(
-                        text = item.device.deviceId,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = Color.White,
-                            fontFamily = FontFamily.Monospace,
+                // Ban / Unban Button
+                if (isBanned) {
+                    Button(
+                        onClick = onUnbanClick,
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("btn_unban_${device.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LockOpen,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "আন-ব্যান করুন (Unban Device)",
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Bottom Actions: Remote Kill toggle button + Unbind
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(
-                    onClick = onToggleBlocked,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isBlocked) EmeraldSuccess else CoralDanger
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.testTag("btn_block_toggle_${item.device.id}")
-                ) {
-                    Icon(
-                        imageVector = if (isBlocked) Icons.Default.LockOpen else Icons.Default.Lock,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (isBlocked) "আনব্লক করুন (Unblock)" else "কিল-সুইচ সক্রিয় (Kill Device)",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    }
+                } else {
+                    Button(
+                        onClick = onBanClick,
+                        colors = ButtonDefaults.buttonColors(containerColor = CoralDanger),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("btn_ban_${device.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Block,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "ব্যান করুন (Ban Device)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
 
-                Button(
-                    onClick = onUnbindClick,
-                    colors = ButtonDefaults.buttonColors(containerColor = Slate700),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.testTag("btn_unbind_${item.device.id}")
+                // Delete Record Button
+                IconButton(
+                    onClick = onDeleteClick,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Slate950)
+                        .testTag("btn_delete_device_${device.id}")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Delete,
-                        contentDescription = null,
+                        contentDescription = "Delete Record",
                         tint = Slate400,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("আনবাইন্ড", color = Color.White, fontSize = 12.sp)
                 }
             }
         }
     }
 }
+
+/**
+ * Metric summary pill.
+ */
+@Composable
+private fun DeviceMetricPill(
+    modifier: Modifier = Modifier,
+    label: String,
+    count: String,
+    accentColor: Color
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = Slate950,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Slate700)
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = count,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    color = accentColor
+                )
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = Slate400,
+                    fontSize = 10.sp
+                )
+            )
+        }
+    }
+}
+
+/**
+ * Parses timestamps and computes a relative Bengali human-readable string.
+ */
+private fun formatRelativeTime(dateString: String?): String {
+    if (dateString.isNullOrBlank()) return "অজানা"
+    return try {
+        val formats = listOf(
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX", Locale.US),
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US),
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US),
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+        )
+
+        var parsedDate: Date? = null
+        for (format in formats) {
+            try {
+                parsedDate = format.parse(dateString)
+                if (parsedDate != null) break
+            } catch (_: Exception) {}
+        }
+
+        if (parsedDate == null) return dateString.take(10)
+
+        val diffMs = System.currentTimeMillis() - parsedDate.time
+        val diffSec = diffMs / 1000
+        val diffMin = diffSec / 60
+        val diffHours = diffMin / 60
+        val diffDays = diffHours / 24
+
+        when {
+            diffSec < 60 -> "এইমাত্র"
+            diffMin < 60 -> "$diffMin মিনিট আগে"
+            diffHours < 24 -> "$diffHours ঘণ্টা আগে"
+            diffDays == 1L -> "গতকাল"
+            diffDays < 7 -> "$diffDays দিন আগে"
+            else -> SimpleDateFormat("dd MMM, yyyy", Locale.US).format(parsedDate)
+        }
+    } catch (_: Exception) {
+        dateString.take(10)
+    }
+}
+
+private val Slate850Color = Color(0xFF141D2E)

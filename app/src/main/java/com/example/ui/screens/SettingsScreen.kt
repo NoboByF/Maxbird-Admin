@@ -121,17 +121,51 @@ CREATE TABLE IF NOT EXISTS app_notices (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Activation Support Links Table (For Device Activation Screen Contact Buttons)
+CREATE TABLE IF NOT EXISTS activation_support_links (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    subtitle TEXT,
+    icon_type TEXT NOT NULL DEFAULT 'telegram',
+    url TEXT NOT NULL,
+    color_hex TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    priority INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- User Devices Table (For Hardware Telemetry & Remote Ban Control)
+CREATE TABLE IF NOT EXISTS devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_hash TEXT UNIQUE NOT NULL,
+    display_device_id TEXT NOT NULL,
+    device_model TEXT DEFAULT 'Unknown Device',
+    device_brand TEXT,
+    android_version TEXT,
+    app_version TEXT,
+    applied_code TEXT,
+    is_banned BOOLEAN DEFAULT false,
+    ban_reason TEXT,
+    status TEXT DEFAULT 'active',
+    last_seen TIMESTAMPTZ DEFAULT now()
+);
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE access_codes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activated_devices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_updates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_notices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE activation_support_links ENABLE ROW LEVEL SECURITY;
+ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
 
 -- Allow Public/Admin Read and Write
 CREATE POLICY "Public Access access_codes" ON access_codes FOR ALL USING (true);
 CREATE POLICY "Public Access activated_devices" ON activated_devices FOR ALL USING (true);
 CREATE POLICY "Public Access app_updates" ON app_updates FOR ALL USING (true);
-CREATE POLICY "Public Access app_notices" ON app_notices FOR ALL USING (true);"""
+CREATE POLICY "Public Access app_notices" ON app_notices FOR ALL USING (true);
+CREATE POLICY "Public Access activation_support_links" ON activation_support_links FOR ALL USING (true);
+CREATE POLICY "Public Access devices" ON devices FOR ALL USING (true);"""
+
 
 @Composable
 fun SettingsScreen(

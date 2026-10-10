@@ -8,11 +8,14 @@ import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
+import com.example.data.model.ActivationSupportLink
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
+import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.UserDevice
 import com.example.data.preferences.AdminPreferences
 import com.example.data.repository.MaxBirdRepository
 import com.example.data.repository.SupabaseMaxBirdRepository
@@ -89,10 +92,14 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _joinedDevices = MutableStateFlow<List<DeviceWithStudent>>(emptyList())
     val joinedDevices: StateFlow<List<DeviceWithStudent>> = _joinedDevices.asStateFlow()
 
+    // Real Supabase Devices (public.devices)
+    private val _userDevices = MutableStateFlow<List<UserDevice>>(emptyList())
+    val userDevices: StateFlow<List<UserDevice>> = _userDevices.asStateFlow()
+
     private val _deviceSearchQuery = MutableStateFlow("")
     val deviceSearchQuery: StateFlow<String> = _deviceSearchQuery.asStateFlow()
 
-    private val _deviceFilter = MutableStateFlow("ALL") // ALL, ACTIVE, BLOCKED
+    private val _deviceFilter = MutableStateFlow("ALL") // ALL, ACTIVE, BANNED
     val deviceFilter: StateFlow<String> = _deviceFilter.asStateFlow()
 
     private val _isLoadingDevices = MutableStateFlow(false)
@@ -184,6 +191,46 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _previewNotice = MutableStateFlow<AppNotice?>(null)
     val previewNotice: StateFlow<AppNotice?> = _previewNotice.asStateFlow()
 
+    // Activation Support Links State
+    private val _supportLinks = MutableStateFlow<List<ActivationSupportLink>>(emptyList())
+    val supportLinks: StateFlow<List<ActivationSupportLink>> = _supportLinks.asStateFlow()
+
+    private val _isLoadingSupportLinks = MutableStateFlow(false)
+    val isLoadingSupportLinks: StateFlow<Boolean> = _isLoadingSupportLinks.asStateFlow()
+
+    private val _supportLinkSearchQuery = MutableStateFlow("")
+    val supportLinkSearchQuery: StateFlow<String> = _supportLinkSearchQuery.asStateFlow()
+
+    private val _supportLinkFilter = MutableStateFlow("ALL") // ALL, ACTIVE, INACTIVE, TELEGRAM, WHATSAPP, FACEBOOK, PHONE, WEBSITE
+    val supportLinkFilter: StateFlow<String> = _supportLinkFilter.asStateFlow()
+
+    private val _isSupportLinkDialogOpen = MutableStateFlow(false)
+    val isSupportLinkDialogOpen: StateFlow<Boolean> = _isSupportLinkDialogOpen.asStateFlow()
+
+    private val _editingSupportLinkId = MutableStateFlow<String?>(null)
+    val editingSupportLinkId: StateFlow<String?> = _editingSupportLinkId.asStateFlow()
+
+    private val _supportLinkTitle = MutableStateFlow("")
+    val supportLinkTitle: StateFlow<String> = _supportLinkTitle.asStateFlow()
+
+    private val _supportLinkSubtitle = MutableStateFlow("")
+    val supportLinkSubtitle: StateFlow<String> = _supportLinkSubtitle.asStateFlow()
+
+    private val _supportLinkIconType = MutableStateFlow("telegram")
+    val supportLinkIconType: StateFlow<String> = _supportLinkIconType.asStateFlow()
+
+    private val _supportLinkUrl = MutableStateFlow("")
+    val supportLinkUrl: StateFlow<String> = _supportLinkUrl.asStateFlow()
+
+    private val _supportLinkColorHex = MutableStateFlow("#229ED9")
+    val supportLinkColorHex: StateFlow<String> = _supportLinkColorHex.asStateFlow()
+
+    private val _supportLinkPriority = MutableStateFlow("10")
+    val supportLinkPriority: StateFlow<String> = _supportLinkPriority.asStateFlow()
+
+    private val _supportLinkIsActive = MutableStateFlow(true)
+    val supportLinkIsActive: StateFlow<Boolean> = _supportLinkIsActive.asStateFlow()
+
     // Settings State
     private val _supabaseUrl = MutableStateFlow(adminPreferences.getSupabaseUrl())
     val supabaseUrl: StateFlow<String> = _supabaseUrl.asStateFlow()
@@ -215,9 +262,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         refreshStats()
         loadCodes()
         loadJoinedDevices()
+        loadUserDevices()
         loadAppUpdates()
         loadAppNotices()
+        loadActivationSupportLinks()
     }
+
 
     fun refreshStats() {
         viewModelScope.launch {
@@ -440,6 +490,56 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Throwable) {
                 showToast("আনবাইন্ড ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    // Real Supabase Devices (public.devices) Operations
+    fun loadUserDevices(forceRefresh: Boolean = false) {
+        viewModelScope.launch {
+            try {
+                _isLoadingDevices.value = true
+                val result = repository.getUserDevices(forceRefresh)
+                if (result.isSuccess) {
+                    _userDevices.value = result.getOrNull() ?: emptyList()
+                }
+            } catch (e: Throwable) {
+                // Silently fallback
+            } finally {
+                _isLoadingDevices.value = false
+            }
+        }
+    }
+
+    fun toggleUserDeviceBan(device: UserDevice, banReason: String? = null) {
+        val willBan = !device.isBanned
+        viewModelScope.launch {
+            try {
+                val targetReason = if (willBan) (banReason ?: "অ্যাডমিন কর্তৃক ব্যান করা হয়েছে") else null
+                val result = repository.toggleUserDeviceBan(device.id, willBan, targetReason)
+                if (result.isSuccess) {
+                    loadUserDevices(forceRefresh = true)
+                    refreshStats()
+                    val msg = if (willBan) "🚫 ডিভাইস সফলভাবে ব্যান করা হয়েছে!" else "✅ ডিভাইস আন-ব্যান করা হয়েছে (সক্রিয়)!"
+                    showToast(msg)
+                }
+            } catch (e: Throwable) {
+                showToast("ডিভাইস স্ট্যাটাস আপডেট ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    fun deleteUserDevice(device: UserDevice) {
+        viewModelScope.launch {
+            try {
+                val result = repository.deleteUserDevice(device.id)
+                if (result.isSuccess) {
+                    loadUserDevices(forceRefresh = true)
+                    refreshStats()
+                    showToast("ডিভাইস রেকর্ড স্থায়ীভাবে মুছে ফেলা হয়েছে।")
+                }
+            } catch (e: Throwable) {
+                showToast("মুছে ফেলতে ব্যর্থ হয়েছে।")
             }
         }
     }
@@ -736,7 +836,159 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Activation Support Links Operations
+    fun loadActivationSupportLinks(forceRefresh: Boolean = false) {
+        viewModelScope.launch {
+            try {
+                _isLoadingSupportLinks.value = true
+                val result = repository.getActivationSupportLinks(forceRefresh)
+                if (result.isSuccess) {
+                    _supportLinks.value = result.getOrNull() ?: emptyList()
+                }
+            } catch (e: Throwable) {
+                // Keep cached
+            } finally {
+                _isLoadingSupportLinks.value = false
+            }
+        }
+    }
+
+    fun setSupportLinkSearchQuery(query: String) {
+        _supportLinkSearchQuery.value = query
+    }
+
+    fun setSupportLinkFilter(filter: String) {
+        _supportLinkFilter.value = filter
+    }
+
+    fun openCreateSupportLinkDialog() {
+        _editingSupportLinkId.value = null
+        _supportLinkTitle.value = ""
+        _supportLinkSubtitle.value = ""
+        _supportLinkIconType.value = "telegram"
+        _supportLinkUrl.value = "https://t.me/"
+        _supportLinkColorHex.value = "#229ED9"
+        _supportLinkPriority.value = "10"
+        _supportLinkIsActive.value = true
+        _isSupportLinkDialogOpen.value = true
+    }
+
+    fun openEditSupportLinkDialog(link: ActivationSupportLink) {
+        _editingSupportLinkId.value = link.id
+        _supportLinkTitle.value = link.title
+        _supportLinkSubtitle.value = link.subtitle ?: ""
+        _supportLinkIconType.value = link.iconType
+        _supportLinkUrl.value = link.url
+        _supportLinkColorHex.value = link.colorHex ?: getDefaultColorForType(link.iconType)
+        _supportLinkPriority.value = link.priority.toString()
+        _supportLinkIsActive.value = link.isActive
+        _isSupportLinkDialogOpen.value = true
+    }
+
+    fun closeSupportLinkDialog() {
+        _isSupportLinkDialogOpen.value = false
+    }
+
+    fun setSupportLinkTitle(title: String) { _supportLinkTitle.value = title }
+    fun setSupportLinkSubtitle(sub: String) { _supportLinkSubtitle.value = sub }
+    fun setSupportLinkIconType(type: String) {
+        _supportLinkIconType.value = type
+        // Auto-suggest default color for selected type
+        _supportLinkColorHex.value = getDefaultColorForType(type)
+    }
+    fun setSupportLinkUrl(url: String) { _supportLinkUrl.value = url }
+    fun setSupportLinkColorHex(hex: String) { _supportLinkColorHex.value = hex }
+    fun setSupportLinkPriority(priority: String) { _supportLinkPriority.value = priority }
+    fun setSupportLinkIsActive(active: Boolean) { _supportLinkIsActive.value = active }
+
+    private fun getDefaultColorForType(type: String): String {
+        return when (type.lowercase()) {
+            "telegram" -> "#229ED9"
+            "whatsapp" -> "#25D366"
+            "facebook" -> "#1877F2"
+            "phone" -> "#10B981"
+            "website" -> "#0EA5E9"
+            else -> "#3B82F6"
+        }
+    }
+
+    fun saveSupportLink() {
+        val title = _supportLinkTitle.value.trim()
+        val url = _supportLinkUrl.value.trim()
+        val priorityInt = _supportLinkPriority.value.trim().toIntOrNull() ?: 0
+
+        if (title.isBlank()) {
+            showToast("দয়া করে সাপোর্ট লিংকের শিরোনাম (Title) লিখুন")
+            return
+        }
+
+        if (url.isBlank()) {
+            showToast("দয়া করে সাপোর্ট লিংকের URL বা ফোন নম্বর দিন")
+            return
+        }
+
+        val payload = CreateSupportLinkPayload(
+            title = title,
+            subtitle = _supportLinkSubtitle.value.trim().ifBlank { null },
+            iconType = _supportLinkIconType.value.trim().lowercase(),
+            url = url,
+            colorHex = _supportLinkColorHex.value.trim().ifBlank { null },
+            isActive = _supportLinkIsActive.value,
+            priority = priorityInt
+        )
+
+        viewModelScope.launch {
+            val editingId = _editingSupportLinkId.value
+            if (editingId == null) {
+                val result = repository.createActivationSupportLink(payload)
+                if (result.isSuccess) {
+                    closeSupportLinkDialog()
+                    loadActivationSupportLinks(forceRefresh = true)
+                    showToast("নতুন সাপোর্ট লিংক তৈরি হয়েছে! (Support link added)")
+                } else {
+                    showToast("লিংক সেভ করতে ব্যর্থ: ${result.exceptionOrNull()?.message}")
+                }
+            } else {
+                val result = repository.updateActivationSupportLink(editingId, payload)
+                if (result.isSuccess) {
+                    closeSupportLinkDialog()
+                    loadActivationSupportLinks(forceRefresh = true)
+                    showToast("সাপোর্ট লিংক আপডেট করা হয়েছে! (Support link updated)")
+                } else {
+                    showToast("লিংক আপডেট ব্যর্থ: ${result.exceptionOrNull()?.message}")
+                }
+            }
+        }
+    }
+
+    fun toggleSupportLinkStatus(link: ActivationSupportLink) {
+        viewModelScope.launch {
+            val newStatus = !link.isActive
+            val result = repository.toggleActivationSupportLinkStatus(link.id, newStatus)
+            if (result.isSuccess) {
+                loadActivationSupportLinks()
+                val statusText = if (newStatus) "সক্রিয় (Active)" else "নিষ্ক্রিয় (Inactive)"
+                showToast("সাপোর্ট লিংক এখন $statusText")
+            } else {
+                showToast("স্ট্যাটাস পরিবর্তন ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    fun deleteSupportLink(link: ActivationSupportLink) {
+        viewModelScope.launch {
+            val result = repository.deleteActivationSupportLink(link.id)
+            if (result.isSuccess) {
+                loadActivationSupportLinks()
+                showToast("সাপোর্ট লিংক মুছে ফেলা হয়েছে। (Deleted)")
+            } else {
+                showToast("মুছে ফেলতে ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
     // Settings Functions
+
     fun updateSupabaseUrl(url: String) {
         _supabaseUrl.value = url
     }

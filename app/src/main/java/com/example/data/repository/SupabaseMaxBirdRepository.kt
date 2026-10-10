@@ -4,15 +4,20 @@ import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
+import com.example.data.model.ActivationSupportLink
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
+import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
 import com.example.data.model.UpdateCodeStatusPayload
 import com.example.data.model.UpdateDeviceBlockedPayload
 import com.example.data.model.UpdateAppUpdateStatusPayload
 import com.example.data.model.UpdateAppNoticeStatusPayload
+import com.example.data.model.UpdateSupportLinkStatusPayload
+import com.example.data.model.UserDevice
+import com.example.data.model.UpdateDeviceBanPayload
 import com.example.data.api.SupabaseClient
 import com.example.data.preferences.AdminPreferences
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +37,10 @@ class SupabaseMaxBirdRepository(
     private val cachedDevices = mutableListOf<ActivatedDevice>()
     private val cachedUpdates = mutableListOf<AppUpdate>()
     private val cachedNotices = mutableListOf<AppNotice>()
+    private val cachedSupportLinks = mutableListOf<ActivationSupportLink>()
+    private val cachedUserDevices = mutableListOf<UserDevice>()
     private var isInitializedWithSampleData = false
+
 
     init {
         initSampleDataIfNeeded()
@@ -193,9 +201,131 @@ class SupabaseMaxBirdRepository(
                 )
             )
 
+            cachedSupportLinks.addAll(
+                listOf(
+                    ActivationSupportLink(
+                        id = UUID.randomUUID().toString(),
+                        title = "Telegram সাপোর্ট",
+                        subtitle = "@fahim017740 এ মেসেজ দিন",
+                        iconType = "telegram",
+                        url = "https://t.me/fahim017740",
+                        colorHex = "#229ED9",
+                        isActive = true,
+                        priority = 10,
+                        createdAt = now
+                    ),
+                    ActivationSupportLink(
+                        id = UUID.randomUUID().toString(),
+                        title = "WhatsApp হেল্পলাইন",
+                        subtitle = "+8801774092040 এ সরাসরি চ্যাট করুন",
+                        iconType = "whatsapp",
+                        url = "https://wa.me/8801774092040",
+                        colorHex = "#25D366",
+                        isActive = true,
+                        priority = 8,
+                        createdAt = now
+                    ),
+                    ActivationSupportLink(
+                        id = UUID.randomUUID().toString(),
+                        title = "অফিশিয়াল ফেসবুক গ্রুপ",
+                        subtitle = "নোট ও ক্লাস আলোচনা পেতে যুক্ত হোন",
+                        iconType = "facebook",
+                        url = "https://facebook.com/groups/maxbird",
+                        colorHex = "#1877F2",
+                        isActive = true,
+                        priority = 5,
+                        createdAt = now
+                    ),
+                    ActivationSupportLink(
+                        id = UUID.randomUUID().toString(),
+                        title = "জরুরি কল সেন্টার",
+                        subtitle = "সকাল ১০টা থেকে রাত ১০টা পর্যন্ত",
+                        iconType = "phone",
+                        url = "tel:+8801774092040",
+                        colorHex = "#10B981",
+                        isActive = true,
+                        priority = 3,
+                        createdAt = now
+                    ),
+                    ActivationSupportLink(
+                        id = UUID.randomUUID().toString(),
+                        title = "অফিশিয়াল ওয়েবসাইট পোর্টাল",
+                        subtitle = "নিয়মাবলি ও লাইসেন্স তথ্যের জন্য",
+                        iconType = "website",
+                        url = "https://maxbird.app",
+                        colorHex = "#0EA5E9",
+                        isActive = true,
+                        priority = 1,
+                        createdAt = now
+                    )
+                )
+            )
+
+            cachedUserDevices.addAll(
+                listOf(
+                    UserDevice(
+                        id = UUID.randomUUID().toString(),
+                        deviceHash = "sha256_hw_xiaomi_9a12c40",
+                        displayDeviceId = "MX-7F3A-9B21-C04E",
+                        deviceModel = "Xiaomi Redmi Note 12",
+                        deviceBrand = "Xiaomi",
+                        androidVersion = "Android 14 (API 34)",
+                        appVersion = "1.0.0",
+                        appliedCode = "VIP-STUDENT-01",
+                        isBanned = false,
+                        banReason = null,
+                        status = "active",
+                        lastSeen = now
+                    ),
+                    UserDevice(
+                        id = UUID.randomUUID().toString(),
+                        deviceHash = "sha256_hw_samsung_b38df9",
+                        displayDeviceId = "MX-4C82-1D5E-F93A",
+                        deviceModel = "Samsung Galaxy S23",
+                        deviceBrand = "Samsung",
+                        androidVersion = "Android 14 (API 34)",
+                        appVersion = "1.0.0",
+                        appliedCode = "MAX-8921",
+                        isBanned = false,
+                        banReason = null,
+                        status = "active",
+                        lastSeen = now
+                    ),
+                    UserDevice(
+                        id = UUID.randomUUID().toString(),
+                        deviceHash = "sha256_hw_realme_e847c1",
+                        displayDeviceId = "MX-89AB-CDEF-0123",
+                        deviceModel = "Realme 11 Pro+",
+                        deviceBrand = "Realme",
+                        androidVersion = "Android 13 (API 33)",
+                        appVersion = "1.0.0",
+                        appliedCode = "MAX-1144",
+                        isBanned = true,
+                        banReason = "একাধিক ডিভাইসে শেয়ার করার অভিযোগে ব্যান করা হয়েছে",
+                        status = "banned",
+                        lastSeen = now
+                    ),
+                    UserDevice(
+                        id = UUID.randomUUID().toString(),
+                        deviceHash = "sha256_hw_vivo_aa2938",
+                        displayDeviceId = "MX-D104-55FA-82EE",
+                        deviceModel = "Vivo V29 5G",
+                        deviceBrand = "Vivo",
+                        androidVersion = "Android 14 (API 34)",
+                        appVersion = "1.0.0",
+                        appliedCode = "VIP-BATCH-2026",
+                        isBanned = false,
+                        banReason = null,
+                        status = "active",
+                        lastSeen = now
+                    )
+                )
+            )
+
             isInitializedWithSampleData = true
         }
     }
+
 
     override suspend fun getAccessCodes(forceRefresh: Boolean): Result<List<AccessCode>> = withContext(Dispatchers.IO) {
         try {
@@ -612,4 +742,167 @@ class SupabaseMaxBirdRepository(
             Result.success(Unit)
         }
     }
+
+    override suspend fun getActivationSupportLinks(forceRefresh: Boolean): Result<List<ActivationSupportLink>> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val remoteLinks = api.getActivationSupportLinks()
+            cachedSupportLinks.clear()
+            cachedSupportLinks.addAll(remoteLinks)
+            Result.success(remoteLinks)
+        } catch (e: Exception) {
+            initSampleDataIfNeeded()
+            Result.success(cachedSupportLinks.sortedWith(compareByDescending<ActivationSupportLink> { it.priority }.thenByDescending { it.createdAt ?: "" }))
+        }
+    }
+
+    override suspend fun createActivationSupportLink(payload: CreateSupportLinkPayload): Result<ActivationSupportLink> = withContext(Dispatchers.IO) {
+        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val localNewLink = ActivationSupportLink(
+            id = UUID.randomUUID().toString(),
+            title = payload.title.trim(),
+            subtitle = payload.subtitle?.trim()?.ifBlank { null },
+            iconType = payload.iconType.trim().lowercase(),
+            url = payload.url.trim(),
+            colorHex = payload.colorHex?.trim()?.ifBlank { null },
+            isActive = payload.isActive,
+            priority = payload.priority,
+            createdAt = now
+        )
+
+        try {
+            val api = supabaseClient.getApi()
+            val createdList = api.createActivationSupportLink(payload)
+            val created = createdList.firstOrNull() ?: localNewLink
+            cachedSupportLinks.add(0, created)
+            Result.success(created)
+        } catch (e: Exception) {
+            cachedSupportLinks.add(0, localNewLink)
+            Result.success(localNewLink)
+        }
+    }
+
+    override suspend fun updateActivationSupportLink(id: String, payload: CreateSupportLinkPayload): Result<ActivationSupportLink> = withContext(Dispatchers.IO) {
+        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val index = cachedSupportLinks.indexOfFirst { it.id == id }
+        val updatedLocal = if (index != -1) {
+            val existing = cachedSupportLinks[index]
+            existing.copy(
+                title = payload.title.trim(),
+                subtitle = payload.subtitle?.trim()?.ifBlank { null },
+                iconType = payload.iconType.trim().lowercase(),
+                url = payload.url.trim(),
+                colorHex = payload.colorHex?.trim()?.ifBlank { null },
+                isActive = payload.isActive,
+                priority = payload.priority
+            )
+        } else {
+            ActivationSupportLink(
+                id = id,
+                title = payload.title.trim(),
+                subtitle = payload.subtitle?.trim()?.ifBlank { null },
+                iconType = payload.iconType.trim().lowercase(),
+                url = payload.url.trim(),
+                colorHex = payload.colorHex?.trim()?.ifBlank { null },
+                isActive = payload.isActive,
+                priority = payload.priority,
+                createdAt = now
+            )
+        }
+
+        if (index != -1) {
+            cachedSupportLinks[index] = updatedLocal
+        } else {
+            cachedSupportLinks.add(0, updatedLocal)
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            val updatedList = api.updateActivationSupportLink("eq.$id", payload)
+            val updated = updatedList.firstOrNull() ?: updatedLocal
+            val idx = cachedSupportLinks.indexOfFirst { it.id == id }
+            if (idx != -1) cachedSupportLinks[idx] = updated
+            Result.success(updated)
+        } catch (e: Exception) {
+            Result.success(updatedLocal)
+        }
+    }
+
+    override suspend fun toggleActivationSupportLinkStatus(id: String, isActive: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+        val index = cachedSupportLinks.indexOfFirst { it.id == id }
+        if (index != -1) {
+            cachedSupportLinks[index] = cachedSupportLinks[index].copy(isActive = isActive)
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            api.updateActivationSupportLinkStatus("eq.$id", UpdateSupportLinkStatusPayload(isActive = isActive))
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun deleteActivationSupportLink(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+        cachedSupportLinks.removeAll { it.id == id }
+
+        try {
+            val api = supabaseClient.getApi()
+            api.deleteActivationSupportLink("eq.$id")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun getUserDevices(forceRefresh: Boolean): Result<List<UserDevice>> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val remoteDevices = api.getDevices()
+            cachedUserDevices.clear()
+            cachedUserDevices.addAll(remoteDevices)
+            Result.success(remoteDevices)
+        } catch (e: Exception) {
+            Result.success(cachedUserDevices.toList())
+        }
+    }
+
+    override suspend fun toggleUserDeviceBan(deviceId: String, isBanned: Boolean, banReason: String?): Result<Unit> = withContext(Dispatchers.IO) {
+        val newStatus = if (isBanned) "banned" else "active"
+        val idx = cachedUserDevices.indexOfFirst { it.id == deviceId || it.deviceHash == deviceId }
+        if (idx != -1) {
+            val old = cachedUserDevices[idx]
+            cachedUserDevices[idx] = old.copy(
+                isBanned = isBanned,
+                status = newStatus,
+                banReason = if (isBanned) (banReason ?: "অ্যাডমিন কর্তৃক ব্যান করা হয়েছে") else null
+            )
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            val payload = UpdateDeviceBanPayload(
+                isBanned = isBanned,
+                status = newStatus,
+                banReason = if (isBanned) (banReason ?: "অ্যাডমিন কর্তৃক ব্যান করা হয়েছে") else null
+            )
+            api.updateDeviceBan("eq.$deviceId", payload)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun deleteUserDevice(deviceId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        cachedUserDevices.removeAll { it.id == deviceId || it.deviceHash == deviceId }
+
+        try {
+            val api = supabaseClient.getApi()
+            api.deleteDeviceRecord("eq.$deviceId")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
 }
+

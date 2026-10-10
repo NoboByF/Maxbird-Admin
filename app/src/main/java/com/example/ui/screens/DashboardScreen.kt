@@ -208,7 +208,7 @@ fun DashboardScreen(
                             border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue)
                         ) {
                             Text(
-                                text = "৬টি মডিউল",
+                                text = "৭টি মডিউল",
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = NeonCyan,
@@ -218,28 +218,28 @@ fun DashboardScreen(
                         }
                     }
 
-                    // 2x3 Grid of Module Buttons
+                    // Grid of Module Buttons
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         FeaturedModuleCard(
                             modifier = Modifier.weight(1f),
-                            title = "📢 নোটিশ কন্ট্রোল",
-                            subtitle = "পপ-আপ ও ব্যানার",
+                            title = "🎧 সাপোর্ট লিংক",
+                            subtitle = "টেলিগ্রাম ও হোয়াটসঅ্যাপ",
                             badge = "নতুন",
                             accentColor = NeonCyan,
-                            onClick = { onNavigate(Screen.Notices) },
-                            testTag = "mod_card_notices"
+                            onClick = { onNavigate(Screen.SupportLinks) },
+                            testTag = "mod_card_support_links"
                         )
                         FeaturedModuleCard(
                             modifier = Modifier.weight(1f),
-                            title = "🚀 অ্যাপ আপডেট",
-                            subtitle = "রিলিজ ও ফোর্স আপডেট",
+                            title = "📢 নোটিশ কন্ট্রোল",
+                            subtitle = "পপ-আপ ও ব্যানার",
                             badge = "সক্রিয়",
                             accentColor = ElectricBlue,
-                            onClick = { onNavigate(Screen.Updates) },
-                            testTag = "mod_card_updates"
+                            onClick = { onNavigate(Screen.Notices) },
+                            testTag = "mod_card_notices"
                         )
                     }
 
@@ -249,13 +249,28 @@ fun DashboardScreen(
                     ) {
                         FeaturedModuleCard(
                             modifier = Modifier.weight(1f),
+                            title = "🚀 অ্যাপ আপডেট",
+                            subtitle = "রিলিজ ও ফোর্স আপডেট",
+                            badge = null,
+                            accentColor = EmeraldSuccess,
+                            onClick = { onNavigate(Screen.Updates) },
+                            testTag = "mod_card_updates"
+                        )
+                        FeaturedModuleCard(
+                            modifier = Modifier.weight(1f),
                             title = "➕ নতুন কোড",
                             subtitle = "কোড জেনারেটর",
                             badge = null,
-                            accentColor = EmeraldSuccess,
+                            accentColor = ElectricBlueLight,
                             onClick = { onNavigate(Screen.Generator) },
                             testTag = "mod_card_generator"
                         )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         FeaturedModuleCard(
                             modifier = Modifier.weight(1f),
                             title = "👥 শিক্ষার্থী তালিকা",
@@ -265,12 +280,6 @@ fun DashboardScreen(
                             onClick = { onNavigate(Screen.Codes) },
                             testTag = "mod_card_codes"
                         )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
                         FeaturedModuleCard(
                             modifier = Modifier.weight(1f),
                             title = "🛡️ কিল-সুইচ",
@@ -280,10 +289,16 @@ fun DashboardScreen(
                             onClick = { onNavigate(Screen.Devices) },
                             testTag = "mod_card_devices"
                         )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         FeaturedModuleCard(
-                            modifier = Modifier.weight(1f),
-                            title = "⚙️ সেটিংস ও এপিকে",
-                            subtitle = "সুপাবেস ও রিলিজ তথ্য",
+                            modifier = Modifier.fillMaxWidth(),
+                            title = "⚙️ সেটিংস, এপিকে ও সুপাবেস SQL স্ক্রিপ্ট",
+                            subtitle = "সুপাবেস ডাটাবেজ সংযোগ, রিলিজ APK ও সকল টেবিল স্ক্রিপ্ট",
                             badge = null,
                             accentColor = Slate400,
                             onClick = { onNavigate(Screen.Settings) },
