@@ -27,6 +27,7 @@ class SupabaseMaxBirdRepository(
     // In-memory fallback / cache to guarantee seamless experience
     private val cachedCodes = mutableListOf<AccessCode>()
     private val cachedDevices = mutableListOf<ActivatedDevice>()
+    private val cachedUpdates = mutableListOf<AppUpdate>()
     private var isInitializedWithSampleData = false
 
     init {
@@ -337,8 +338,6 @@ class SupabaseMaxBirdRepository(
             Result.failure(e)
         }
     }
-
-    private val cachedUpdates = mutableListOf<AppUpdate>()
 
     override suspend fun getAppUpdates(forceRefresh: Boolean): Result<List<AppUpdate>> = withContext(Dispatchers.IO) {
         try {
