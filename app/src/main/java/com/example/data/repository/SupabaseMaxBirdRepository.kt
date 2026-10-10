@@ -3,13 +3,16 @@ package com.example.data.repository
 import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
+import com.example.data.model.AppNotice
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
+import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
 import com.example.data.model.UpdateCodeStatusPayload
 import com.example.data.model.UpdateDeviceBlockedPayload
 import com.example.data.model.UpdateAppUpdateStatusPayload
+import com.example.data.model.UpdateAppNoticeStatusPayload
 import com.example.data.api.SupabaseClient
 import com.example.data.preferences.AdminPreferences
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +31,7 @@ class SupabaseMaxBirdRepository(
     private val cachedCodes = mutableListOf<AccessCode>()
     private val cachedDevices = mutableListOf<ActivatedDevice>()
     private val cachedUpdates = mutableListOf<AppUpdate>()
+    private val cachedNotices = mutableListOf<AppNotice>()
     private var isInitializedWithSampleData = false
 
     init {
@@ -152,6 +156,37 @@ class SupabaseMaxBirdRepository(
                         downloadUrl = "https://play.google.com/store/apps/details?id=com.maxbird.app",
                         buttonText = "আবশ্যক আপডেট",
                         isActive = true,
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                )
+            )
+
+            cachedNotices.addAll(
+                listOf(
+                    AppNotice(
+                        id = UUID.randomUUID().toString(),
+                        title = "🎉 নতুন স্পেশাল ব্যাচ শুরু হয়েছে!",
+                        description = "সকল ক্লাসের লাইভ সেশন, নোট ও কুইজ অ্যাক্সেস করতে আমাদের অফিশিয়াল টেলিগ্রাম চ্যানেলে যুক্ত থাকুন।",
+                        imageUrl = "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800",
+                        actionUrl = "https://t.me/maxbird_updates",
+                        actionButtonText = "টেলিগ্রামে যুক্ত হোন",
+                        priority = 10,
+                        isActive = true,
+                        showAsPopup = true,
+                        createdAt = now,
+                        updatedAt = now
+                    ),
+                    AppNotice(
+                        id = UUID.randomUUID().toString(),
+                        title = "⚠️ সার্ভার মেইনটেন্যান্স অ্যালার্ট",
+                        description = "আজ রাত ১২টা থেকে রাত ১টা পর্যন্ত সার্ভার আপগ্রেড কার্যক্রম চলবে। সাময়িক অসুবিধার জন্য আন্তরিকভাবে দুঃখিত।",
+                        imageUrl = "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=800",
+                        actionUrl = "https://maxbird.app/status",
+                        actionButtonText = "সার্ভার স্ট্যাটাস দেখুন",
+                        priority = 5,
+                        isActive = true,
+                        showAsPopup = false,
                         createdAt = now,
                         updatedAt = now
                     )
@@ -454,6 +489,124 @@ class SupabaseMaxBirdRepository(
         try {
             val api = supabaseClient.getApi()
             api.deleteAppUpdate("eq.$id")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun getAppNotices(forceRefresh: Boolean): Result<List<AppNotice>> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val remoteNotices = api.getAppNotices()
+            cachedNotices.clear()
+            cachedNotices.addAll(remoteNotices)
+            Result.success(remoteNotices)
+        } catch (e: Exception) {
+            initSampleDataIfNeeded()
+            Result.success(cachedNotices.sortedWith(compareByDescending<AppNotice> { it.priority }.thenByDescending { it.createdAt }))
+        }
+    }
+
+    override suspend fun createAppNotice(payload: CreateAppNoticePayload): Result<AppNotice> = withContext(Dispatchers.IO) {
+        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val localNewNotice = AppNotice(
+            id = UUID.randomUUID().toString(),
+            title = payload.title.trim(),
+            description = payload.description?.trim(),
+            imageUrl = payload.imageUrl.trim(),
+            actionUrl = payload.actionUrl?.trim()?.ifBlank { null },
+            actionButtonText = payload.actionButtonText.trim().ifBlank { "বিস্তারিত দেখুন" },
+            priority = payload.priority,
+            isActive = payload.isActive,
+            showAsPopup = payload.showAsPopup,
+            createdAt = now,
+            updatedAt = now
+        )
+
+        try {
+            val api = supabaseClient.getApi()
+            val createdList = api.createAppNotice(payload)
+            val created = createdList.firstOrNull() ?: localNewNotice
+            cachedNotices.add(0, created)
+            Result.success(created)
+        } catch (e: Exception) {
+            cachedNotices.add(0, localNewNotice)
+            Result.success(localNewNotice)
+        }
+    }
+
+    override suspend fun updateAppNotice(id: String, payload: CreateAppNoticePayload): Result<AppNotice> = withContext(Dispatchers.IO) {
+        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val index = cachedNotices.indexOfFirst { it.id == id }
+        val updatedLocal = if (index != -1) {
+            val existing = cachedNotices[index]
+            existing.copy(
+                title = payload.title.trim(),
+                description = payload.description?.trim(),
+                imageUrl = payload.imageUrl.trim(),
+                actionUrl = payload.actionUrl?.trim()?.ifBlank { null },
+                actionButtonText = payload.actionButtonText.trim().ifBlank { "বিস্তারিত দেখুন" },
+                priority = payload.priority,
+                isActive = payload.isActive,
+                showAsPopup = payload.showAsPopup,
+                updatedAt = now
+            )
+        } else {
+            AppNotice(
+                id = id,
+                title = payload.title.trim(),
+                description = payload.description?.trim(),
+                imageUrl = payload.imageUrl.trim(),
+                actionUrl = payload.actionUrl?.trim()?.ifBlank { null },
+                actionButtonText = payload.actionButtonText.trim().ifBlank { "বিস্তারিত দেখুন" },
+                priority = payload.priority,
+                isActive = payload.isActive,
+                showAsPopup = payload.showAsPopup,
+                createdAt = now,
+                updatedAt = now
+            )
+        }
+
+        if (index != -1) {
+            cachedNotices[index] = updatedLocal
+        } else {
+            cachedNotices.add(0, updatedLocal)
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            val updatedList = api.updateAppNotice("eq.$id", payload)
+            val updated = updatedList.firstOrNull() ?: updatedLocal
+            val idx = cachedNotices.indexOfFirst { it.id == id }
+            if (idx != -1) cachedNotices[idx] = updated
+            Result.success(updated)
+        } catch (e: Exception) {
+            Result.success(updatedLocal)
+        }
+    }
+
+    override suspend fun toggleAppNoticeStatus(id: String, isActive: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+        val index = cachedNotices.indexOfFirst { it.id == id }
+        if (index != -1) {
+            cachedNotices[index] = cachedNotices[index].copy(isActive = isActive)
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            api.updateAppNoticeStatus("eq.$id", UpdateAppNoticeStatusPayload(isActive = isActive))
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun deleteAppNotice(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+        cachedNotices.removeAll { it.id == id }
+
+        try {
+            val api = supabaseClient.getApi()
+            api.deleteAppNotice("eq.$id")
             Result.success(Unit)
         } catch (e: Exception) {
             Result.success(Unit)

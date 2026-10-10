@@ -7,8 +7,10 @@ import com.example.data.api.SupabaseClient
 import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
+import com.example.data.model.AppNotice
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
+import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
 import com.example.data.preferences.AdminPreferences
@@ -136,6 +138,52 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateIsActive = MutableStateFlow(true)
     val updateIsActive: StateFlow<Boolean> = _updateIsActive.asStateFlow()
 
+    // Notice Management State
+    private val _appNotices = MutableStateFlow<List<AppNotice>>(emptyList())
+    val appNotices: StateFlow<List<AppNotice>> = _appNotices.asStateFlow()
+
+    private val _isLoadingNotices = MutableStateFlow(false)
+    val isLoadingNotices: StateFlow<Boolean> = _isLoadingNotices.asStateFlow()
+
+    private val _noticeSearchQuery = MutableStateFlow("")
+    val noticeSearchQuery: StateFlow<String> = _noticeSearchQuery.asStateFlow()
+
+    private val _noticeFilter = MutableStateFlow("ALL") // ALL, ACTIVE, INACTIVE, POPUP
+    val noticeFilter: StateFlow<String> = _noticeFilter.asStateFlow()
+
+    private val _isNoticeDialogOpen = MutableStateFlow(false)
+    val isNoticeDialogOpen: StateFlow<Boolean> = _isNoticeDialogOpen.asStateFlow()
+
+    private val _editingNoticeId = MutableStateFlow<String?>(null)
+    val editingNoticeId: StateFlow<String?> = _editingNoticeId.asStateFlow()
+
+    private val _noticeTitle = MutableStateFlow("")
+    val noticeTitle: StateFlow<String> = _noticeTitle.asStateFlow()
+
+    private val _noticeDescription = MutableStateFlow("")
+    val noticeDescription: StateFlow<String> = _noticeDescription.asStateFlow()
+
+    private val _noticeImageUrl = MutableStateFlow("")
+    val noticeImageUrl: StateFlow<String> = _noticeImageUrl.asStateFlow()
+
+    private val _noticeActionUrl = MutableStateFlow("")
+    val noticeActionUrl: StateFlow<String> = _noticeActionUrl.asStateFlow()
+
+    private val _noticeActionButtonText = MutableStateFlow("বিস্তারিত দেখুন")
+    val noticeActionButtonText: StateFlow<String> = _noticeActionButtonText.asStateFlow()
+
+    private val _noticePriority = MutableStateFlow("0")
+    val noticePriority: StateFlow<String> = _noticePriority.asStateFlow()
+
+    private val _noticeIsActive = MutableStateFlow(true)
+    val noticeIsActive: StateFlow<Boolean> = _noticeIsActive.asStateFlow()
+
+    private val _noticeShowAsPopup = MutableStateFlow(true)
+    val noticeShowAsPopup: StateFlow<Boolean> = _noticeShowAsPopup.asStateFlow()
+
+    private val _previewNotice = MutableStateFlow<AppNotice?>(null)
+    val previewNotice: StateFlow<AppNotice?> = _previewNotice.asStateFlow()
+
     // Settings State
     private val _supabaseUrl = MutableStateFlow(adminPreferences.getSupabaseUrl())
     val supabaseUrl: StateFlow<String> = _supabaseUrl.asStateFlow()
@@ -168,6 +216,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         loadCodes()
         loadJoinedDevices()
         loadAppUpdates()
+        loadAppNotices()
     }
 
     fun refreshStats() {
@@ -531,6 +580,156 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             if (result.isSuccess) {
                 loadAppUpdates()
                 showToast("আপডেট ${update.latestVersionName} মুছে ফেলা হয়েছে। (Deleted)")
+            } else {
+                showToast("মুছে ফেলতে ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    // Notice Management Functions
+    fun loadAppNotices(forceRefresh: Boolean = false) {
+        viewModelScope.launch {
+            try {
+                _isLoadingNotices.value = true
+                val result = repository.getAppNotices(forceRefresh)
+                if (result.isSuccess) {
+                    _appNotices.value = result.getOrNull() ?: emptyList()
+                } else {
+                    showToast("নোটিশ লোড করতে সমস্যা হয়েছে: ${result.exceptionOrNull()?.message}")
+                }
+            } catch (e: Exception) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isLoadingNotices.value = false
+            }
+        }
+    }
+
+    fun setNoticeSearchQuery(query: String) {
+        _noticeSearchQuery.value = query
+    }
+
+    fun setNoticeFilter(filter: String) {
+        _noticeFilter.value = filter
+    }
+
+    fun openCreateNoticeDialog() {
+        _editingNoticeId.value = null
+        _noticeTitle.value = ""
+        _noticeDescription.value = ""
+        _noticeImageUrl.value = ""
+        _noticeActionUrl.value = ""
+        _noticeActionButtonText.value = "বিস্তারিত দেখুন"
+        _noticePriority.value = "0"
+        _noticeIsActive.value = true
+        _noticeShowAsPopup.value = true
+        _isNoticeDialogOpen.value = true
+    }
+
+    fun openEditNoticeDialog(notice: AppNotice) {
+        _editingNoticeId.value = notice.id
+        _noticeTitle.value = notice.title
+        _noticeDescription.value = notice.description ?: ""
+        _noticeImageUrl.value = notice.imageUrl
+        _noticeActionUrl.value = notice.actionUrl ?: ""
+        _noticeActionButtonText.value = notice.actionButtonText.ifBlank { "বিস্তারিত দেখুন" }
+        _noticePriority.value = notice.priority.toString()
+        _noticeIsActive.value = notice.isActive
+        _noticeShowAsPopup.value = notice.showAsPopup
+        _isNoticeDialogOpen.value = true
+    }
+
+    fun closeNoticeDialog() {
+        _isNoticeDialogOpen.value = false
+    }
+
+    fun setNoticeTitle(title: String) { _noticeTitle.value = title }
+    fun setNoticeDescription(desc: String) { _noticeDescription.value = desc }
+    fun setNoticeImageUrl(url: String) { _noticeImageUrl.value = url }
+    fun setNoticeActionUrl(url: String) { _noticeActionUrl.value = url }
+    fun setNoticeActionButtonText(txt: String) { _noticeActionButtonText.value = txt }
+    fun setNoticePriority(priority: String) { _noticePriority.value = priority }
+    fun setNoticeIsActive(active: Boolean) { _noticeIsActive.value = active }
+    fun setNoticeShowAsPopup(popup: Boolean) { _noticeShowAsPopup.value = popup }
+
+    fun openPreviewModal(notice: AppNotice) {
+        _previewNotice.value = notice
+    }
+
+    fun closePreviewModal() {
+        _previewNotice.value = null
+    }
+
+    fun saveAppNotice() {
+        val title = _noticeTitle.value.trim()
+        val imageUrl = _noticeImageUrl.value.trim()
+        val priorityInt = _noticePriority.value.trim().toIntOrNull() ?: 0
+
+        if (title.isBlank()) {
+            showToast("দয়া করে নোটিশের শিরোনাম (Title) লিখুন")
+            return
+        }
+
+        if (imageUrl.isBlank()) {
+            showToast("দয়া করে নোটিশের ছবির URL (Image URL) দিন")
+            return
+        }
+
+        val payload = CreateAppNoticePayload(
+            title = title,
+            description = _noticeDescription.value.trim().ifBlank { null },
+            imageUrl = imageUrl,
+            actionUrl = _noticeActionUrl.value.trim().ifBlank { null },
+            actionButtonText = _noticeActionButtonText.value.trim().ifBlank { "বিস্তারিত দেখুন" },
+            priority = priorityInt,
+            isActive = _noticeIsActive.value,
+            showAsPopup = _noticeShowAsPopup.value
+        )
+
+        viewModelScope.launch {
+            val editingId = _editingNoticeId.value
+            if (editingId == null) {
+                val result = repository.createAppNotice(payload)
+                if (result.isSuccess) {
+                    closeNoticeDialog()
+                    loadAppNotices(forceRefresh = true)
+                    showToast("নতুন নোটিশ সফলভাবে তৈরি হয়েছে! (Notice published)")
+                } else {
+                    showToast("নোটিশ সেভ করতে ব্যর্থ: ${result.exceptionOrNull()?.message}")
+                }
+            } else {
+                val result = repository.updateAppNotice(editingId, payload)
+                if (result.isSuccess) {
+                    closeNoticeDialog()
+                    loadAppNotices(forceRefresh = true)
+                    showToast("নোটিশ সফলভাবে আপডেট করা হয়েছে! (Notice updated)")
+                } else {
+                    showToast("নোটিশ আপডেট ব্যর্থ: ${result.exceptionOrNull()?.message}")
+                }
+            }
+        }
+    }
+
+    fun toggleAppNoticeStatus(notice: AppNotice) {
+        viewModelScope.launch {
+            val newStatus = !notice.isActive
+            val result = repository.toggleAppNoticeStatus(notice.id, newStatus)
+            if (result.isSuccess) {
+                loadAppNotices()
+                val statusText = if (newStatus) "সক্রিয় (Active)" else "নিষ্ক্রিয় (Inactive)"
+                showToast("নোটিশ এখন $statusText")
+            } else {
+                showToast("স্ট্যাটাস পরিবর্তন ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    fun deleteAppNotice(notice: AppNotice) {
+        viewModelScope.launch {
+            val result = repository.deleteAppNotice(notice.id)
+            if (result.isSuccess) {
+                loadAppNotices()
+                showToast("নোটিশ মুছে ফেলা হয়েছে। (Deleted)")
             } else {
                 showToast("মুছে ফেলতে ব্যর্থ হয়েছে।")
             }

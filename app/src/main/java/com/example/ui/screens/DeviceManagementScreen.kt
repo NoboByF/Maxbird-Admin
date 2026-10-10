@@ -74,6 +74,7 @@ import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
+import com.example.ui.theme.Slate950
 
 @Composable
 fun DeviceManagementScreen(
@@ -158,6 +159,113 @@ fun DeviceManagementScreen(
                         )
                     } else {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = NeonCyan)
+                    }
+                }
+            }
+        }
+
+        // Real-Time Supabase Sync & Device Summary Metrics
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Slate800),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Slate700, RoundedCornerShape(14.dp))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(EmeraldSuccess)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Supabase লাইভ ডাটাবেজ সিঙ্ক (Real Database)",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = EmeraldSuccess,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+
+                        Surface(
+                            color = Slate950,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "public.activated_devices",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = NeonCyan,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                ),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            color = Slate900,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("মোট ডিভাইস", style = MaterialTheme.typography.labelSmall.copy(color = Slate400))
+                                Text(
+                                    text = "${devices.size}",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = Slate900,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("সক্রিয় অনুমোদিত", style = MaterialTheme.typography.labelSmall.copy(color = EmeraldSuccess))
+                                Text(
+                                    text = "${devices.count { !it.device.isBlocked }}",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        color = EmeraldSuccess,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = Slate900,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("কিল-সুইচ ব্লকড", style = MaterialTheme.typography.labelSmall.copy(color = CoralDanger))
+                                Text(
+                                    text = "${devices.count { it.device.isBlocked }}",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        color = CoralDanger,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
             }

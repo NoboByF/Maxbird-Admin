@@ -124,3 +124,44 @@ data class CreateAppUpdatePayload(
 data class UpdateAppUpdateStatusPayload(
     @Json(name = "is_active") val isActive: Boolean
 )
+
+/**
+ * Notice model mapping to Supabase `app_notices` table.
+ */
+@JsonClass(generateAdapter = true)
+data class AppNotice(
+    @Json(name = "id") val id: String = "",
+    @Json(name = "title") val title: String = "",
+    @Json(name = "description") val description: String? = null,
+    @Json(name = "image_url") val imageUrl: String = "",
+    @Json(name = "action_url") val actionUrl: String? = null,
+    @Json(name = "action_button_text") val actionButtonText: String = "বিস্তারিত দেখুন",
+    @Json(name = "priority") val priority: Int = 0,
+    @Json(name = "is_active") val isActive: Boolean = true,
+    @Json(name = "show_as_popup") val showAsPopup: Boolean = true,
+    @Json(name = "created_at") val createdAt: String = "",
+    @Json(name = "updated_at") val updatedAt: String = ""
+)
+
+/**
+ * Request payload to create or update an app notice.
+ */
+@JsonClass(generateAdapter = true)
+data class CreateAppNoticePayload(
+    @Json(name = "title") val title: String,
+    @Json(name = "description") val description: String?,
+    @Json(name = "image_url") val imageUrl: String,
+    @Json(name = "action_url") val actionUrl: String?,
+    @Json(name = "action_button_text") val actionButtonText: String = "বিস্তারিত দেখুন",
+    @Json(name = "priority") val priority: Int = 0,
+    @Json(name = "is_active") val isActive: Boolean = true,
+    @Json(name = "show_as_popup") val showAsPopup: Boolean = true
+)
+
+/**
+ * Request payload to update notice active status.
+ */
+@JsonClass(generateAdapter = true)
+data class UpdateAppNoticeStatusPayload(
+    @Json(name = "is_active") val isActive: Boolean
+)

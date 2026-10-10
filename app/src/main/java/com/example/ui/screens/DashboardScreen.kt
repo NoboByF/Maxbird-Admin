@@ -21,8 +21,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddModerator
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
@@ -156,6 +158,136 @@ fun DashboardScreen(
                             imageVector = Icons.Default.Settings,
                             contentDescription = "Settings",
                             tint = Slate400
+                        )
+                    }
+                }
+            }
+        }
+
+        // Featured Modules Hub (Instant One-Tap Access right at top of Dashboard)
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Slate800),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.5.dp,
+                        Brush.horizontalGradient(listOf(ElectricBlue, NeonCyan)),
+                        RoundedCornerShape(20.dp)
+                    )
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Campaign,
+                                contentDescription = null,
+                                tint = NeonCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "প্রধান এডমিন ফিচারসমূহ (Modules)",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = ElectricBlue.copy(alpha = 0.25f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue)
+                        ) {
+                            Text(
+                                text = "৬টি মডিউল",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = NeonCyan,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+
+                    // 2x3 Grid of Module Buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        FeaturedModuleCard(
+                            modifier = Modifier.weight(1f),
+                            title = "📢 নোটিশ কন্ট্রোল",
+                            subtitle = "পপ-আপ ও ব্যানার",
+                            badge = "নতুন",
+                            accentColor = NeonCyan,
+                            onClick = { onNavigate(Screen.Notices) },
+                            testTag = "mod_card_notices"
+                        )
+                        FeaturedModuleCard(
+                            modifier = Modifier.weight(1f),
+                            title = "🚀 অ্যাপ আপডেট",
+                            subtitle = "রিলিজ ও ফোর্স আপডেট",
+                            badge = "সক্রিয়",
+                            accentColor = ElectricBlue,
+                            onClick = { onNavigate(Screen.Updates) },
+                            testTag = "mod_card_updates"
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        FeaturedModuleCard(
+                            modifier = Modifier.weight(1f),
+                            title = "➕ নতুন কোড",
+                            subtitle = "কোড জেনারেটর",
+                            badge = null,
+                            accentColor = EmeraldSuccess,
+                            onClick = { onNavigate(Screen.Generator) },
+                            testTag = "mod_card_generator"
+                        )
+                        FeaturedModuleCard(
+                            modifier = Modifier.weight(1f),
+                            title = "👥 শিক্ষার্থী তালিকা",
+                            subtitle = "কোড ও ডিভাইস",
+                            badge = null,
+                            accentColor = ElectricBlueLight,
+                            onClick = { onNavigate(Screen.Codes) },
+                            testTag = "mod_card_codes"
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        FeaturedModuleCard(
+                            modifier = Modifier.weight(1f),
+                            title = "🛡️ কিল-সুইচ",
+                            subtitle = "ডিভাইস ব্লক কন্ট্রোল",
+                            badge = null,
+                            accentColor = CoralDanger,
+                            onClick = { onNavigate(Screen.Devices) },
+                            testTag = "mod_card_devices"
+                        )
+                        FeaturedModuleCard(
+                            modifier = Modifier.weight(1f),
+                            title = "⚙️ সেটিংস ও এপিকে",
+                            subtitle = "সুপাবেস ও রিলিজ তথ্য",
+                            badge = null,
+                            accentColor = Slate400,
+                            onClick = { onNavigate(Screen.Settings) },
+                            testTag = "mod_card_settings"
                         )
                     }
                 }
@@ -330,6 +462,51 @@ fun DashboardScreen(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("কিল-সুইচ", color = Color.White, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = { onNavigate(Screen.Notices) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Slate700),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("action_quick_notices")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Campaign,
+                        contentDescription = null,
+                        tint = NeonCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("নোটিশ কন্ট্রোল", color = Color.White, fontWeight = FontWeight.SemiBold)
+                }
+
+                Button(
+                    onClick = { onNavigate(Screen.Updates) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Slate700),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("action_quick_updates")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = null,
+                        tint = ElectricBlueLight,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("অ্যাপ আপডেট", color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -519,3 +696,85 @@ private fun RecentCodeCard(
         }
     }
 }
+
+@Composable
+private fun FeaturedModuleCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    subtitle: String,
+    badge: String?,
+    accentColor: Color,
+    onClick: () -> Unit,
+    testTag: String
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Slate900),
+        shape = RoundedCornerShape(14.dp),
+        modifier = modifier
+            .border(1.dp, Slate700, RoundedCornerShape(14.dp))
+            .clickable { onClick() }
+            .testTag(testTag)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    ),
+                    maxLines = 1
+                )
+                if (badge != null) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = accentColor.copy(alpha = 0.2f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, accentColor)
+                    ) {
+                        Text(
+                            text = badge,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = accentColor,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 9.sp
+                            )
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = Slate400,
+                    fontSize = 11.sp
+                ),
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "খুলুন >",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = accentColor,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+            }
+        }
+    }
+}
+

@@ -2,12 +2,14 @@ package com.example.ui.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddModerator
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.AddModerator
+import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Group
@@ -24,8 +26,8 @@ sealed class Screen(
 ) {
     data object Dashboard : Screen(
         route = "dashboard",
-        titleEn = "Dashboard",
-        titleBn = "ড্যাশবোর্ড",
+        titleEn = "Home",
+        titleBn = "হোম",
         selectedIcon = Icons.Filled.Dashboard,
         unselectedIcon = Icons.Outlined.Dashboard
     )
@@ -38,28 +40,36 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.AddModerator
     )
 
+    data object Notices : Screen(
+        route = "notices",
+        titleEn = "Notices",
+        titleBn = "নোটিশ",
+        selectedIcon = Icons.Filled.Campaign,
+        unselectedIcon = Icons.Outlined.Campaign
+    )
+
+    data object Updates : Screen(
+        route = "updates",
+        titleEn = "Updates",
+        titleBn = "আপডেট",
+        selectedIcon = Icons.Filled.SystemUpdate,
+        unselectedIcon = Icons.Outlined.SystemUpdate
+    )
+
     data object Codes : Screen(
         route = "codes",
         titleEn = "Students",
-        titleBn = "শিক্ষার্থী তালিকা",
+        titleBn = "কোডসমূহ",
         selectedIcon = Icons.Filled.Group,
         unselectedIcon = Icons.Outlined.Group
     )
 
     data object Devices : Screen(
         route = "devices",
-        titleEn = "Kill-Switch",
-        titleBn = "ডিভাইস কন্ট্রোল",
+        titleEn = "Devices",
+        titleBn = "ডিভাইস",
         selectedIcon = Icons.Filled.Devices,
         unselectedIcon = Icons.Outlined.Devices
-    )
-
-    data object Updates : Screen(
-        route = "updates",
-        titleEn = "Updates",
-        titleBn = "অ্যাপ আপডেট",
-        selectedIcon = Icons.Filled.SystemUpdate,
-        unselectedIcon = Icons.Outlined.SystemUpdate
     )
 
     data object Settings : Screen(
@@ -73,6 +83,6 @@ sealed class Screen(
     companion object {
         // Use custom getter to prevent Kotlin static initialization circular dependency null-reference
         val bottomNavItems: List<Screen>
-            get() = listOf(Dashboard, Generator, Codes, Devices, Updates, Settings)
+            get() = listOf(Dashboard, Notices, Updates, Codes, Devices, Settings)
     }
 }

@@ -3,8 +3,10 @@ package com.example.data.repository
 import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
+import com.example.data.model.AppNotice
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
+import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
 import kotlinx.coroutines.flow.Flow
@@ -46,4 +48,14 @@ interface MaxBirdRepository {
     suspend fun toggleAppUpdateStatus(id: String, isActive: Boolean): Result<Unit>
 
     suspend fun deleteAppUpdate(id: String): Result<Unit>
+
+    suspend fun getAppNotices(forceRefresh: Boolean = false): Result<List<AppNotice>>
+
+    suspend fun createAppNotice(payload: CreateAppNoticePayload): Result<AppNotice>
+
+    suspend fun updateAppNotice(id: String, payload: CreateAppNoticePayload): Result<AppNotice>
+
+    suspend fun toggleAppNoticeStatus(id: String, isActive: Boolean): Result<Unit>
+
+    suspend fun deleteAppNotice(id: String): Result<Unit>
 }

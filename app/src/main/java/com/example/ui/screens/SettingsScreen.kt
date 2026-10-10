@@ -90,13 +90,48 @@ CREATE TABLE IF NOT EXISTS activated_devices (
     last_active_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- App Updates Table
+CREATE TABLE IF NOT EXISTS app_updates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    latest_version_name TEXT NOT NULL,
+    latest_version_code INT NOT NULL,
+    min_supported_version_code INT NOT NULL DEFAULT 1,
+    is_force_update BOOLEAN NOT NULL DEFAULT false,
+    title TEXT NOT NULL,
+    changelog TEXT NOT NULL,
+    download_url TEXT NOT NULL,
+    button_text TEXT NOT NULL DEFAULT 'এখনই আপডেট করুন',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- App Notices Table
+CREATE TABLE IF NOT EXISTS app_notices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT,
+    image_url TEXT NOT NULL,
+    action_url TEXT,
+    action_button_text TEXT DEFAULT 'বিস্তারিত দেখুন',
+    priority INT DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    show_as_popup BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE access_codes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activated_devices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_updates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_notices ENABLE ROW LEVEL SECURITY;
 
--- Allow Admin API Access (Service Role or Public Anon Key)
-CREATE POLICY "Public Read/Write Access" ON access_codes FOR ALL USING (true);
-CREATE POLICY "Public Devices Read/Write Access" ON activated_devices FOR ALL USING (true);"""
+-- Allow Public/Admin Read and Write
+CREATE POLICY "Public Access access_codes" ON access_codes FOR ALL USING (true);
+CREATE POLICY "Public Access activated_devices" ON activated_devices FOR ALL USING (true);
+CREATE POLICY "Public Access app_updates" ON app_updates FOR ALL USING (true);
+CREATE POLICY "Public Access app_notices" ON app_notices FOR ALL USING (true);"""
 
 @Composable
 fun SettingsScreen(
@@ -374,6 +409,85 @@ fun SettingsScreen(
                             ),
                             modifier = Modifier.padding(12.dp)
                         )
+                    }
+                }
+            }
+        }
+
+        // Release APK & Export Info Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Slate800),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, EmeraldSuccess, RoundedCornerShape(16.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Security,
+                                contentDescription = null,
+                                tint = EmeraldSuccess,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "রিলিজ APK ও বিল্ড তথ্য (Release APK)",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = EmeraldSuccess.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = "Release Ready",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = EmeraldSuccess,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "MaxBird Secure Admin এখন সম্পূর্ণ তৈরি। আপনি Google AI Studio এর ওপরের ডানপাশের সেটিংস মেনু (Gear icon) অথবা প্রজেক্ট এক্সপোর্ট অপশন থেকে সরাসরি 'Generate APK / Export ZIP' করে আপনার ডিভাইসে ইন্সটল করতে পারবেন।",
+                        style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
+                    )
+
+                    Surface(
+                        color = Slate950,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "• প্যাকেজ নাম: com.aistudio.maxbirdadmin.kxmpzq",
+                                style = MaterialTheme.typography.labelSmall.copy(color = NeonCyan, fontFamily = FontFamily.Monospace)
+                            )
+                            Text(
+                                text = "• সাইনিং কনফিগ: Release Keystore কনফিগার করা আছে",
+                                style = MaterialTheme.typography.labelSmall.copy(color = Color.White)
+                            )
+                            Text(
+                                text = "• মডিউলসমূহ: নোটিশ ম্যানেজমেন্ট, অ্যাপ আপডেট, কোড ও ডিভাইস কিল-সুইচ",
+                                style = MaterialTheme.typography.labelSmall.copy(color = EmeraldSuccess)
+                            )
+                        }
                     }
                 }
             }
