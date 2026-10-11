@@ -12,11 +12,11 @@ import retrofit2.http.Path
 interface CloudinaryApi {
 
     /**
-     * Upload any media (Image, Video, Audio, PDF, Raw file) to Shikho Cloudinary.
-     * Endpoint: POST https://api.cloudinary.com/v1_1/{cloud_name}/auto/upload
+     * Upload image to Shikho Cloudinary.
+     * Endpoint: POST https://api.cloudinary.com/v1_1/{cloud_name}/image/upload
      */
     @Multipart
-    @POST("v1_1/{cloudName}/auto/upload")
+    @POST("v1_1/{cloudName}/image/upload")
     suspend fun uploadMedia(
         @Path("cloudName") cloudName: String = "cross-border-education-technologies-pte-ltd",
         @Part("upload_preset") uploadPreset: RequestBody,

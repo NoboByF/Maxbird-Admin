@@ -5,7 +5,7 @@ import com.squareup.moshi.JsonClass
 
 /**
  * Cloudinary API Response model
- * Matches response from POST https://api.cloudinary.com/v1_1/{cloud_name}/auto/upload
+ * Matches response from POST https://api.cloudinary.com/v1_1/{cloud_name}/image/upload
  */
 @JsonClass(generateAdapter = true)
 data class CloudinaryUploadResponse(

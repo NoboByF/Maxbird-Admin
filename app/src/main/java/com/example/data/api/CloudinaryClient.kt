@@ -22,7 +22,7 @@ class CloudinaryClient(private val context: Context) {
 
     companion object {
         const val CLOUD_NAME = "cross-border-education-technologies-pte-ltd"
-        const val UPLOAD_PRESET = "ml_default"
+        const val UPLOAD_PRESET = "profile"
         const val BASE_URL = "https://api.cloudinary.com/"
     }
 
