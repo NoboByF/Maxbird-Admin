@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.navigation.Screen
 import com.example.ui.screens.ActivationSupportLinksScreen
+import com.example.ui.screens.CloudinaryMediaScreen
 import com.example.ui.screens.CodeGeneratorScreen
 import com.example.ui.screens.CodeManagementScreen
 import com.example.ui.screens.DashboardScreen
@@ -383,6 +384,27 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
+                            Screen.CloudinaryMedia -> {
+                                val selectedUri by viewModel.selectedMediaUri.collectAsStateWithLifecycle()
+                                val fileMeta by viewModel.selectedMediaMeta.collectAsStateWithLifecycle()
+                                val isUploading by viewModel.isUploadingMedia.collectAsStateWithLifecycle()
+                                val lastUploadedUrl by viewModel.lastUploadedSecureUrl.collectAsStateWithLifecycle()
+                                val history by viewModel.mediaUploadHistory.collectAsStateWithLifecycle()
+
+                                CloudinaryMediaScreen(
+                                    selectedUri = selectedUri,
+                                    fileMeta = fileMeta,
+                                    isUploading = isUploading,
+                                    lastUploadedUrl = lastUploadedUrl,
+                                    uploadHistory = history,
+                                    onSelectFile = { uri -> viewModel.selectMediaFile(uri) },
+                                    onClearSelectedFile = { viewModel.clearSelectedMedia() },
+                                    onUploadClick = { viewModel.uploadSelectedMedia() },
+                                    onRemoveHistoryItem = { item -> viewModel.removeMediaHistoryItem(item) },
+                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                )
+                            }
+
                             Screen.Settings -> {
                                 val supabaseUrl by viewModel.supabaseUrl.collectAsStateWithLifecycle()
                                 val supabaseKey by viewModel.supabaseKey.collectAsStateWithLifecycle()
@@ -526,6 +548,7 @@ private fun AdminTopHeaderBar(
         ) {
             val allScreens = listOf(
                 Screen.Dashboard,
+                Screen.CloudinaryMedia,
                 Screen.SupportLinks,
                 Screen.Notices,
                 Screen.Updates,

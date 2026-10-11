@@ -12,6 +12,8 @@ import com.example.data.model.ActivationSupportLink
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
+import com.example.data.api.CloudinaryClient
+import com.example.data.model.CloudinaryHistoryItem
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
@@ -31,10 +33,27 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val adminPreferences = AdminPreferences(application)
     private val supabaseClient = SupabaseClient(adminPreferences)
     private val repository: MaxBirdRepository = SupabaseMaxBirdRepository(supabaseClient, adminPreferences)
+    private val cloudinaryClient = CloudinaryClient(application)
 
     // Navigation State
     private val _currentScreen = MutableStateFlow<Screen>(Screen.Dashboard)
     val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
+
+    // Cloudinary Media Uploader State
+    private val _selectedMediaUri = MutableStateFlow<android.net.Uri?>(null)
+    val selectedMediaUri: StateFlow<android.net.Uri?> = _selectedMediaUri.asStateFlow()
+
+    private val _selectedMediaMeta = MutableStateFlow<CloudinaryClient.FileMeta?>(null)
+    val selectedMediaMeta: StateFlow<CloudinaryClient.FileMeta?> = _selectedMediaMeta.asStateFlow()
+
+    private val _isUploadingMedia = MutableStateFlow(false)
+    val isUploadingMedia: StateFlow<Boolean> = _isUploadingMedia.asStateFlow()
+
+    private val _lastUploadedSecureUrl = MutableStateFlow<String?>(null)
+    val lastUploadedSecureUrl: StateFlow<String?> = _lastUploadedSecureUrl.asStateFlow()
+
+    private val _mediaUploadHistory = MutableStateFlow<List<CloudinaryHistoryItem>>(emptyList())
+    val mediaUploadHistory: StateFlow<List<CloudinaryHistoryItem>> = _mediaUploadHistory.asStateFlow()
 
     // Dashboard State
     private val _stats = MutableStateFlow(DashboardStats())
@@ -1029,6 +1048,82 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 _isTestingConnection.value = false
             }
+        }
+    }
+
+    // Shikho Cloudinary Media Uploader Operations
+
+    fun selectMediaFile(uri: android.net.Uri?) {
+        if (uri == null) return
+        _selectedMediaUri.value = uri
+        try {
+            _selectedMediaMeta.value = cloudinaryClient.getFileMeta(uri)
+        } catch (e: Exception) {
+            _selectedMediaMeta.value = null
+        }
+    }
+
+    fun clearSelectedMedia() {
+        _selectedMediaUri.value = null
+        _selectedMediaMeta.value = null
+    }
+
+    fun uploadSelectedMedia() {
+        val uri = _selectedMediaUri.value ?: return
+        viewModelScope.launch {
+            try {
+                _isUploadingMedia.value = true
+                val result = cloudinaryClient.uploadFile(uri)
+                if (result.isSuccess) {
+                    val resp = result.getOrNull()
+                    val secureUrl = resp?.secureUrl ?: resp?.url
+                    if (resp != null && !secureUrl.isNullOrBlank()) {
+                        _lastUploadedSecureUrl.value = secureUrl
+                        val meta = _selectedMediaMeta.value
+                        val sizeFormatted = formatFileSize(meta?.size ?: (resp.bytes ?: 0L))
+                        val mimeType = meta?.mimeType ?: "image/jpeg"
+                        val resourceType = resp.resourceType ?: if (mimeType.startsWith("video")) "video" else if (mimeType.contains("pdf")) "raw" else "image"
+                        val timeFormatted = java.text.SimpleDateFormat("hh:mm a, dd MMM", java.util.Locale.getDefault()).format(java.util.Date())
+
+                        val newItem = CloudinaryHistoryItem(
+                            fileName = meta?.name ?: (resp.originalFilename ?: "uploaded_media"),
+                            fileSizeFormatted = sizeFormatted,
+                            mimeType = mimeType,
+                            resourceType = resourceType,
+                            secureUrl = secureUrl,
+                            uploadedAtFormatted = timeFormatted
+                        )
+                        _mediaUploadHistory.value = listOf(newItem) + _mediaUploadHistory.value
+                        showToast("✅ ফাইল সফলভাবে Shikho ক্লাউডনারিতে আপলোড হয়েছে!")
+                    } else {
+                        showToast("আপলোড হয়েছে কিন্তু ডিরেক্ট লিংক পাওয়া যায়নি।")
+                    }
+                } else {
+                    val errorMsg = result.exceptionOrNull()?.message ?: "আপলোড ব্যর্থ হয়েছে"
+                    showToast("ত্রুটি: $errorMsg")
+                }
+            } catch (e: Throwable) {
+                showToast("আপলোড ব্যর্থ: ${e.message}")
+            } finally {
+                _isUploadingMedia.value = false
+            }
+        }
+    }
+
+    fun removeMediaHistoryItem(item: CloudinaryHistoryItem) {
+        _mediaUploadHistory.value = _mediaUploadHistory.value.filter { it.id != item.id }
+    }
+
+    private fun formatFileSize(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        val kb = bytes / 1024.0
+        val mb = kb / 1024.0
+        return if (mb >= 1.0) {
+            String.format(java.util.Locale.US, "%.2f MB", mb)
+        } else if (kb >= 1.0) {
+            String.format(java.util.Locale.US, "%.1f KB", kb)
+        } else {
+            "$bytes B"
         }
     }
 

@@ -208,7 +208,7 @@ fun DashboardScreen(
                             border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue)
                         ) {
                             Text(
-                                text = "৭টি মডিউল",
+                                text = "৮টি মডিউল",
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = NeonCyan,
@@ -225,18 +225,33 @@ fun DashboardScreen(
                     ) {
                         FeaturedModuleCard(
                             modifier = Modifier.weight(1f),
-                            title = "🎧 সাপোর্ট লিংক",
-                            subtitle = "টেলিগ্রাম ও হোয়াটসঅ্যাপ",
-                            badge = "নতুন",
+                            title = "☁️ Shikho ক্লাউডনারি",
+                            subtitle = "মিডিয়া ও ডিরেক্ট লিংক",
+                            badge = "নতুন টুল",
                             accentColor = NeonCyan,
-                            onClick = { onNavigate(Screen.SupportLinks) },
-                            testTag = "mod_card_support_links"
+                            onClick = { onNavigate(Screen.CloudinaryMedia) },
+                            testTag = "mod_card_cloudinary_uploader"
                         )
                         FeaturedModuleCard(
                             modifier = Modifier.weight(1f),
+                            title = "🎧 সাপোর্ট লিংক",
+                            subtitle = "টেলিগ্রাম ও হোয়াটসঅ্যাপ",
+                            badge = "সক্রিয়",
+                            accentColor = ElectricBlueLight,
+                            onClick = { onNavigate(Screen.SupportLinks) },
+                            testTag = "mod_card_support_links"
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        FeaturedModuleCard(
+                            modifier = Modifier.fillMaxWidth(),
                             title = "📢 নোটিশ কন্ট্রোল",
                             subtitle = "পপ-আপ ও ব্যানার",
-                            badge = "সক্রিয়",
+                            badge = null,
                             accentColor = ElectricBlue,
                             onClick = { onNavigate(Screen.Notices) },
                             testTag = "mod_card_notices"

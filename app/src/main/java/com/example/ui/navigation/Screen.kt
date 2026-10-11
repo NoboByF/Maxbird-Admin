@@ -3,6 +3,7 @@ package com.example.ui.navigation
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddModerator
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Group
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.AddModerator
 import androidx.compose.material.icons.outlined.Campaign
+import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Group
@@ -82,6 +84,14 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Devices
     )
 
+    data object CloudinaryMedia : Screen(
+        route = "cloudinary_media",
+        titleEn = "Uploader",
+        titleBn = "মিডিয়া আপলোড",
+        selectedIcon = Icons.Filled.CloudUpload,
+        unselectedIcon = Icons.Outlined.CloudUpload
+    )
+
     data object Settings : Screen(
         route = "settings",
         titleEn = "Settings",
@@ -93,7 +103,7 @@ sealed class Screen(
     companion object {
         // Use custom getter to prevent Kotlin static initialization circular dependency null-reference
         val bottomNavItems: List<Screen>
-            get() = listOf(Dashboard, Notices, SupportLinks, Updates, Codes, Devices, Settings)
+            get() = listOf(Dashboard, CloudinaryMedia, Notices, SupportLinks, Updates, Codes, Devices, Settings)
     }
 }
 
