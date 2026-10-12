@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,9 +32,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material3.Button
@@ -41,7 +40,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -54,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -66,6 +65,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.api.CloudinaryClient
 import com.example.data.model.CloudinaryHistoryItem
+import com.example.ui.theme.CardBorderGradientEnd
+import com.example.ui.theme.CardBorderGradientStart
 import com.example.ui.theme.CoralDanger
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricBlueLight
@@ -73,10 +74,13 @@ import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate400
+import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
+import com.example.ui.theme.Slate850
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
+import com.example.ui.theme.Violet500
 
 /**
  * Shikho Cloudinary Media Uploader Screen
@@ -110,86 +114,107 @@ fun CloudinaryMediaScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(Slate900)
-            .padding(16.dp),
+            .background(Slate900),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Header Banner
+        // 1. Header Banner Card with glowing aesthetic
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Slate800),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate850),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                    .border(
+                        1.dp,
+                        Brush.horizontalGradient(
+                            listOf(ElectricBlue.copy(alpha = 0.5f), CardBorderGradientEnd)
+                        ),
+                        RoundedCornerShape(20.dp)
+                    )
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(ElectricBlue),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CloudUpload,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "Shikho Cloudinary Media Uploader",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                )
-                                Text(
-                                    text = "আনলিমিটেড ও সরাসরি মিডিয়া আপলোডার টুল",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = NeonCyan,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                )
-                            }
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = EmeraldSuccess.copy(alpha = 0.2f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldSuccess)
-                        ) {
-                            Text(
-                                text = "Active API",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = EmeraldSuccess,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    ElectricBlue.copy(alpha = 0.15f),
+                                    Violet500.copy(alpha = 0.08f),
+                                    Color.Transparent
                                 )
                             )
-                        }
-                    }
-
-                    Text(
-                        text = "কোনো লগইন বা অ্যাকাউন্ট ছাড়াই Shikho-এর অফিশিয়াল ক্লাউডনারিতে ছবি, ভিডিও বা পিডিএফ আপলোড করুন এবং যেকোনো ব্যানার বা নোটিশে ব্যবহারের জন্য চিরস্থায়ী ডিরেক্ট লিংক সংগ্রহ করুন।",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = Slate400,
-                            lineHeight = 18.sp
                         )
-                    )
+                        .padding(18.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            Brush.linearGradient(listOf(ElectricBlue, Violet500))
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CloudUpload,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Shikho Cloudinary Uploader",
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color.White
+                                        )
+                                    )
+                                    Text(
+                                        text = "সরাসরি ও আনলিমিটেড মিডিয়া ক্লাউড হোস্টিং",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = NeonCyan,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = EmeraldSuccess.copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldSuccess)
+                            ) {
+                                Text(
+                                    text = "Preset: profile",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = EmeraldSuccess,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "কোনো লগইন বা অ্যাকাউন্ট ছাড়াই Shikho-এর অফিসিয়াল ক্লাউডনারিতে ছবি, ব্যানার, ভিডিও বা পিডিএফ আপলোড করুন এবং অ্যাপ নোটিশ বা আপডেটের জন্য ডিরেক্ট পার্মানেন্ট লিংক সংগ্রহ করুন।",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = Slate200.copy(alpha = 0.85f),
+                                lineHeight = 18.sp
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -197,18 +222,22 @@ fun CloudinaryMediaScreen(
         // 2. File Selection & Upload Card
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Slate800),
-                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                shape = RoundedCornerShape(20.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                    .border(
+                        1.dp,
+                        Brush.linearGradient(listOf(CardBorderGradientStart, CardBorderGradientEnd)),
+                        RoundedCornerShape(20.dp)
+                    )
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Text(
-                        text = "১. ফাইল নির্বাচন করুন",
+                        text = "১. ফাইল নির্বাচন ও প্রিভিউ",
                         style = MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -220,12 +249,11 @@ fun CloudinaryMediaScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(130.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .height(140.dp)
+                                .clip(RoundedCornerShape(16.dp))
                                 .background(Slate900)
-                                .border(1.5.dp, Slate700, RoundedCornerShape(12.dp))
+                                .border(1.5.dp, Slate700, RoundedCornerShape(16.dp))
                                 .clickable {
-                                    // Open file picker (*/* allows images, pdf, mp4, etc.)
                                     filePickerLauncher.launch("*/*")
                                 }
                                 .testTag("btn_select_media_picker"),
@@ -233,26 +261,34 @@ fun CloudinaryMediaScreen(
                         ) {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.CloudUpload,
-                                    contentDescription = "Select File",
-                                    tint = NeonCyan,
-                                    modifier = Modifier.size(36.dp)
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(ElectricBlue.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CloudUpload,
+                                        contentDescription = "Select File",
+                                        tint = NeonCyan,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
                                 Text(
-                                    text = "ফাইল সিলেক্ট করুন (Image, PDF, Video)",
+                                    text = "ফাইল নির্বাচন করুন (Image, PDF, Video)",
                                     style = MaterialTheme.typography.titleSmall.copy(
                                         color = Color.White,
                                         fontWeight = FontWeight.Bold
                                     )
                                 )
                                 Text(
-                                    text = "এখানে ট্যাপ করে গ্যালারি বা ফাইল ম্যানেজার থেকে ফাইল বেছে নিন",
+                                    text = "গ্যালারি অথবা ফাইল ম্যানেজার থেকে ফাইল বেছে নিতে ট্যাপ করুন",
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         color = Slate400,
-                                        fontSize = 11.sp
+                                        fontSize = 12.sp
                                     )
                                 )
                             }
@@ -265,13 +301,13 @@ fun CloudinaryMediaScreen(
 
                         Card(
                             colors = CardDefaults.cardColors(containerColor = Slate900),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .border(1.dp, ElectricBlue, RoundedCornerShape(12.dp))
+                                .border(1.2.dp, ElectricBlue, RoundedCornerShape(14.dp))
                         ) {
                             Column(
-                                modifier = Modifier.padding(12.dp),
+                                modifier = Modifier.padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Row(
@@ -339,9 +375,9 @@ fun CloudinaryMediaScreen(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(180.dp)
-                                            .clip(RoundedCornerShape(8.dp))
+                                            .clip(RoundedCornerShape(10.dp))
                                             .background(Slate950)
-                                            .border(1.dp, Slate700, RoundedCornerShape(8.dp)),
+                                            .border(1.dp, Slate700, RoundedCornerShape(10.dp)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         AsyncImage(
@@ -363,7 +399,7 @@ fun CloudinaryMediaScreen(
                                         colors = ButtonDefaults.outlinedButtonColors(
                                             contentColor = Slate200
                                         ),
-                                        shape = RoundedCornerShape(8.dp)
+                                        shape = RoundedCornerShape(10.dp)
                                     ) {
                                         Text("অন্য ফাইল নিন", fontSize = 12.sp)
                                     }
@@ -378,7 +414,7 @@ fun CloudinaryMediaScreen(
                                             containerColor = ElectricBlue,
                                             contentColor = Color.White
                                         ),
-                                        shape = RoundedCornerShape(8.dp)
+                                        shape = RoundedCornerShape(10.dp)
                                     ) {
                                         if (isUploading) {
                                             CircularProgressIndicator(
@@ -411,26 +447,34 @@ fun CloudinaryMediaScreen(
         if (!currentUploadedUrl.isNullOrBlank()) {
             item {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Slate800),
-                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Slate850),
+                    shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.5.dp, EmeraldSuccess, RoundedCornerShape(16.dp))
+                        .border(1.5.dp, EmeraldSuccess, RoundedCornerShape(20.dp))
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier.padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = EmeraldSuccess,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(EmeraldSuccess.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = EmeraldSuccess,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                             Text(
                                 text = "আপলোড সফল হয়েছে! (Permanent Direct Link)",
                                 style = MaterialTheme.typography.titleSmall.copy(
@@ -441,7 +485,7 @@ fun CloudinaryMediaScreen(
                         }
 
                         Text(
-                            text = "এই লিংকটি সরাসরি যেকোনো নোটিশ ব্যানার, সাপোর্ট লিংক বা ব্রাউজারে ব্যবহার করুন:",
+                            text = "এই লিংকটি সরাসরি যেকোনো নোটিশ ব্যানার, সাপোর্ট লিংক বা ব্রাউজারে ব্যবহার করতে পারবেন:",
                             style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
                         )
 
@@ -471,7 +515,7 @@ fun CloudinaryMediaScreen(
                                 focusedBorderColor = EmeraldSuccess,
                                 unfocusedBorderColor = Slate700
                             ),
-                            shape = RoundedCornerShape(10.dp)
+                            shape = RoundedCornerShape(12.dp)
                         )
 
                         // Big Prominent "Copy Link" Button
@@ -482,22 +526,22 @@ fun CloudinaryMediaScreen(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(46.dp)
+                                .height(48.dp)
                                 .testTag("btn_copy_direct_link"),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = EmeraldSuccess,
                                 contentColor = Color.White
                             ),
-                            shape = RoundedCornerShape(10.dp)
+                            shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ContentCopy,
                                 contentDescription = "Copy Link",
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Copy Link (ডিরেক্ট লিংক কপি করুন)",
+                                text = "Copy Direct Link (ডিরেক্ট লিংক কপি করুন)",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp
                             )
@@ -543,9 +587,11 @@ fun CloudinaryMediaScreen(
         if (uploadHistory.isEmpty()) {
             item {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Slate800),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    colors = CardDefaults.cardColors(containerColor = Slate850),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, Slate700.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
                 ) {
                     Column(
                         modifier = Modifier
@@ -554,17 +600,25 @@ fun CloudinaryMediaScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CloudUpload,
-                            contentDescription = null,
-                            tint = Slate400,
-                            modifier = Modifier.size(40.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(CircleShape)
+                                .background(Slate800),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudUpload,
+                                contentDescription = null,
+                                tint = Slate400,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
                         Text(
                             text = "এখনো কোনো ফাইল আপলোড করা হয়নি",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 color = Slate200,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.Bold
                             )
                         )
                         Text(
@@ -589,6 +643,10 @@ fun CloudinaryMediaScreen(
                 )
             }
         }
+
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+        }
     }
 }
 
@@ -599,14 +657,14 @@ private fun UploadHistoryItemCard(
     onDelete: () -> Unit
 ) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = Slate800),
-        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Slate850),
+        shape = RoundedCornerShape(14.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, Slate700, RoundedCornerShape(12.dp))
+            .border(1.dp, Slate700, RoundedCornerShape(14.dp))
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
@@ -633,7 +691,7 @@ private fun UploadHistoryItemCard(
 
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(34.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(Slate900),
                         contentAlignment = Alignment.Center
@@ -670,7 +728,7 @@ private fun UploadHistoryItemCard(
                         modifier = Modifier
                             .size(34.dp)
                             .clip(CircleShape)
-                            .background(Slate700)
+                            .background(Slate800)
                             .testTag("btn_copy_history_${item.id}")
                     ) {
                         Icon(
@@ -686,7 +744,7 @@ private fun UploadHistoryItemCard(
                         modifier = Modifier
                             .size(34.dp)
                             .clip(CircleShape)
-                            .background(Slate700)
+                            .background(Slate800)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Delete,
@@ -700,21 +758,21 @@ private fun UploadHistoryItemCard(
 
             // Url preview pill
             Surface(
-                shape = RoundedCornerShape(6.dp),
+                shape = RoundedCornerShape(8.dp),
                 color = Slate900,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { onCopy() }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Link,
                         contentDescription = null,
                         tint = NeonCyan,
-                        modifier = Modifier.size(12.dp)
+                        modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(

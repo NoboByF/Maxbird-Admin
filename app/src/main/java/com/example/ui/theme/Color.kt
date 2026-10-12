@@ -29,3 +29,10 @@ val CoralDark = Color(0xFFB91C1C)
 
 val AmberWarning = Color(0xFFF59E0B) // Warning / Multi-device
 val PurpleRoyal = Color(0xFF8B5CF6) // VIP Code badge
+val Indigo600 = Color(0xFF4F46E5)
+val Violet500 = Color(0xFF8B5CF6)
+val Rose500 = Color(0xFFF43F5E)
+val Sky500 = Color(0xFF0EA5E9)
+val Slate850 = Color(0xFF172033)
+val CardBorderGradientStart = Color(0x3360A5FA)
+val CardBorderGradientEnd = Color(0x1038BDF8)

@@ -2,9 +2,11 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -39,13 +42,10 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -55,17 +55,22 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.CardBorderGradientEnd
+import com.example.ui.theme.CardBorderGradientStart
 import com.example.ui.theme.CoralDanger
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricBlueLight
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.NeonCyan
+import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
+import com.example.ui.theme.Slate850
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
+import com.example.ui.theme.Violet500
 
 private const val SUPABASE_SCHEMA_SQL = """-- MaxBird Supabase Setup SQL Script
 -- Run this in your Supabase Dashboard -> SQL Editor
@@ -166,7 +171,6 @@ CREATE POLICY "Public Access app_notices" ON app_notices FOR ALL USING (true);
 CREATE POLICY "Public Access activation_support_links" ON activation_support_links FOR ALL USING (true);
 CREATE POLICY "Public Access devices" ON devices FOR ALL USING (true);"""
 
-
 @Composable
 fun SettingsScreen(
     supabaseUrl: String,
@@ -185,50 +189,123 @@ fun SettingsScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(Slate900)
-            .padding(16.dp),
+            .background(Slate900),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Modern Header Card
         item {
-            Column {
-                Text(
-                    text = "সেটিংস ও সুপাবেস কানেকশন",
-                    style = MaterialTheme.typography.headlineSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.dp,
+                        Brush.horizontalGradient(
+                            listOf(NeonCyan.copy(alpha = 0.4f), CardBorderGradientEnd)
+                        ),
+                        RoundedCornerShape(20.dp)
                     )
-                )
-                Text(
-                    text = "Supabase API & Admin Security Configuration",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = NeonCyan,
-                        fontWeight = FontWeight.Medium
-                    )
-                )
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(NeonCyan.copy(alpha = 0.12f), Color.Transparent)
+                            )
+                        )
+                        .padding(18.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Surface(
+                                color = NeonCyan.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "API & BACKEND CONFIG",
+                                    color = NeonCyan,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 1.sp,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "সেটিংস ও সুপাবেস কানেকশন",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Supabase API Endpoint, এনভায়রনমেন্ট কি এবং ডাটাবেজ নিরাপত্তা",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = Slate200.copy(alpha = 0.8f)
+                                )
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Slate800),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = null,
+                                tint = NeonCyan,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
 
         // Supabase Endpoint Card
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Slate800),
-                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                shape = RoundedCornerShape(20.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                    .border(
+                        1.dp,
+                        Brush.linearGradient(listOf(CardBorderGradientStart, CardBorderGradientEnd)),
+                        RoundedCornerShape(20.dp)
+                    )
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Cloud,
-                            contentDescription = null,
-                            tint = NeonCyan,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(NeonCyan.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Cloud,
+                                contentDescription = null,
+                                tint = NeonCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = "Supabase Database Settings",
                             style = MaterialTheme.typography.titleMedium.copy(
@@ -243,7 +320,7 @@ fun SettingsScreen(
                         Text(
                             text = "Supabase Project URL",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                         )
@@ -251,15 +328,17 @@ fun SettingsScreen(
                         OutlinedTextField(
                             value = supabaseUrl,
                             onValueChange = onUrlChange,
-                            placeholder = { Text("https://your-project.supabase.co", color = Slate400) },
+                            placeholder = { Text("https://your-project.supabase.co", color = Slate400, fontSize = 13.sp) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = NeonCyan,
-                                unfocusedBorderColor = Slate600,
+                                unfocusedBorderColor = Slate700,
+                                focusedContainerColor = Slate900,
+                                unfocusedContainerColor = Slate900,
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White
                             ),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("input_supabase_url")
@@ -271,7 +350,7 @@ fun SettingsScreen(
                         Text(
                             text = "Supabase Anon / Service Role Key",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                         )
@@ -279,15 +358,17 @@ fun SettingsScreen(
                         OutlinedTextField(
                             value = supabaseKey,
                             onValueChange = onKeyChange,
-                            placeholder = { Text("eyJhbGciOiJIUz...", color = Slate400) },
+                            placeholder = { Text("eyJhbGciOiJIUz...", color = Slate400, fontSize = 13.sp) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = NeonCyan,
-                                unfocusedBorderColor = Slate600,
+                                unfocusedBorderColor = Slate700,
+                                focusedContainerColor = Slate900,
+                                unfocusedContainerColor = Slate900,
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White
                             ),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("input_supabase_key")
@@ -298,13 +379,13 @@ fun SettingsScreen(
                     if (!connectionStatus.isNullOrBlank()) {
                         Surface(
                             color = if (isConnectionSuccess == true) EmeraldSuccess.copy(alpha = 0.15f) else CoralDanger.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .border(
                                     1.dp,
                                     if (isConnectionSuccess == true) EmeraldSuccess else CoralDanger,
-                                    RoundedCornerShape(10.dp)
+                                    RoundedCornerShape(12.dp)
                                 )
                         ) {
                             Row(
@@ -337,32 +418,33 @@ fun SettingsScreen(
                         Button(
                             onClick = onTestConnection,
                             enabled = !isTestingConnection,
-                            colors = ButtonDefaults.buttonColors(containerColor = Slate700),
-                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(48.dp)
+                                .border(1.dp, Slate700, RoundedCornerShape(12.dp))
                                 .testTag("btn_test_connection")
                         ) {
                             if (isTestingConnection) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), color = NeonCyan, strokeWidth = 2.dp)
                             } else {
-                                Text("টেস্ট কানেকশন", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                Text("টেস্ট কানেকশন", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
                         }
 
                         Button(
                             onClick = onSaveSettings,
                             colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(48.dp)
                                 .testTag("btn_save_settings")
                         ) {
                             Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("সেভ করুন", fontWeight = FontWeight.Bold)
+                            Text("সেভ করুন", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
@@ -372,14 +454,14 @@ fun SettingsScreen(
         // Supabase SQL Schema Helper
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Slate800),
-                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                shape = RoundedCornerShape(20.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                    .border(1.dp, Slate700.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
@@ -388,13 +470,21 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Terminal,
-                                contentDescription = null,
-                                tint = NeonCyan,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(ElectricBlue.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Terminal,
+                                    contentDescription = null,
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
                             Text(
                                 text = "Supabase SQL Setup Script",
                                 style = MaterialTheme.typography.titleSmall.copy(
@@ -411,8 +501,8 @@ fun SettingsScreen(
                             },
                             modifier = Modifier
                                 .clip(CircleShape)
-                                .background(Slate700)
-                                .size(36.dp)
+                                .background(Slate800)
+                                .size(38.dp)
                                 .testTag("btn_copy_sql_schema")
                         ) {
                             Icon(
@@ -425,14 +515,16 @@ fun SettingsScreen(
                     }
 
                     Text(
-                        text = "আপনার Supabase প্রজেক্টে access_codes ও activated_devices টেবিল না থাকলে উপরের বাটন দিয়ে কপি করে Supabase SQL Editor এ রান করুন।",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
+                        text = "আপনার Supabase প্রজেক্টে access_codes, devices ও অন্যান্য টেবিল না থাকলে উপরের বাটন দিয়ে কপি করে Supabase SQL Editor এ রান করুন।",
+                        style = MaterialTheme.typography.bodySmall.copy(color = Slate400, lineHeight = 18.sp)
                     )
 
                     Surface(
                         color = Slate950,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, Slate700.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                     ) {
                         Text(
                             text = SUPABASE_SCHEMA_SQL,
@@ -441,7 +533,7 @@ fun SettingsScreen(
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 11.sp
                             ),
-                            modifier = Modifier.padding(12.dp)
+                            modifier = Modifier.padding(14.dp)
                         )
                     }
                 }
@@ -451,14 +543,20 @@ fun SettingsScreen(
         // Release APK & Export Info Card
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Slate800),
-                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                shape = RoundedCornerShape(20.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, EmeraldSuccess, RoundedCornerShape(16.dp))
+                    .border(
+                        1.dp,
+                        Brush.horizontalGradient(
+                            listOf(EmeraldSuccess.copy(alpha = 0.5f), CardBorderGradientEnd)
+                        ),
+                        RoundedCornerShape(20.dp)
+                    )
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Row(
@@ -467,15 +565,23 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Security,
-                                contentDescription = null,
-                                tint = EmeraldSuccess,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(EmeraldSuccess.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Security,
+                                    contentDescription = null,
+                                    tint = EmeraldSuccess,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "রিলিজ APK ও বিল্ড তথ্য (Release APK)",
+                                text = "রিলিজ APK ও বিল্ড তথ্য",
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -485,7 +591,8 @@ fun SettingsScreen(
 
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = EmeraldSuccess.copy(alpha = 0.2f)
+                            color = EmeraldSuccess.copy(alpha = 0.15f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldSuccess)
                         ) {
                             Text(
                                 text = "Release Ready",
@@ -500,12 +607,12 @@ fun SettingsScreen(
 
                     Text(
                         text = "MaxBird Secure Admin এখন সম্পূর্ণ তৈরি। আপনি Google AI Studio এর ওপরের ডানপাশের সেটিংস মেনু (Gear icon) অথবা প্রজেক্ট এক্সপোর্ট অপশন থেকে সরাসরি 'Generate APK / Export ZIP' করে আপনার ডিভাইসে ইন্সটল করতে পারবেন।",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
+                        style = MaterialTheme.typography.bodySmall.copy(color = Slate400, lineHeight = 18.sp)
                     )
 
                     Surface(
                         color = Slate950,
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -528,7 +635,7 @@ fun SettingsScreen(
         }
 
         item {
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }

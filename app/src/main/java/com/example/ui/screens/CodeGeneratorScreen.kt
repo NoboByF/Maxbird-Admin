@@ -2,12 +2,16 @@ package com.example.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,18 +23,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -39,18 +42,16 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -59,21 +60,27 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AccessCode
+import com.example.ui.theme.CardBorderGradientEnd
+import com.example.ui.theme.CardBorderGradientStart
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricBlueLight
 import com.example.ui.theme.EmeraldSuccess
+import com.example.ui.theme.Indigo600
 import com.example.ui.theme.NeonCyan
+import com.example.ui.theme.PurpleRoyal
+import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
+import com.example.ui.theme.Slate850
 import com.example.ui.theme.Slate900
+import com.example.ui.theme.Slate950
+import com.example.ui.theme.Violet500
 
 @Composable
 fun CodeGeneratorScreen(
@@ -99,62 +106,156 @@ fun CodeGeneratorScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(Slate900)
-            .padding(16.dp),
+            .background(Slate900),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Hero Header Card with modern glowing gradient
         item {
-            Column {
-                Text(
-                    text = "এক্সেস কোড জেনারেটর",
-                    style = MaterialTheme.typography.headlineSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.dp,
+                        Brush.horizontalGradient(
+                            listOf(ElectricBlue.copy(alpha = 0.5f), NeonCyan.copy(alpha = 0.2f))
+                        ),
+                        RoundedCornerShape(22.dp)
                     )
-                )
-                Text(
-                    text = "Generate New Student Access Key for MaxBird App",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = NeonCyan,
-                        fontWeight = FontWeight.Medium
-                    )
-                )
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    ElectricBlue.copy(alpha = 0.16f),
+                                    Violet500.copy(alpha = 0.08f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                        .padding(18.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    color = NeonCyan.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "VIP ACCESS",
+                                        color = NeonCyan,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        letterSpacing = 1.sp,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "MaxBird Protection",
+                                    color = Slate400,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "এক্সেস কোড জেনারেটর",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "শিক্ষার্থীর জন্য সরাসরি লাইসেন্স কী ও ডিভাইস সীমা নির্ধারণ করুন",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = Slate200.copy(alpha = 0.85f),
+                                    lineHeight = 16.sp
+                                )
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    Brush.linearGradient(listOf(ElectricBlue, Violet500))
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.VpnKey,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
 
+        // Form Card
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Slate800),
-                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                shape = RoundedCornerShape(20.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                    .border(
+                        1.dp,
+                        Brush.linearGradient(listOf(CardBorderGradientStart, CardBorderGradientEnd)),
+                        RoundedCornerShape(20.dp)
+                    )
             ) {
                 Column(
                     modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Student Name Field
+                    // Field 1: Student Name
                     Column {
-                        Text(
-                            text = "শিক্ষার্থীর নাম (Student Name) *",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = ElectricBlueLight,
+                                modifier = Modifier.size(16.dp)
                             )
-                        )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "শিক্ষার্থীর পূর্ণ নাম *",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            )
+                        }
                         Spacer(modifier = Modifier.height(6.dp))
                         OutlinedTextField(
                             value = studentName,
                             onValueChange = onNameChange,
-                            placeholder = { Text("যেমন: তানভীর আহমেদ", color = Slate400) },
+                            placeholder = { Text("যেমন: তানভীর আহমেদ", color = Slate400, fontSize = 14.sp) },
                             singleLine = true,
-                            leadingIcon = {
-                                Icon(Icons.Default.Person, contentDescription = null, tint = ElectricBlueLight)
-                            },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = ElectricBlue,
-                                unfocusedBorderColor = Slate600,
+                                unfocusedBorderColor = Slate700,
+                                focusedContainerColor = Slate900,
+                                unfocusedContainerColor = Slate900,
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White
                             ),
@@ -165,22 +266,31 @@ fun CodeGeneratorScreen(
                         )
                     }
 
-                    // Code Field & Random Generator
+                    // Field 2: Custom Code & Quick Generators
                     Column {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "এক্সেস কোড (Access Code) *",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Stars,
+                                    contentDescription = null,
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(16.dp)
                                 )
-                            )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "এক্সেস কোড (Access Key) *",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                )
+                            }
                             Text(
-                                text = "Auto uppercase",
+                                text = "স্বয়ংক্রিয় আপারকেস",
                                 style = MaterialTheme.typography.labelSmall.copy(color = Slate400)
                             )
                         }
@@ -190,19 +300,24 @@ fun CodeGeneratorScreen(
                         OutlinedTextField(
                             value = code,
                             onValueChange = { onCodeChange(it.uppercase()) },
-                            placeholder = { Text("MAX-8921", color = Slate400) },
+                            placeholder = { Text("MAX-8921", color = Slate400, fontFamily = FontFamily.Monospace) },
                             singleLine = true,
-                            leadingIcon = {
-                                Icon(Icons.Default.VpnKey, contentDescription = null, tint = NeonCyan)
-                            },
                             keyboardOptions = KeyboardOptions(
                                 capitalization = KeyboardCapitalization.Characters
                             ),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.5.sp,
+                                color = NeonCyan
+                            ),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = NeonCyan,
-                                unfocusedBorderColor = Slate600,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
+                                unfocusedBorderColor = Slate700,
+                                focusedContainerColor = Slate900,
+                                unfocusedContainerColor = Slate900,
+                                focusedTextColor = NeonCyan,
+                                unfocusedTextColor = NeonCyan
                             ),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
@@ -219,27 +334,34 @@ fun CodeGeneratorScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "র‍্যান্ডম কোড:",
-                                style = MaterialTheme.typography.labelSmall.copy(color = Slate400)
+                                text = "র‍্যান্ডম কী:",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = Slate400,
+                                    fontWeight = FontWeight.Medium
+                                )
                             )
                             listOf("MAX", "VIP", "BIRD").forEach { prefix ->
                                 Surface(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(10.dp))
                                         .clickable { onGenerateRandom(prefix) }
-                                        .border(1.dp, ElectricBlue.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                        .border(
+                                            1.dp,
+                                            ElectricBlue.copy(alpha = 0.4f),
+                                            RoundedCornerShape(10.dp)
+                                        )
                                         .testTag("btn_random_$prefix"),
-                                    color = Slate700
+                                    color = Slate800
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.AutoAwesome,
                                             contentDescription = null,
                                             tint = NeonCyan,
-                                            modifier = Modifier.size(14.dp)
+                                            modifier = Modifier.size(13.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
@@ -256,30 +378,39 @@ fun CodeGeneratorScreen(
                         }
                     }
 
-                    // Max Allowed Devices Stepper
+                    // Field 3: Max Allowed Devices Stepper
                     Column {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "সর্বোচ্চ অনুমোদিত ডিভাইস (Max Devices)",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Devices,
+                                    contentDescription = null,
+                                    tint = PurpleRoyal,
+                                    modifier = Modifier.size(16.dp)
                                 )
-                            )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "সর্বোচ্চ অনুমোদিত ডিভাইস",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                )
+                            }
                             Surface(
-                                color = ElectricBlue.copy(alpha = 0.2f),
+                                color = PurpleRoyal.copy(alpha = 0.18f),
                                 shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.border(1.dp, ElectricBlue, RoundedCornerShape(8.dp))
+                                border = androidx.compose.foundation.BorderStroke(1.dp, PurpleRoyal.copy(alpha = 0.5f))
                             ) {
                                 Text(
                                     text = "$maxDevices Device${if (maxDevices > 1) "s" else ""}",
                                     style = MaterialTheme.typography.labelMedium.copy(
-                                        color = ElectricBlueLight,
-                                        fontWeight = FontWeight.Bold
+                                        color = Violet500,
+                                        fontWeight = FontWeight.ExtraBold
                                     ),
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                 )
@@ -288,7 +419,7 @@ fun CodeGeneratorScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Stepper row with quick 1..5 buttons
+                        // Modern device selector pills (1..5)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -298,21 +429,26 @@ fun CodeGeneratorScreen(
                                 Surface(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(42.dp)
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .height(44.dp)
+                                        .clip(RoundedCornerShape(12.dp))
                                         .clickable { onMaxDevicesChange(count) }
                                         .border(
-                                            1.dp,
+                                            1.2.dp,
                                             if (isSelected) ElectricBlue else Slate700,
-                                            RoundedCornerShape(8.dp)
+                                            RoundedCornerShape(12.dp)
                                         )
                                         .testTag("stepper_device_$count"),
-                                    color = if (isSelected) ElectricBlue else Slate700
+                                    color = if (isSelected) {
+                                        ElectricBlue
+                                    } else {
+                                        Slate800
+                                    }
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Text(
                                             text = "$count",
                                             fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
                                             color = Color.White
                                         )
                                     }
@@ -321,24 +457,35 @@ fun CodeGeneratorScreen(
                         }
                     }
 
-                    // Note / Batch Field
+                    // Field 4: Note / Batch Field
                     Column {
-                        Text(
-                            text = "নোট / ব্যাচ / মেয়াদ (Optional Note)",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.EditNote,
+                                contentDescription = null,
+                                tint = Slate400,
+                                modifier = Modifier.size(16.dp)
                             )
-                        )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "নোট / ব্যাচ / মেয়াদ (ঐচ্ছিক)",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            )
+                        }
                         Spacer(modifier = Modifier.height(6.dp))
                         OutlinedTextField(
                             value = note,
                             onValueChange = onNoteChange,
-                            placeholder = { Text("যেমন: HSC 26 Batch, VIP Access", color = Slate400) },
+                            placeholder = { Text("যেমন: HSC 26 Batch, VIP Student", color = Slate400, fontSize = 13.sp) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = ElectricBlue,
-                                unfocusedBorderColor = Slate600,
+                                unfocusedBorderColor = Slate700,
+                                focusedContainerColor = Slate900,
+                                unfocusedContainerColor = Slate900,
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White
                             ),
@@ -348,21 +495,31 @@ fun CodeGeneratorScreen(
                     }
 
                     if (!errorMessage.isNullOrBlank()) {
-                        Text(
-                            text = errorMessage,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                        Surface(
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                        ) {
+                            Text(
+                                text = errorMessage,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
-                    // Generate & Save Button
+                    // Generate & Save Button (Prominent Action)
                     Button(
                         onClick = onSubmit,
                         enabled = !isGenerating,
-                        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ElectricBlue,
+                            disabledContainerColor = Slate700
+                        ),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp)
@@ -374,66 +531,85 @@ fun CodeGeneratorScreen(
                                 color = Color.White,
                                 strokeWidth = 2.dp
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("সেভ করা হচ্ছে...", fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("সেভ ও ক্লাউডে সিঙ্ক হচ্ছে...", fontWeight = FontWeight.Bold, color = Color.White)
                         } else {
                             Icon(Icons.Default.VpnKey, contentDescription = null, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("কোড তৈরি ও সেভ করুন (Generate & Save)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text("কোড তৈরি ও সেভ করুন", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
                         }
                     }
                 }
             }
         }
 
+        // Informative Tip Card
         item {
-            // Explanatory Tip Box
             Card(
-                colors = CardDefaults.cardColors(containerColor = Slate800.copy(alpha = 0.6f)),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                colors = CardDefaults.cardColors(containerColor = Slate850.copy(alpha = 0.7f)),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Slate700.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
             ) {
                 Row(
                     modifier = Modifier.padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = EmeraldSuccess,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(EmeraldSuccess.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lightbulb,
+                            contentDescription = null,
+                            tint = EmeraldSuccess,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = "কোড তৈরি হওয়ার পর আপনি সরাসরি এক ক্লিকে টেলিগ্রাম অথবা হোয়াটসঅ্যাপে শিক্ষার্থীর কাছে পাঠাতে পারবেন।",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
+                        text = "কোড সফলভাবে তৈরি হওয়ার সাথে সাথেই টেলিগ্রাম বা হোয়াটসঅ্যাপের জন্য তৈরি বার্তা সহ শেয়ার করার সুযোগ পাবেন।",
+                        style = MaterialTheme.typography.bodySmall.copy(color = Slate400, lineHeight = 18.sp)
                     )
                 }
             }
         }
     }
 
-    // Success Dialog with Bangla message sharing template
+    // Success Dialog with modern aesthetics
     if (successCode != null) {
         val shareMessage = "প্রিয় ${successCode.studentName}, MaxBird অ্যাপে আপনার এক্সেস কোড: ${successCode.code}। অ্যাপ ওপেন করে এই কোডটি দিয়ে ডিভাইসটি সক্রিয় করুন।"
 
         AlertDialog(
             onDismissRequest = onDismissSuccess,
-            containerColor = Slate800,
-            shape = RoundedCornerShape(20.dp),
+            containerColor = Slate850,
+            shape = RoundedCornerShape(22.dp),
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = EmeraldSuccess,
-                        modifier = Modifier.size(28.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(EmeraldSuccess.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = EmeraldSuccess,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = "এক্সেস কোড তৈরি সফল!",
                         color = Color.White,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
                     )
                 }
             },
@@ -447,15 +623,15 @@ fun CodeGeneratorScreen(
                         style = MaterialTheme.typography.bodyMedium.copy(color = Slate400)
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    // Big highlight code pill
+                    // Highlight Code Box
                     Surface(
                         color = Slate900,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
-                            .border(2.dp, NeonCyan, RoundedCornerShape(14.dp))
                             .fillMaxWidth()
+                            .border(1.5.dp, NeonCyan, RoundedCornerShape(14.dp))
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
@@ -472,23 +648,28 @@ fun CodeGeneratorScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Max Devices: ${successCode.maxDevices}",
+                                text = "অনুমোদিত ডিভাইস: ${successCode.maxDevices} টি",
                                 style = MaterialTheme.typography.labelSmall.copy(color = Slate400)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    // Ready message preview
+                    // Share preview
                     Surface(
-                        color = Slate700.copy(alpha = 0.5f),
+                        color = Slate900.copy(alpha = 0.6f),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, Slate700, RoundedCornerShape(10.dp))
                     ) {
                         Text(
                             text = shareMessage,
-                            style = MaterialTheme.typography.bodySmall.copy(color = Color.White),
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = Slate200,
+                                lineHeight = 17.sp
+                            ),
                             modifier = Modifier.padding(10.dp)
                         )
                     }
@@ -506,28 +687,28 @@ fun CodeGeneratorScreen(
                         context.startActivity(shareIntent)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.testTag("btn_share_code")
                 ) {
-                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("মেসেজ শেয়ার করুন (WhatsApp / Telegram)", fontWeight = FontWeight.Bold)
+                    Text("হোয়াটসঅ্যাপ/টেলিগ্রামে পাঠান", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             },
             dismissButton = {
                 Button(
                     onClick = {
                         clipboardManager.setText(AnnotatedString(successCode.code))
-                        onShowToast("কোড ${successCode.code} ক্লিপবোর্ডে কপি হয়েছে!")
+                        onShowToast("কোড ${successCode.code} কপি হয়েছে!")
                         onDismissSuccess()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Slate700),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.testTag("btn_copy_code_dialog")
                 ) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("কপি করুন", color = Color.White)
+                    Text("কপি করুন", color = Color.White, fontSize = 13.sp)
                 }
             }
         )

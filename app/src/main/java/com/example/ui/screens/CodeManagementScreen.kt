@@ -1,11 +1,13 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,16 +21,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Block
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -54,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -65,16 +66,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
+import com.example.ui.theme.CardBorderGradientEnd
+import com.example.ui.theme.CardBorderGradientStart
 import com.example.ui.theme.CoralDanger
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricBlueLight
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.NeonCyan
+import com.example.ui.theme.PurpleRoyal
+import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
+import com.example.ui.theme.Slate850
 import com.example.ui.theme.Slate900
+import com.example.ui.theme.Violet500
 
 @Composable
 fun CodeManagementScreen(
@@ -97,118 +104,193 @@ fun CodeManagementScreen(
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
     var codeToDelete by remember { mutableStateOf<AccessCode?>(null) }
 
-    val filteredCodes = codes.filter { item ->
-        val matchesSearch = item.studentName.contains(searchQuery, ignoreCase = true) ||
-                item.code.contains(searchQuery, ignoreCase = true) ||
-                (item.note?.contains(searchQuery, ignoreCase = true) == true)
-        val matchesFilter = when (filter) {
-            "ACTIVE" -> item.isActive
-            "INACTIVE" -> !item.isActive
-            else -> true
+    val filteredCodes = remember(codes, searchQuery, filter) {
+        codes.filter { item ->
+            val matchesSearch = searchQuery.isBlank() ||
+                    item.studentName.contains(searchQuery, ignoreCase = true) ||
+                    item.code.contains(searchQuery, ignoreCase = true) ||
+                    (item.note?.contains(searchQuery, ignoreCase = true) == true)
+
+            val matchesFilter = when (filter) {
+                "ACTIVE" -> item.isActive
+                "INACTIVE" -> !item.isActive
+                else -> true
+            }
+
+            matchesSearch && matchesFilter
         }
-        matchesSearch && matchesFilter
     }
+
+    val activeCount = remember(codes) { codes.count { it.isActive } }
+    val inactiveCount = remember(codes) { codes.count { !it.isActive } }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(Slate900)
-            .padding(16.dp),
+            .background(Slate900),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Header
+        // Modern Header with Status Indicator & Refresh
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.dp,
+                        Brush.horizontalGradient(
+                            listOf(ElectricBlue.copy(alpha = 0.4f), CardBorderGradientEnd)
+                        ),
+                        RoundedCornerShape(20.dp)
+                    )
             ) {
-                Column {
-                    Text(
-                        text = "শিক্ষার্থী ও এক্সেস কোড",
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    )
-                    Text(
-                        text = "মোট ${codes.size} টি কোড • Student Key Management",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = NeonCyan,
-                            fontWeight = FontWeight.Medium
-                        )
-                    )
-                }
-
-                IconButton(
-                    onClick = onRefresh,
+                Box(
                     modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Slate800)
-                        .testTag("btn_refresh_codes")
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = ElectricBlueLight,
-                            strokeWidth = 2.dp
+                        .fillMaxWidth()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(ElectricBlue.copy(alpha = 0.12f), Color.Transparent)
+                            )
                         )
-                    } else {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = NeonCyan)
+                        .padding(18.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Surface(
+                                    color = EmeraldSuccess.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "$activeCount টি সক্রিয়",
+                                        color = EmeraldSuccess,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                    )
+                                }
+                                if (inactiveCount > 0) {
+                                    Surface(
+                                        color = CoralDanger.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "$inactiveCount টি নিষ্ক্রিয়",
+                                            color = CoralDanger,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "শিক্ষার্থী ও এক্সেস কোড",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "মোট ${codes.size} টি কোড • রিমোট নিয়ন্ত্রণ ও ডিভাইস ট্র্যাকিং",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = Slate200.copy(alpha = 0.8f)
+                                )
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onRefresh,
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Slate800)
+                                .testTag("btn_refresh_codes")
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = NeonCyan,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = NeonCyan)
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // Search Bar
+        // Modern Outlined Search Bar
         item {
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = onSearchChange,
-                placeholder = { Text("শিক্ষার্থীর নাম অথবা কোড দিয়ে খুঁজুন...", color = Slate400) },
+                placeholder = { Text("শিক্ষার্থীর নাম, কোড বা নোট দিয়ে খুঁজুন...", color = Slate400, fontSize = 13.sp) },
                 singleLine = true,
                 leadingIcon = {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = Slate400)
+                    Icon(Icons.Default.Search, contentDescription = null, tint = Slate400, modifier = Modifier.size(20.dp))
                 },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
                         IconButton(onClick = { onSearchChange("") }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Slate400)
+                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Slate400, modifier = Modifier.size(18.dp))
                         }
                     }
                 },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = ElectricBlue,
                     unfocusedBorderColor = Slate700,
+                    focusedContainerColor = Slate850,
+                    unfocusedContainerColor = Slate850,
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("search_codes_input")
             )
         }
 
-        // Filter Chips
+        // Filter Chips with badges
         item {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 listOf(
                     "ALL" to "সব কোড (${codes.size})",
-                    "ACTIVE" to "সক্রিয় (${codes.count { it.isActive }})",
-                    "INACTIVE" to "নিষ্ক্রিয় (${codes.count { !it.isActive }})"
+                    "ACTIVE" to "সক্রিয় ($activeCount)",
+                    "INACTIVE" to "নিষ্ক্রিয় ($inactiveCount)"
                 ).forEach { (key, label) ->
                     val isSelected = filter == key
                     FilterChip(
                         selected = isSelected,
                         onClick = { onFilterChange(key) },
-                        label = { Text(label, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                        label = {
+                            Text(
+                                label,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = ElectricBlue,
                             selectedLabelColor = Color.White,
-                            containerColor = Slate800,
+                            containerColor = Slate850,
                             labelColor = Slate400
                         ),
                         border = FilterChipDefaults.filterChipBorder(
@@ -216,7 +298,8 @@ fun CodeManagementScreen(
                             selectedBorderColor = ElectricBlue,
                             enabled = true,
                             selected = isSelected
-                        )
+                        ),
+                        shape = RoundedCornerShape(10.dp)
                     )
                 }
             }
@@ -225,34 +308,44 @@ fun CodeManagementScreen(
         if (filteredCodes.isEmpty()) {
             item {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Slate800),
-                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Slate850),
+                    shape = RoundedCornerShape(18.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 24.dp)
+                        .padding(vertical = 16.dp)
+                        .border(1.dp, Slate700.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(24.dp),
+                            .padding(32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = null,
-                            tint = Slate600,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(Slate800),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = Slate400,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
                         Text(
                             text = "কোনো এক্সেস কোড পাওয়া যায়নি",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 color = Color.White,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.Bold
                             )
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "ভিন্ন নামে খুঁজুন অথবা নতুন কোড তৈরি করুন।",
+                            text = "ভিন্ন নামে খুঁজুন অথবা জেনারেটর থেকে নতুন কোড তৈরি করুন।",
                             style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
                         )
                     }
@@ -274,7 +367,7 @@ fun CodeManagementScreen(
         }
 
         item {
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 
@@ -282,19 +375,39 @@ fun CodeManagementScreen(
     codeToDelete?.let { targetCode ->
         AlertDialog(
             onDismissRequest = { codeToDelete = null },
-            containerColor = Slate800,
-            shape = RoundedCornerShape(16.dp),
+            containerColor = Slate850,
+            shape = RoundedCornerShape(20.dp),
             title = {
-                Text(
-                    text = "কোড মুছে ফেলতে চান?",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(CoralDanger.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.WarningAmber,
+                            contentDescription = null,
+                            tint = CoralDanger,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "কোড মুছে ফেলতে চান?",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
             },
             text = {
                 Text(
-                    text = "${targetCode.studentName}-এর কোড (${targetCode.code}) মুছে ফেললে তার সকল সংযুক্ত ডিভাইস স্বয়ংক্রিয়ভাবে অ্যাক্সেস হারাবে।",
-                    color = Slate400
+                    text = "${targetCode.studentName}-এর কোড (${targetCode.code}) মুছে ফেললে তার সকল সংযুক্ত ডিভাইস স্বয়ংক্রিয়ভাবে অ্যাপ অ্যাক্সেস হারাবে।",
+                    color = Slate200,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
                 )
             },
             confirmButton = {
@@ -306,7 +419,7 @@ fun CodeManagementScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = CoralDanger),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("মুছে ফেলুন (Delete)", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("মুছে ফেলুন", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -325,59 +438,81 @@ fun CodeManagementScreen(
     selectedCodeForDevices?.let { code ->
         AlertDialog(
             onDismissRequest = onCloseLinkedDevices,
-            containerColor = Slate800,
-            shape = RoundedCornerShape(18.dp),
+            containerColor = Slate850,
+            shape = RoundedCornerShape(20.dp),
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Devices,
-                        contentDescription = null,
-                        tint = NeonCyan,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(NeonCyan.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Devices,
+                            contentDescription = null,
+                            tint = NeonCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = "সংযুক্ত ডিভাইসসমূহ",
                         color = Color.White,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
                     )
                 }
             },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "${code.studentName} (${code.code})",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            color = NeonCyan,
-                            fontWeight = FontWeight.SemiBold
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${code.studentName} (${code.code})",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = NeonCyan,
+                                fontWeight = FontWeight.Bold
+                            )
                         )
-                    )
-                    Text(
-                        text = "অনুমোদিত সর্বোচ্চ ডিভাইস: ${code.maxDevices}",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
-                    )
+                        Surface(
+                            color = Slate800,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "সর্বোচ্চ: ${code.maxDevices} টি",
+                                color = Slate400,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     if (isLoadingLinkedDevices) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(100.dp),
+                                .height(120.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             CircularProgressIndicator(color = NeonCyan, strokeWidth = 2.dp)
                         }
                     } else if (linkedDevices.isEmpty()) {
                         Surface(
-                            color = Slate700.copy(alpha = 0.5f),
-                            shape = RoundedCornerShape(10.dp),
+                            color = Slate900,
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "এই কোডে এখনো কোনো ডিভাইস সক্রিয় করা হয়নি।",
+                                text = "এই কোডে এখনো কোনো শিক্ষার্থী ডিভাইস সক্রিয় করেনি।",
                                 style = MaterialTheme.typography.bodySmall.copy(color = Slate400),
-                                modifier = Modifier.padding(14.dp)
+                                modifier = Modifier.padding(16.dp)
                             )
                         }
                     } else {
@@ -385,16 +520,16 @@ fun CodeManagementScreen(
                             linkedDevices.forEach { dev ->
                                 Surface(
                                     color = Slate900,
-                                    shape = RoundedCornerShape(10.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .border(
                                             1.dp,
                                             if (dev.isBlocked) CoralDanger else Slate700,
-                                            RoundedCornerShape(10.dp)
+                                            RoundedCornerShape(12.dp)
                                         )
                                 ) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -412,7 +547,7 @@ fun CodeManagementScreen(
                                                 shape = RoundedCornerShape(6.dp)
                                             ) {
                                                 Text(
-                                                    text = if (dev.isBlocked) "ব্লকড (Killed)" else "সক্রিয় (Active)",
+                                                    text = if (dev.isBlocked) "ব্লকড" else "সক্রিয়",
                                                     color = if (dev.isBlocked) CoralDanger else EmeraldSuccess,
                                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -458,17 +593,21 @@ private fun StudentCodeCard(
     onViewDevices: () -> Unit
 ) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = Slate800),
-        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Slate850),
+        shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
             .border(
                 1.dp,
-                if (code.isActive) Slate700 else CoralDanger.copy(alpha = 0.4f),
-                RoundedCornerShape(14.dp)
+                if (code.isActive) {
+                    Brush.linearGradient(listOf(CardBorderGradientStart, CardBorderGradientEnd))
+                } else {
+                    Brush.linearGradient(listOf(CoralDanger.copy(alpha = 0.4f), Color.Transparent))
+                },
+                RoundedCornerShape(16.dp)
             )
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             // Header Row: Student Name + Active Switch
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -505,7 +644,7 @@ private fun StudentCodeCard(
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Code Badge & Copy
             Row(
@@ -515,25 +654,25 @@ private fun StudentCodeCard(
             ) {
                 Surface(
                     color = Slate900,
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .clickable { onCopyCode() }
-                        .border(1.dp, ElectricBlue.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        .border(1.dp, ElectricBlue.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = code.code,
                             style = MaterialTheme.typography.titleSmall.copy(
                                 color = NeonCyan,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.ExtraBold,
                                 fontFamily = FontFamily.Monospace,
-                                letterSpacing = 1.sp
+                                letterSpacing = 1.2.sp
                             )
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Icon(
                             imageVector = Icons.Default.ContentCopy,
                             contentDescription = "Copy",
@@ -544,14 +683,15 @@ private fun StudentCodeCard(
                 }
 
                 Surface(
-                    color = Slate700,
-                    shape = RoundedCornerShape(6.dp)
+                    color = PurpleRoyal.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, PurpleRoyal.copy(alpha = 0.4f))
                 ) {
                     Text(
-                        text = "Max Devices: ${code.maxDevices}",
+                        text = "ডিভাইস সীমা: ${code.maxDevices}",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = Slate400,
-                            fontWeight = FontWeight.Medium
+                            color = Violet500,
+                            fontWeight = FontWeight.Bold
                         ),
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
@@ -562,11 +702,11 @@ private fun StudentCodeCard(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "নোট: ${code.note}",
-                    style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
+                    style = MaterialTheme.typography.bodySmall.copy(color = Slate400, fontSize = 12.sp)
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Action Buttons Row: View Linked Devices + Delete
             Row(
@@ -576,9 +716,11 @@ private fun StudentCodeCard(
             ) {
                 Button(
                     onClick = onViewDevices,
-                    colors = ButtonDefaults.buttonColors(containerColor = Slate700),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.testTag("btn_view_devices_${code.code}")
+                    colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .border(1.dp, Slate700, RoundedCornerShape(10.dp))
+                        .testTag("btn_view_devices_${code.code}")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Devices,
@@ -594,8 +736,9 @@ private fun StudentCodeCard(
                     onClick = onDeleteClick,
                     modifier = Modifier
                         .clip(CircleShape)
-                        .background(Slate700.copy(alpha = 0.6f))
-                        .size(36.dp)
+                        .background(Slate800)
+                        .size(38.dp)
+                        .border(1.dp, CoralDanger.copy(alpha = 0.3f), CircleShape)
                         .testTag("btn_delete_${code.code}")
                 ) {
                     Icon(

@@ -18,22 +18,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.HeadsetMic
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +43,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -71,8 +72,10 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.UpdatesManagementScreen
 
 import com.example.ui.theme.ElectricBlue
+import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NeonCyan
+import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
@@ -118,8 +121,11 @@ class MainActivity : ComponentActivity() {
                     contentWindowInsets = WindowInsets.safeDrawing,
                     snackbarHost = { SnackbarHost(snackbarHostState) },
                     topBar = {
+                        val isLoadingStats by viewModel.isLoadingStats.collectAsStateWithLifecycle()
                         AdminTopHeaderBar(
                             currentScreen = currentScreen,
+                            isLoading = isLoadingStats,
+                            onRefresh = { viewModel.refreshStats() },
                             onNavigate = { screen -> viewModel.navigateTo(screen) }
                         )
                     },
@@ -436,161 +442,181 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AdminTopHeaderBar(
     currentScreen: Screen,
+    isLoading: Boolean,
+    onRefresh: () -> Unit,
     onNavigate: (Screen) -> Unit
 ) {
-    androidx.compose.foundation.layout.Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Slate950)
-            .padding(top = 4.dp, bottom = 6.dp)
+    Surface(
+        color = Slate950,
+        tonalElevation = 6.dp,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        androidx.compose.foundation.layout.Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
-            androidx.compose.foundation.layout.Row(
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                        .background(ElectricBlue),
-                    contentAlignment = androidx.compose.ui.Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Default.Security,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.width(10.dp))
-                androidx.compose.foundation.layout.Column {
-                    Text(
-                        text = "MAXBIRD ADMIN",
-                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                            letterSpacing = 0.5.sp
-                        )
-                    )
-                    Text(
-                        text = "এখন আছেন: ${currentScreen.titleBn} (${currentScreen.titleEn})",
-                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(
-                            color = NeonCyan,
-                            fontWeight = FontWeight.Medium
-                        )
-                    )
-                }
-            }
+                if (currentScreen == Screen.Dashboard) {
+                    // Executive Dashboard Branding
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(ElectricBlue),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Security,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
 
-            // Direct shortcut to Notice or Update or Home
-            androidx.compose.foundation.layout.Row(
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)
-            ) {
-                androidx.compose.material3.IconButton(
-                    onClick = { onNavigate(Screen.Notices) },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(if (currentScreen == Screen.Notices) ElectricBlue else Slate800)
-                ) {
-                    Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Default.Campaign,
-                        contentDescription = "Notices",
-                        tint = if (currentScreen == Screen.Notices) Color.White else NeonCyan,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "MAXBIRD ADMIN",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color.White,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(EmeraldSuccess)
+                                )
+                            }
+                            Text(
+                                text = "কন্ট্রোল প্যানেল • অনলাইন",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = NeonCyan,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                    }
 
-                androidx.compose.material3.IconButton(
-                    onClick = { onNavigate(Screen.SupportLinks) },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(if (currentScreen == Screen.SupportLinks) ElectricBlue else Slate800)
-                ) {
-                    Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Default.HeadsetMic,
-                        contentDescription = "Support Links",
-                        tint = if (currentScreen == Screen.SupportLinks) Color.White else NeonCyan,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+                    // Dashboard Actions: Refresh & Settings
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = onRefresh,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Slate800)
+                                .testTag("top_btn_refresh")
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = NeonCyan
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh",
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
 
-                androidx.compose.material3.IconButton(
-                    onClick = { onNavigate(Screen.Updates) },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(if (currentScreen == Screen.Updates) ElectricBlue else Slate800)
-                ) {
-                    Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Default.SystemUpdate,
-                        contentDescription = "Updates",
-                        tint = if (currentScreen == Screen.Updates) Color.White else NeonCyan,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
+                        IconButton(
+                            onClick = { onNavigate(Screen.Settings) },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Slate800)
+                                .testTag("top_btn_settings")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = Slate200,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                } else {
+                    // Sub-screen Navigation Header with prominent Back Button
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        IconButton(
+                            onClick = { onNavigate(Screen.Dashboard) },
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Slate800)
+                                .testTag("top_btn_back_home")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back to Dashboard",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
 
-        // Quick Navigation Tabs Row across the top
-        androidx.compose.foundation.lazy.LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
-        ) {
-            val allScreens = listOf(
-                Screen.Dashboard,
-                Screen.CloudinaryMedia,
-                Screen.SupportLinks,
-                Screen.Notices,
-                Screen.Updates,
-                Screen.Generator,
-                Screen.Codes,
-                Screen.Devices,
-                Screen.Settings
-            )
-            items(allScreens) { screen ->
-                val isSelected = currentScreen == screen
-                androidx.compose.material3.FilterChip(
-                    selected = isSelected,
-                    onClick = { onNavigate(screen) },
-                    label = {
-                        Text(
-                            text = screen.titleBn,
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                        )
-                    },
-                    leadingIcon = {
+                        Column {
+                            Text(
+                                text = currentScreen.titleBn,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            )
+                            Text(
+                                text = currentScreen.titleEn,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = NeonCyan,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                    }
+
+                    // Direct Home icon
+                    IconButton(
+                        onClick = { onNavigate(Screen.Dashboard) },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Slate800)
+                            .testTag("top_btn_home_shortcut")
+                    ) {
                         Icon(
-                            imageVector = if (isSelected) screen.selectedIcon else screen.unselectedIcon,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
+                            imageVector = Icons.Default.Home,
+                            contentDescription = "Home",
+                            tint = Slate400,
+                            modifier = Modifier.size(20.dp)
                         )
-                    },
-                    colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
-                        containerColor = Slate800,
-                        labelColor = Slate400,
-                        iconColor = Slate400,
-                        selectedContainerColor = ElectricBlue,
-                        selectedLabelColor = Color.White,
-                        selectedLeadingIconColor = Color.White
-                    ),
-                    border = androidx.compose.material3.FilterChipDefaults.filterChipBorder(
-                        enabled = true,
-                        selected = isSelected,
-                        borderColor = if (isSelected) ElectricBlue else Slate700,
-                        selectedBorderColor = NeonCyan
-                    )
-                )
+                    }
+                }
             }
         }
     }
@@ -602,27 +628,29 @@ private fun AdminBottomNavigationBar(
     onNavigate: (Screen) -> Unit
 ) {
     NavigationBar(
-        containerColor = Slate800,
+        containerColor = Slate950,
         tonalElevation = 8.dp,
-        modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
+        modifier = Modifier.navigationBarsPadding()
     ) {
-        val items = Screen.bottomNavItems.filterNotNull()
+        val items = Screen.bottomNavItems
         items.forEach { screen ->
-            val isSelected = currentScreen == screen
+            val isSelected = currentScreen == screen || (screen == Screen.Codes && currentScreen == Screen.Generator)
             NavigationBarItem(
                 selected = isSelected,
                 onClick = { onNavigate(screen) },
                 icon = {
                     Icon(
                         imageVector = if (isSelected) screen.selectedIcon else screen.unselectedIcon,
-                        contentDescription = screen.titleEn
+                        contentDescription = screen.titleEn,
+                        modifier = Modifier.size(22.dp)
                     )
                 },
                 label = {
                     Text(
-                        text = screen.titleBn,
+                        text = screen.navBarLabel,
                         fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1
                     )
                 },
                 colors = NavigationBarItemDefaults.colors(

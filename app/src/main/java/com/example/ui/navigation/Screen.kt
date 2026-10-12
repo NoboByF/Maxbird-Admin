@@ -100,10 +100,23 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Settings
     )
 
+    val navBarLabel: String
+        get() = when (this) {
+            Dashboard -> "হোম"
+            Codes -> "কোডসমূহ"
+            CloudinaryMedia -> "মিডিয়া"
+            Devices -> "ডিভাইস"
+            Settings -> "সেটিংস"
+            Generator -> "নতুন কোড"
+            Notices -> "নোটিশ"
+            Updates -> "আপডেট"
+            SupportLinks -> "সাপোর্ট"
+        }
+
     companion object {
-        // Use custom getter to prevent Kotlin static initialization circular dependency null-reference
+        // Core 5 primary destinations for clean, spacious Material 3 NavigationBar
         val bottomNavItems: List<Screen>
-            get() = listOf(Dashboard, CloudinaryMedia, Notices, SupportLinks, Updates, Codes, Devices, Settings)
+            get() = listOf(Dashboard, Codes, CloudinaryMedia, Devices, Settings)
     }
 }
 
