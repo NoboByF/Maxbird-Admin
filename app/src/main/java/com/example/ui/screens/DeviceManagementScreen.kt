@@ -235,7 +235,7 @@ fun DeviceManagementScreen(
                         )
                     }
                     Text(
-                        text = "Supabase `public.devices` টেলিমেট্রি ও ব্যান কন্ট্রোল",
+                        text = "ডিভাইস টেলিমেট্রি, শিখো অ্যাকাউন্ট লক ও ব্যান কন্ট্রোল",
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = NeonCyan,
                             fontWeight = FontWeight.Medium
@@ -307,7 +307,7 @@ fun DeviceManagementScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Supabase লাইভ ডিভাইস টেলিমেট্রি",
+                                text = "লাইভ ডিভাইস ওভারভিউ",
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     color = EmeraldSuccess,
                                     fontWeight = FontWeight.Bold
@@ -321,11 +321,10 @@ fun DeviceManagementScreen(
                             border = androidx.compose.foundation.BorderStroke(0.5.dp, Slate700)
                         ) {
                             Text(
-                                text = "TABLE: public.devices",
+                                text = "অনলাইন সিঙ্ক",
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = Slate400,
-                                    fontFamily = FontFamily.Monospace,
+                                    color = NeonCyan,
                                     fontSize = 10.sp
                                 )
                             )

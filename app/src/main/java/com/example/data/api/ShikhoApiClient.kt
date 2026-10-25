@@ -15,12 +15,22 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
+ * Result wrapper for syllabus sync + program fetch so the caller can also persist
+ * the updated JWT `access_token` returned by `ChangeSyllabus`.
+ */
+data class ShikhoProgramsFetchResult(
+    val programs: List<ShikhoAcademicProgram>,
+    val updatedAccessToken: String,
+    val updatedRefreshToken: String? = null
+)
+
+/**
  * Official Shikho Server API Client (`https://api.shikho.com`)
  * Implements:
  * 1. PIN-based Direct Login (`POST https://api.shikho.com/auth/v2/login`)
  * 2. Real Syllabus Class List (`GET https://api.shikho.com/class_list?vendor=BD&type=syllabus`)
- * 3. Real BatchOptions GraphQL (`POST https://api.shikho.com/graphql`)
- * 4. Real GetAcademicProgram GraphQL (`POST https://api.shikho.com/graphql`)
+ * 3. Real BatchOptions GraphQL (`POST https://api.shikho.com/graphql` with `classCode` & `options`)
+ * 4. Real Syllabus Switching (`ChangeSyllabus` + `UpdateExamYear`) & `GetAcademicProgram` GraphQL
  */
 class ShikhoApiClient {
 
@@ -33,6 +43,7 @@ class ShikhoApiClient {
 
         val ALLOWED_CLASS_CODES = setOf("C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12")
         val GROUP_REQUIRED_CLASSES = setOf("C9", "C10", "C11", "C12")
+        val NON_GROUP_CLASSES = setOf("C5", "C6", "C7", "C8")
 
         val CLASS_BENGALI_NAMES = mapOf(
             "C5" to "পঞ্চম শ্রেণি",
@@ -57,7 +68,73 @@ class ShikhoApiClient {
         )
 
         /**
-         * Formats phone number according to rule 1.1:
+         * Normalizes group code from student telemetry or saved values:
+         * e.g. "SCI" -> "Science", "HUM" -> "Humanities", "BUS" / "COM" -> "BusinessStudies"
+         */
+        fun normalizeGroupCode(rawGroup: String?, classCode: String): String {
+            val cleanClass = classCode.trim().uppercase()
+            if (cleanClass in NON_GROUP_CLASSES) return "None"
+            val g = rawGroup?.trim().orEmpty()
+            return when (g.uppercase()) {
+                "SCI", "SCIENCE", "বিজ্ঞান" -> "Science"
+                "HUM", "HUMANITIES", "ARTS", "মানবিক" -> "Humanities"
+                "BUS", "BUSINESS", "BUSINESSSTUDIES", "BUSINESS_STUDIES", "COM", "COMMERCE", "ব্যবসায় শিক্ষা" -> "BusinessStudies"
+                else -> if (g in setOf("Science", "Humanities", "BusinessStudies")) g else "Science"
+            }
+        }
+
+        /**
+         * Normalizes a batch string (e.g. "HSC 2027", "SSC 2026", "Batch 2028") into a 4-digit year ("2027").
+         */
+        fun extractBatchYear(rawBatch: String?): String {
+            val clean = rawBatch?.trim().orEmpty()
+            if (clean.isBlank()) return ""
+            val match = Regex("(20\\d{2})").find(clean)
+            return match?.value ?: clean.replace(Regex("^(SSC|HSC|Batch)\\s*", RegexOption.IGNORE_CASE), "").trim()
+        }
+
+        /**
+         * Formats label for a given classCode and year (for fallback/extra batch years).
+         */
+        fun buildBatchLabel(classCode: String, year: String): String {
+            val cleanYear = extractBatchYear(year).ifBlank { year.trim() }
+            return when (classCode.trim().uppercase()) {
+                "C9", "C10" -> "SSC $cleanYear"
+                "C11", "C12" -> "HSC $cleanYear"
+                else -> "Batch $cleanYear"
+            }
+        }
+
+        /**
+         * Guarantees that 2026, 2027, 2028 are always included in the batch options list
+         * alongside whatever options came from the server.
+         */
+        fun mergeWithFallbackBatchYears(
+            apiOptions: List<ShikhoBatchExamYear>,
+            classCode: String
+        ): List<ShikhoBatchExamYear> {
+            val map = LinkedHashMap<String, ShikhoBatchExamYear>()
+            for (item in apiOptions) {
+                val yr = extractBatchYear(item.year).ifBlank { item.year.trim() }
+                if (yr.isNotBlank()) {
+                    val lbl = item.label.trim().ifBlank { buildBatchLabel(classCode, yr) }
+                    map[yr] = ShikhoBatchExamYear(year = yr, label = lbl)
+                }
+            }
+            val guaranteedYears = listOf("2026", "2027", "2028")
+            for (yr in guaranteedYears) {
+                if (!map.containsKey(yr)) {
+                    map[yr] = ShikhoBatchExamYear(
+                        year = yr,
+                        label = buildBatchLabel(classCode, yr)
+                    )
+                }
+            }
+            return map.values.sortedBy { it.year }
+        }
+
+        /**
+         * Formats phone number:
          * If input is `017xxxxxxxx` (11 digits), prepends `88` -> `88017xxxxxxxx` (13 digits).
          */
         fun formatPhoneNumber(rawInput: String): String {
@@ -71,25 +148,18 @@ class ShikhoApiClient {
         }
 
         /**
-         * Builds `batch_id` according to Part 3 Step 4 rules:
+         * Builds `batch_id` for `GetAcademicProgram`:
          * - If className is "C11" or "C12" and year is "2027" -> "HSC 2027"
          * - If className is "C9" or "C10" and year is "2028" -> "SSC 2028"
          * - If C5–C8 -> year (e.g. "2026")
          */
         fun buildBatchId(className: String, year: String): String {
-            val cleanYear = year.trim()
+            val cleanYear = extractBatchYear(year)
             if (cleanYear.isBlank()) return ""
             return when (className.uppercase().trim()) {
-                "C11", "C12" -> {
-                    if (cleanYear.uppercase().startsWith("HSC")) cleanYear else "HSC $cleanYear"
-                }
-                "C9", "C10" -> {
-                    if (cleanYear.uppercase().startsWith("SSC")) cleanYear else "SSC $cleanYear"
-                }
-                else -> {
-                    // C5 to C8 -> only year (strip SSC/HSC if accidentally present)
-                    cleanYear.replace(Regex("^(SSC|HSC)\\s*", RegexOption.IGNORE_CASE), "").trim()
-                }
+                "C11", "C12" -> "HSC $cleanYear"
+                "C9", "C10" -> "SSC $cleanYear"
+                else -> cleanYear
             }
         }
     }
@@ -282,18 +352,20 @@ class ShikhoApiClient {
         }
 
     /**
-     * Part 3 - Step 3: Real BatchOptions GraphQL API
-     * `POST https://api.shikho.com/graphql`
+     * BUG 1 FIX: Official `BatchOptions` GraphQL Query
+     * Uses variable `$classCode: ClassEnumCommon` and response field `options { year label }`,
+     * and merges with guaranteed fallback years (2026, 2027, 2028) so batch options are never empty.
      */
     suspend fun fetchBatchOptions(
         accessToken: String,
         classCode: String
     ): Result<List<ShikhoBatchExamYear>> = withContext(Dispatchers.IO) {
+        val normalizedClass = classCode.trim().uppercase()
         try {
             val cleanToken = accessToken.trim()
             if (cleanToken.isBlank()) {
-                return@withContext Result.failure(
-                    IllegalStateException("শিখো অ্যাকাউন্ট লগইন করা নেই।")
+                return@withContext Result.success(
+                    mergeWithFallbackBatchYears(emptyList(), normalizedClass)
                 )
             }
 
@@ -301,10 +373,10 @@ class ShikhoApiClient {
                 put("operationName", "BatchOptions")
                 put(
                     "query",
-                    "query BatchOptions(\$class: ClassEnumCommon!) { batchOptions(class: \$class) { exam_years { year label } } }"
+                    "query BatchOptions(\$classCode: ClassEnumCommon) { batchOptions(classCode: \$classCode) { classCode date options { year label } } }"
                 )
                 put("variables", JSONObject().apply {
-                    put("class", classCode.trim().uppercase())
+                    put("classCode", normalizedClass)
                 })
             }
 
@@ -321,157 +393,351 @@ class ShikhoApiClient {
             okHttpClient.newCall(request).execute().use { response ->
                 val bodyStr = response.body?.string().orEmpty()
                 if (!response.isSuccessful || bodyStr.isBlank()) {
-                    return@withContext Result.failure(
-                        Exception("ব্যাচ অপশন লোড করতে ব্যর্থ (HTTP ${response.code})")
+                    return@withContext Result.success(
+                        mergeWithFallbackBatchYears(emptyList(), normalizedClass)
                     )
                 }
 
                 val root = JSONObject(bodyStr)
-                val errors = root.optJSONArray("errors")
-                if (errors != null && errors.length() > 0 && root.optJSONObject("data") == null) {
-                    val firstErr = errors.optJSONObject(0)?.optString("message") ?: "GraphQL Error"
-                    return@withContext Result.failure(Exception(firstErr))
-                }
-
-                val examYearsArr = root
+                val batchOptionsObj = root
                     .optJSONObject("data")
                     ?.optJSONObject("batchOptions")
-                    ?.optJSONArray("exam_years")
+
+                val optionsArr = batchOptionsObj?.optJSONArray("options")
+                    ?: batchOptionsObj?.optJSONArray("exam_years")
                     ?: JSONArray()
 
-                val examYears = mutableListOf<ShikhoBatchExamYear>()
-                for (i in 0 until examYearsArr.length()) {
-                    val obj = examYearsArr.optJSONObject(i) ?: continue
-                    val year = obj.optString("year").trim()
-                    val label = obj.optString("label").trim().ifBlank { year }
+                val parsedOptions = mutableListOf<ShikhoBatchExamYear>()
+                for (i in 0 until optionsArr.length()) {
+                    val obj = optionsArr.optJSONObject(i) ?: continue
+                    val year = obj.opt("year")?.toString()?.trim().orEmpty()
+                    val label = obj.optString("label").trim().ifBlank {
+                        buildBatchLabel(normalizedClass, year)
+                    }
                     if (year.isNotBlank()) {
-                        examYears.add(ShikhoBatchExamYear(year = year, label = label))
+                        parsedOptions.add(ShikhoBatchExamYear(year = year, label = label))
                     }
                 }
 
-                Result.success(examYears.distinctBy { it.year })
+                Result.success(mergeWithFallbackBatchYears(parsedOptions, normalizedClass))
             }
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (_: Exception) {
+            Result.success(mergeWithFallbackBatchYears(emptyList(), normalizedClass))
         }
     }
 
     /**
-     * Part 3 - Step 4: Real GetAcademicProgram GraphQL API
-     * `POST https://api.shikho.com/graphql`
+     * BUG 2 FIX - Step A:
+     * Calls `mutation ChangeSyllabus` when class or study_group changes, and returns the
+     * newly issued JWT `access_token` (which embeds the new class & group in Shikho's backend).
+     * Warning: If class is C5, C6, C7, or C8, `study_group` MUST NOT be sent in `variables`.
+     */
+    suspend fun changeSyllabus(
+        accessToken: String,
+        classCode: String,
+        studyGroup: String?
+    ): Result<Pair<String, String?>> = withContext(Dispatchers.IO) {
+        try {
+            val cleanToken = accessToken.trim()
+            val normalizedClass = classCode.trim().uppercase()
+            val variablesObj = JSONObject().apply {
+                put("userclass", normalizedClass)
+                if (normalizedClass in GROUP_REQUIRED_CLASSES) {
+                    val normalizedGroup = normalizeGroupCode(studyGroup, normalizedClass)
+                    put("study_group", normalizedGroup)
+                }
+            }
+
+            val payload = JSONObject().apply {
+                put("operationName", "ChangeSyllabus")
+                put(
+                    "query",
+                    "mutation ChangeSyllabus(\$study_group: StudyGroupTypeEnum, \$userclass: ClassEnumCommon) { changeSyllabus(study_group: \$study_group, class: \$userclass) { access_token id_token refresh_token } }"
+                )
+                put("variables", variablesObj)
+            }
+
+            val request = Request.Builder()
+                .url("$BASE_URL/graphql")
+                .post(payload.toString().toRequestBody(jsonMediaType))
+                .header("Authorization", "Bearer $cleanToken")
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .header("x-vendor", VENDOR_BD)
+                .header("User-Agent", USER_AGENT)
+                .build()
+
+            okHttpClient.newCall(request).execute().use { response ->
+                val bodyStr = response.body?.string().orEmpty()
+                if (!response.isSuccessful || bodyStr.isBlank()) {
+                    return@withContext Result.success(cleanToken to null)
+                }
+                val root = JSONObject(bodyStr)
+                val changeObj = root.optJSONObject("data")?.optJSONObject("changeSyllabus")
+                val newAccessToken = changeObj?.optString("access_token")?.trim().orEmpty()
+                val newRefreshToken = changeObj?.optString("refresh_token")?.trim()?.takeIf { it.isNotBlank() }
+                if (newAccessToken.isNotBlank()) {
+                    Result.success(newAccessToken to newRefreshToken)
+                } else {
+                    Result.success(cleanToken to null)
+                }
+            }
+        } catch (_: Exception) {
+            Result.success(accessToken.trim() to null)
+        }
+    }
+
+    /**
+     * BUG 2 FIX - Step B:
+     * Calls `mutation UpdateExamYear` using the new `access_token` from `ChangeSyllabus`.
+     */
+    suspend fun updateExamYear(
+        accessToken: String,
+        passingYear: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val cleanToken = accessToken.trim()
+            val cleanYear = extractBatchYear(passingYear)
+            if (cleanToken.isBlank() || cleanYear.isBlank()) {
+                return@withContext Result.success(Unit)
+            }
+
+            val payload = JSONObject().apply {
+                put("operationName", "UpdateExamYear")
+                put(
+                    "query",
+                    "mutation UpdateExamYear(\$passing_year: String, \$type: PrimaryUserTypeEnum!) { updateProfile(passing_year: \$passing_year, type: \$type) { passing_year } }"
+                )
+                put("variables", JSONObject().apply {
+                    put("passing_year", cleanYear)
+                    put("type", "student")
+                })
+            }
+
+            val request = Request.Builder()
+                .url("$BASE_URL/graphql")
+                .post(payload.toString().toRequestBody(jsonMediaType))
+                .header("Authorization", "Bearer $cleanToken")
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .header("x-vendor", VENDOR_BD)
+                .header("User-Agent", USER_AGENT)
+                .build()
+
+            okHttpClient.newCall(request).execute().use {
+                Result.success(Unit)
+            }
+        } catch (_: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    /**
+     * BUG 2 FIX - Step A + Step B + Step C:
+     * 1. Calls `ChangeSyllabus` to switch class & group and obtain the new JWT `access_token`.
+     * 2. Calls `UpdateExamYear` with the selected passing year and the new token.
+     * 3. Calls `GetAcademicProgram` with the new token and `batch_id`.
+     * 4. If no courses are found for that `batch_id` (or `other_programs` is empty), automatically
+     *    retries `GetAcademicProgram` with `batch_id: null`.
+     * 5. Strictly filters the combined courses by `course.classes` matching `className` so
+     *    courses from another class (e.g. HSC '26 when C10 is selected) never appear!
      */
     suspend fun fetchAcademicPrograms(
         accessToken: String,
         className: String,
         group: String,
         year: String
-    ): Result<List<ShikhoAcademicProgram>> = withContext(Dispatchers.IO) {
+    ): Result<ShikhoProgramsFetchResult> = withContext(Dispatchers.IO) {
         try {
-            val cleanToken = accessToken.trim()
-            if (cleanToken.isBlank()) {
+            val initialToken = accessToken.trim()
+            if (initialToken.isBlank()) {
                 return@withContext Result.failure(
                     IllegalStateException("শিখো অ্যাকাউন্ট লগইন করা নেই।")
                 )
             }
 
             val normalizedClass = className.trim().uppercase()
-            val effectiveGroup = if (normalizedClass in GROUP_REQUIRED_CLASSES) {
-                group.trim().ifBlank { "Science" }
+            val effectiveGroup = normalizeGroupCode(group, normalizedClass)
+            val cleanYear = extractBatchYear(year)
+            val batchId = buildBatchId(normalizedClass, cleanYear)
+
+            // Step A: ChangeSyllabus -> obtain updated JWT access_token
+            val syllabusResult = changeSyllabus(
+                accessToken = initialToken,
+                classCode = normalizedClass,
+                studyGroup = if (normalizedClass in GROUP_REQUIRED_CLASSES) effectiveGroup else null
+            )
+            val (activeToken, updatedRefreshToken) = syllabusResult.getOrDefault(initialToken to null)
+
+            // Step B: UpdateExamYear -> update passing_year on profile with the new token
+            if (cleanYear.isNotBlank()) {
+                updateExamYear(accessToken = activeToken, passingYear = cleanYear)
+            }
+
+            // Step C: Execute GetAcademicProgram
+            val firstAttempt = executeGetAcademicProgramQuery(
+                accessToken = activeToken,
+                normalizedClass = normalizedClass,
+                effectiveGroup = effectiveGroup,
+                batchId = batchId.takeIf { it.isNotBlank() }
+            )
+
+            val firstPrograms = firstAttempt.getOrNull()
+            val hasNonEnrolledOrMatching = firstPrograms != null &&
+                    firstPrograms.isNotEmpty() &&
+                    firstPrograms.any { !it.isEnrolledProgram }
+
+            val finalPrograms = if (hasNonEnrolledOrMatching) {
+                firstPrograms!!
             } else {
-                "None"
-            }
-            val batchId = buildBatchId(normalizedClass, year)
-
-            val payload = JSONObject().apply {
-                put("operationName", "GetAcademicProgram")
-                put(
-                    "query",
-                    "query GetAcademicProgram(\$batch_id: String, \$className: AcademicProgramClassEnum, \$group: StudyGroupTypeEnum, \$vendor: VendorEnum) { listAcademicProgramByEnrollment(batch_id: \$batch_id, class: \$className, group: \$group, vendor: \$vendor) { enrolled_programs { id classes title_bn banner_url is_free } other_programs { id classes title_bn banner_url is_free } } }"
+                // Fallback: call GetAcademicProgram a second time with batch_id: null
+                val fallbackAttempt = executeGetAcademicProgramQuery(
+                    accessToken = activeToken,
+                    normalizedClass = normalizedClass,
+                    effectiveGroup = effectiveGroup,
+                    batchId = null
                 )
-                put("variables", JSONObject().apply {
-                    put("batch_id", batchId)
-                    put("className", normalizedClass)
-                    put("group", effectiveGroup)
-                    put("vendor", VENDOR_BD)
-                })
-            }
-
-            val request = Request.Builder()
-                .url("$BASE_URL/graphql")
-                .post(payload.toString().toRequestBody(jsonMediaType))
-                .header("Authorization", "Bearer $cleanToken")
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .header("x-vendor", VENDOR_BD)
-                .header("User-Agent", USER_AGENT)
-                .build()
-
-            okHttpClient.newCall(request).execute().use { response ->
-                val bodyStr = response.body?.string().orEmpty()
-                if (!response.isSuccessful || bodyStr.isBlank()) {
+                val fallbackPrograms = fallbackAttempt.getOrNull().orEmpty()
+                if (fallbackPrograms.isNotEmpty()) {
+                    // Merge firstPrograms + fallbackPrograms deduplicated by ID
+                    val merged = LinkedHashMap<String, ShikhoAcademicProgram>()
+                    firstPrograms.orEmpty().forEach { merged[it.id] = it }
+                    fallbackPrograms.forEach { if (!merged.containsKey(it.id)) merged[it.id] = it }
+                    merged.values.toList()
+                } else if (firstPrograms != null) {
+                    firstPrograms
+                } else {
                     return@withContext Result.failure(
-                        Exception("কোর্সের তালিকা লোড করতে ব্যর্থ (HTTP ${response.code})")
+                        firstAttempt.exceptionOrNull()
+                            ?: fallbackAttempt.exceptionOrNull()
+                            ?: Exception("কোর্সের তালিকা লোড করতে ব্যর্থ")
                     )
                 }
-
-                val root = JSONObject(bodyStr)
-                val errors = root.optJSONArray("errors")
-                if (errors != null && errors.length() > 0 && root.optJSONObject("data") == null) {
-                    val firstErr = errors.optJSONObject(0)?.optString("message") ?: "GraphQL Error"
-                    return@withContext Result.failure(Exception(firstErr))
-                }
-
-                val container = root
-                    .optJSONObject("data")
-                    ?.optJSONObject("listAcademicProgramByEnrollment")
-
-                val enrolledArr = container?.optJSONArray("enrolled_programs") ?: JSONArray()
-                val otherArr = container?.optJSONArray("other_programs") ?: JSONArray()
-
-                val combinedMap = LinkedHashMap<String, ShikhoAcademicProgram>()
-
-                fun parseProgramArray(arr: JSONArray, isEnrolled: Boolean) {
-                    for (i in 0 until arr.length()) {
-                        val obj = arr.optJSONObject(i) ?: continue
-                        val id = obj.optString("id").trim()
-                        if (id.isBlank() || combinedMap.containsKey(id)) continue
-
-                        val titleBn = obj.optString("title_bn").trim().ifBlank { id }
-                        val bannerUrl = if (obj.isNull("banner_url")) null else obj.optString("banner_url").trim().ifBlank { null }
-                        val isFree = obj.optBoolean("is_free", false)
-
-                        val classesList = mutableListOf<String>()
-                        val classesArr = obj.optJSONArray("classes")
-                        if (classesArr != null) {
-                            for (j in 0 until classesArr.length()) {
-                                val cls = classesArr.optString(j).trim()
-                                if (cls.isNotBlank()) classesList.add(cls)
-                            }
-                        } else {
-                            val clsStr = obj.optString("classes").trim()
-                            if (clsStr.isNotBlank() && clsStr != "null") {
-                                classesList.add(clsStr)
-                            }
-                        }
-
-                        combinedMap[id] = ShikhoAcademicProgram(
-                            id = id,
-                            classes = classesList,
-                            titleBn = titleBn,
-                            bannerUrl = bannerUrl,
-                            isFree = isFree,
-                            isEnrolledProgram = isEnrolled
-                        )
-                    }
-                }
-
-                parseProgramArray(enrolledArr, isEnrolled = true)
-                parseProgramArray(otherArr, isEnrolled = false)
-
-                Result.success(combinedMap.values.toList())
             }
+
+            Result.success(
+                ShikhoProgramsFetchResult(
+                    programs = finalPrograms,
+                    updatedAccessToken = activeToken,
+                    updatedRefreshToken = updatedRefreshToken
+                )
+            )
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private fun executeGetAcademicProgramQuery(
+        accessToken: String,
+        normalizedClass: String,
+        effectiveGroup: String,
+        batchId: String?
+    ): Result<List<ShikhoAcademicProgram>> {
+        val variablesObj = JSONObject().apply {
+            if (batchId != null) {
+                put("batch_id", batchId)
+            } else {
+                put("batch_id", JSONObject.NULL)
+            }
+            put("className", normalizedClass)
+            put("group", effectiveGroup)
+            put("vendor", VENDOR_BD)
+        }
+
+        val payload = JSONObject().apply {
+            put("operationName", "GetAcademicProgram")
+            put(
+                "query",
+                "query GetAcademicProgram(\$batch_id: String, \$className: AcademicProgramClassEnum, \$group: StudyGroupTypeEnum, \$vendor: VendorEnum) { listAcademicProgramByEnrollment(batch_id: \$batch_id, class: \$className, group: \$group, vendor: \$vendor) { enrolled_programs { id classes title_bn banner_url is_free } other_programs { id classes title_bn banner_url is_free } } }"
+            )
+            put("variables", variablesObj)
+        }
+
+        val request = Request.Builder()
+            .url("$BASE_URL/graphql")
+            .post(payload.toString().toRequestBody(jsonMediaType))
+            .header("Authorization", "Bearer $accessToken")
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .header("x-vendor", VENDOR_BD)
+            .header("User-Agent", USER_AGENT)
+            .build()
+
+        okHttpClient.newCall(request).execute().use { response ->
+            val bodyStr = response.body?.string().orEmpty()
+            if (!response.isSuccessful || bodyStr.isBlank()) {
+                return Result.failure(
+                    Exception("কোর্সের তালিকা লোড করতে ব্যর্থ (HTTP ${response.code})")
+                )
+            }
+
+            val root = JSONObject(bodyStr)
+            val errors = root.optJSONArray("errors")
+            if (errors != null && errors.length() > 0 && root.optJSONObject("data") == null) {
+                val firstErr = errors.optJSONObject(0)?.optString("message") ?: "GraphQL Error"
+                return Result.failure(Exception(firstErr))
+            }
+
+            val container = root
+                .optJSONObject("data")
+                ?.optJSONObject("listAcademicProgramByEnrollment")
+
+            val enrolledArr = container?.optJSONArray("enrolled_programs") ?: JSONArray()
+            val otherArr = container?.optJSONArray("other_programs") ?: JSONArray()
+
+            val combinedMap = LinkedHashMap<String, ShikhoAcademicProgram>()
+
+            fun parseProgramArray(arr: JSONArray, isEnrolled: Boolean) {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val id = obj.optString("id").trim()
+                    if (id.isBlank() || combinedMap.containsKey(id)) continue
+
+                    val titleBn = obj.optString("title_bn").trim().ifBlank { id }
+                    val bannerUrl = if (obj.isNull("banner_url")) null else obj.optString("banner_url").trim().ifBlank { null }
+                    val isFree = obj.optBoolean("is_free", false)
+
+                    val classesList = mutableListOf<String>()
+                    val classesArr = obj.optJSONArray("classes")
+                    if (classesArr != null) {
+                        for (j in 0 until classesArr.length()) {
+                            val cls = classesArr.optString(j).trim()
+                            if (cls.isNotBlank()) classesList.add(cls)
+                        }
+                    } else {
+                        val clsStr = obj.optString("classes").trim()
+                        if (clsStr.isNotBlank() && clsStr != "null") {
+                            classesList.add(clsStr)
+                        }
+                    }
+
+                    combinedMap[id] = ShikhoAcademicProgram(
+                        id = id,
+                        classes = classesList,
+                        titleBn = titleBn,
+                        bannerUrl = bannerUrl,
+                        isFree = isFree,
+                        isEnrolledProgram = isEnrolled
+                    )
+                }
+            }
+
+            // Parse other_programs and enrolled_programs
+            parseProgramArray(enrolledArr, isEnrolled = true)
+            parseProgramArray(otherArr, isEnrolled = false)
+
+            // Strict Class Filtering (বাধ্যতামূলক):
+            // Keep only courses matching normalizedClass so admin's own enrolled HSC courses
+            // never leak into C9/C10 or other classes.
+            val strictlyFiltered = combinedMap.values.filter { course ->
+                if (course.classes.isEmpty()) {
+                    true
+                } else {
+                    course.classes.any { cls -> cls.equals(normalizedClass, ignoreCase = true) }
+                }
+            }
+
+            return Result.success(strictlyFiltered)
         }
     }
 }

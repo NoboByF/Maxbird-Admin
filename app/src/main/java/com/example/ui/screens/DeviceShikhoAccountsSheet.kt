@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,19 +27,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.School
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -75,7 +69,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -116,7 +109,7 @@ private val STUDY_GROUPS = listOf(
 
 /**
  * BottomSheet displaying:
- * 1. All Shikho accounts logged in under a specific device (`public.device_shikho_accounts`)
+ * 1. All Shikho accounts logged in under a specific device
  * 2. Step-by-step real Shikho API syllabus & course access selector for a selected Shikho account
  * 3. Saving via Supabase RPC `admin_set_account_course_permissions`
  */
@@ -163,6 +156,11 @@ fun DeviceShikhoAccountsBottomSheet(
     var manualShikhoUserId by remember { mutableStateOf("") }
     var manualUserPhone by remember { mutableStateOf("") }
     var manualStudentName by remember { mutableStateOf("") }
+
+    // BUG 3 FIX: Check whether ANY account on this device has custom access/restriction enabled
+    val hasAnyRestrictedAccountOnDevice = remember(accounts) {
+        accounts.any { it.isAccessGranted || it.isRestricted }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -312,9 +310,9 @@ fun DeviceShikhoAccountsBottomSheet(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = if (isShikhoConnected) {
-                                            "✅ অ্যাডমিন শিখো টোকেন সংযুক্ত ($shikhoConnectedPhone)"
+                                            "✅ শিখো সার্ভার সংযুক্ত আছে ($shikhoConnectedPhone)"
                                         } else {
-                                            "⚠️ অ্যাডমিন শিখো অ্যাকাউন্ট লগইন করা নেই"
+                                            "⚠️ শিখো অ্যাকাউন্ট লগইন করা নেই"
                                         },
                                         style = MaterialTheme.typography.labelMedium.copy(
                                             color = if (isShikhoConnected) EmeraldSuccess else AmberWarning,
@@ -323,7 +321,7 @@ fun DeviceShikhoAccountsBottomSheet(
                                     )
                                     Text(
                                         text = if (isShikhoConnected) {
-                                            "api.shikho.com থেকে রিয়েল শ্রেণি, ব্যাচ এবং কোর্স লোড করার জন্য প্রস্তুত"
+                                            "রিয়েল শ্রেণি, ব্যাচ এবং কোর্স তালিকা লোড করার জন্য প্রস্তুত"
                                         } else {
                                             "রিয়েল শ্রেণি, ব্যাচ ও কোর্সের তালিকা লোড করতে আপনার শিখো অ্যাকাউন্ট লগইন করুন"
                                         },
@@ -351,7 +349,7 @@ fun DeviceShikhoAccountsBottomSheet(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = if (isShikhoConnected) "টোকেন" else "লগইন করুন",
+                                        text = if (isShikhoConnected) "অ্যাকাউন্ট" else "লগইন করুন",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -360,14 +358,14 @@ fun DeviceShikhoAccountsBottomSheet(
                         }
                     }
 
-                    // Section Title & Count
+                    // Section Title & Count (Clean Bengali UI - Bug 5 Fix)
                     item {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "লগইনকৃত শিখো অ্যাকাউন্টসমূহ (${accounts.size})",
                                     style = MaterialTheme.typography.titleSmall.copy(
@@ -376,11 +374,10 @@ fun DeviceShikhoAccountsBottomSheet(
                                     )
                                 )
                                 Text(
-                                    text = "TABLE: public.device_shikho_accounts",
+                                    text = "এই ডিভাইসে লগইন করা শিক্ষার্থীদের শিখো অ্যাকাউন্টের তালিকা",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         color = Slate400,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 10.sp
+                                        fontSize = 11.sp
                                     )
                                 )
                             }
@@ -401,7 +398,7 @@ fun DeviceShikhoAccountsBottomSheet(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "ম্যানুয়াল অ্যাকাউন্ট",
+                                        text = "ম্যানুয়াল যোগ",
                                         fontSize = 11.sp,
                                         color = NeonCyan
                                     )
@@ -455,7 +452,7 @@ fun DeviceShikhoAccountsBottomSheet(
                                     OutlinedTextField(
                                         value = manualShikhoUserId,
                                         onValueChange = { manualShikhoUserId = it },
-                                        label = { Text("Shikho User ID *", fontSize = 11.sp) },
+                                        label = { Text("শিখো ইউজার আইডি (Shikho User ID) *", fontSize = 11.sp) },
                                         singleLine = true,
                                         shape = RoundedCornerShape(10.dp),
                                         colors = OutlinedTextFieldDefaults.colors(
@@ -472,7 +469,7 @@ fun DeviceShikhoAccountsBottomSheet(
                                         OutlinedTextField(
                                             value = manualUserPhone,
                                             onValueChange = { manualUserPhone = it },
-                                            label = { Text("ফোন নাম্বার (8801...)", fontSize = 11.sp) },
+                                            label = { Text("ফোন নাম্বার (017...)", fontSize = 11.sp) },
                                             singleLine = true,
                                             shape = RoundedCornerShape(10.dp),
                                             colors = OutlinedTextFieldDefaults.colors(
@@ -507,7 +504,7 @@ fun DeviceShikhoAccountsBottomSheet(
                                             val uid = manualShikhoUserId.trim()
                                             val phone = ShikhoApiClient.formatPhoneNumber(manualUserPhone)
                                             if (uid.isBlank() && phone.isBlank()) {
-                                                onShowToast("Shikho User ID অথবা ফোন নাম্বার লিখুন")
+                                                onShowToast("ইউজার আইডি অথবা ফোন নাম্বার লিখুন")
                                                 return@Button
                                             }
                                             selectedAccount = DeviceShikhoAccount(
@@ -546,7 +543,7 @@ fun DeviceShikhoAccountsBottomSheet(
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Text(
-                                        text = "⚠️ ডাটাবেজ থেকে অ্যাকাউন্ট তালিকা লোড করতে সমস্যা হয়েছে:",
+                                        text = "⚠️ অ্যাকাউন্টের তালিকা লোড করতে সমস্যা হয়েছে:",
                                         style = MaterialTheme.typography.labelMedium.copy(
                                             color = CoralDanger,
                                             fontWeight = FontWeight.Bold
@@ -576,7 +573,7 @@ fun DeviceShikhoAccountsBottomSheet(
                                 ) {
                                     CircularProgressIndicator(color = NeonCyan)
                                     Text(
-                                        text = "Supabase `public.device_shikho_accounts` থেকে লগইনকৃত অ্যাকাউন্ট লোড হচ্ছে...",
+                                        text = "ডিভাইসের শিখো অ্যাকাউন্টগুলো লোড হচ্ছে...",
                                         style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
                                     )
                                 }
@@ -612,7 +609,7 @@ fun DeviceShikhoAccountsBottomSheet(
                                         )
                                     )
                                     Text(
-                                        text = "স্টুডেন্ট অ্যাপে শিখো অ্যাকাউন্ট লগইন করলে `public.device_shikho_accounts` টেবিলে স্বয়ংক্রিয়ভাবে যুক্ত হবে। অথবা উপরের 'ম্যানুয়াল অ্যাকাউন্ট' বাটন দিয়ে সরাসরি সেট করতে পারেন।",
+                                        text = "স্টুডেন্ট অ্যাপে শিখো অ্যাকাউন্ট লগইন করলে এখানে স্বয়ংক্রিয়ভাবে যুক্ত হবে। অথবা উপরের 'ম্যানুয়াল যোগ' বাটন দিয়ে সরাসরি সেট করতে পারেন।",
                                         style = MaterialTheme.typography.bodySmall.copy(color = Slate400),
                                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                     )
@@ -626,9 +623,10 @@ fun DeviceShikhoAccountsBottomSheet(
                         ) { account ->
                             DeviceShikhoAccountCard(
                                 account = account,
+                                hasAnyRestrictedAccountOnDevice = hasAnyRestrictedAccountOnDevice,
                                 onCopyUserId = {
                                     clipboardManager.setText(AnnotatedString(account.shikhoUserId))
-                                    onShowToast("Shikho User ID কপি করা হয়েছে: ${account.shikhoUserId}")
+                                    onShowToast("ইউজার আইডি কপি করা হয়েছে: ${account.shikhoUserId}")
                                 },
                                 onConfigureAccessClick = {
                                     selectedAccount = account
@@ -646,7 +644,6 @@ fun DeviceShikhoAccountsBottomSheet(
                 device = device,
                 account = currentTargetAccount,
                 isShikhoConnected = isShikhoConnected,
-                shikhoConnectedPhone = shikhoConnectedPhone,
                 shikhoClassList = shikhoClassList,
                 isLoadingClassList = isLoadingClassList,
                 classListError = classListError,
@@ -662,6 +659,7 @@ fun DeviceShikhoAccountsBottomSheet(
                 onLoadRealClasses = onLoadRealClasses,
                 onLoadRealBatches = onLoadRealBatches,
                 onLoadRealPrograms = onLoadRealPrograms,
+                onShowToast = onShowToast,
                 onSaveAccountPermissions = { payload ->
                     onSaveAccountPermissions(payload) {
                         selectedAccount = null
@@ -673,20 +671,41 @@ fun DeviceShikhoAccountsBottomSheet(
 }
 
 /**
- * Part 2: Card displaying a single logged-in Shikho account under a device (`public.device_shikho_accounts`).
+ * BUG 3 & BUG 5 FIX:
+ * Card displaying a single logged-in Shikho account under a device:
+ * - If `account.isAccessGranted == true`: Green badge `✅ কাস্টম এক্সেস চালু`
+ * - Else if `!account.isAccessGranted && hasAnyRestrictedAccountOnDevice`: Red badge `🔒 ব্লকড (অন্য অ্যাকাউন্ট)`
+ * - Else (`!hasAnyRestrictedAccountOnDevice`): Cyan/Blue badge `🌐 ডিফল্ট মোড (লক করা হয়নি)`
  */
 @Composable
 private fun DeviceShikhoAccountCard(
     account: DeviceShikhoAccount,
+    hasAnyRestrictedAccountOnDevice: Boolean,
     onCopyUserId: () -> Unit,
     onConfigureAccessClick: () -> Unit
 ) {
     val isGranted = account.isAccessGranted
-    val borderColor = if (isGranted) EmeraldSuccess.copy(alpha = 0.7f) else Slate700
+    val isBlockedOtherAccount = !isGranted && hasAnyRestrictedAccountOnDevice
+
+    val badgeText = when {
+        isGranted -> "✅ কাস্টম এক্সেস চালু"
+        isBlockedOtherAccount -> "🔒 ব্লকড (অন্য অ্যাকাউন্ট)"
+        else -> "🌐 ডিফল্ট মোড (লক করা হয়নি)"
+    }
+    val badgeColor = when {
+        isGranted -> EmeraldSuccess
+        isBlockedOtherAccount -> CoralDanger
+        else -> NeonCyan
+    }
+    val borderColor = when {
+        isGranted -> EmeraldSuccess.copy(alpha = 0.7f)
+        isBlockedOtherAccount -> CoralDanger.copy(alpha = 0.5f)
+        else -> Slate700
+    }
 
     val syllabusParts = listOfNotNull(
         account.currentClass?.takeIf { it.isNotBlank() },
-        account.currentGroup?.takeIf { it.isNotBlank() },
+        account.currentGroup?.takeIf { it.isNotBlank() && it != "None" },
         account.currentBatch?.takeIf { it.isNotBlank() }
     )
     val currentSyllabusText = if (syllabusParts.isNotEmpty()) {
@@ -725,23 +744,20 @@ private fun DeviceShikhoAccountCard(
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .border(1.dp, if (isGranted) EmeraldSuccess else Slate700, CircleShape)
+                                .border(1.dp, badgeColor, CircleShape)
                         )
                     } else {
                         Box(
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .background(
-                                    if (isGranted) EmeraldSuccess.copy(alpha = 0.2f)
-                                    else ElectricBlue.copy(alpha = 0.2f)
-                                ),
+                                .background(badgeColor.copy(alpha = 0.18f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Person,
                                 contentDescription = null,
-                                tint = if (isGranted) EmeraldSuccess else NeonCyan,
+                                tint = badgeColor,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
@@ -772,20 +788,17 @@ private fun DeviceShikhoAccountCard(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Status Badge
+                // Status Badge (Bug 3 Fix)
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = if (isGranted) EmeraldSuccess.copy(alpha = 0.16f) else CoralDanger.copy(alpha = 0.14f),
-                    border = BorderStroke(
-                        1.dp,
-                        if (isGranted) EmeraldSuccess else CoralDanger.copy(alpha = 0.7f)
-                    )
+                    color = badgeColor.copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.8f))
                 ) {
                     Text(
-                        text = if (isGranted) "✅ এক্সেস দেওয়া আছে" else "🔒 এক্সেস নেই (অন্য অ্যাকাউন্ট)",
+                        text = badgeText,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = if (isGranted) EmeraldSuccess else CoralDanger,
+                            color = badgeColor,
                             fontWeight = FontWeight.Bold,
                             fontSize = 10.sp
                         )
@@ -810,7 +823,7 @@ private fun DeviceShikhoAccountCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "🆔 Shikho User ID: ${account.shikhoUserId.ifBlank { "N/A" }}",
+                            text = "🆔 ইউজার আইডি: ${account.shikhoUserId.ifBlank { "N/A" }}",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = Slate200,
                                 fontFamily = FontFamily.Monospace
@@ -867,16 +880,20 @@ private fun DeviceShikhoAccountCard(
                             )
                         )
                         Text(
-                            text = "• শ্রেণি: ${if (allowedClasses.isEmpty()) "সব" else allowedClasses.joinToString(", ")}" +
-                                    "  • বিভাগ: ${if (allowedGroups.isEmpty()) "সব" else allowedGroups.joinToString(", ")}" +
-                                    "  • ব্যাচ: ${if (allowedBatches.isEmpty()) "সব" else allowedBatches.joinToString(", ")}",
+                            text = "অনুমোদিত শ্রেণি: ${if (allowedClasses.isEmpty()) "সব" else allowedClasses.joinToString(", ")}" +
+                                    " • বিভাগ: ${if (allowedGroups.isEmpty()) "সব" else allowedGroups.joinToString(", ")}" +
+                                    " • ব্যাচ: ${if (allowedBatches.isEmpty()) "সব" else allowedBatches.joinToString(", ")}",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = Color.White,
                                 fontSize = 11.sp
                             )
                         )
                         Text(
-                            text = "• অনুমোদিত কোর্স সংখ্যা: ${allowedPrograms.size} টি কোর্স",
+                            text = if (!account.isRestricted || allowedPrograms.isEmpty()) {
+                                "কোর্স: এই শ্রেণির সকল কোর্স উন্মুক্ত"
+                            } else {
+                                "কোর্স: ${allowedPrograms.size} টি অনুমোদিত"
+                            },
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = NeonCyan,
                                 fontWeight = FontWeight.SemiBold,
@@ -915,7 +932,8 @@ private fun DeviceShikhoAccountCard(
 }
 
 /**
- * Part 3 & Part 4: Step-by-Step Real Shikho API Syllabus & Course Selector for a Selected Shikho Account
+ * BUG 2, BUG 4 & BUG 5 FIX:
+ * Step-by-Step Real Shikho API Syllabus & Course Selector for a Selected Shikho Account
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -923,7 +941,6 @@ private fun AccountRealCoursePermissionConfigurator(
     device: UserDevice,
     account: DeviceShikhoAccount,
     isShikhoConnected: Boolean,
-    shikhoConnectedPhone: String,
     shikhoClassList: List<ShikhoClassItem>,
     isLoadingClassList: Boolean,
     classListError: String?,
@@ -939,37 +956,55 @@ private fun AccountRealCoursePermissionConfigurator(
     onLoadRealClasses: () -> Unit,
     onLoadRealBatches: (classCode: String) -> Unit,
     onLoadRealPrograms: (classCode: String, groupCode: String, batchYear: String) -> Unit,
+    onShowToast: (String) -> Unit,
     onSaveAccountPermissions: (SetAccountCoursePermissionsRpcPayload) -> Unit
 ) {
-    // Initialize from existing account permissions or account's current syllabus
+    // BUG 4 FIX: Initialize from existing saved permissions OR fallback to student's current syllabus
     val initialClass = remember(account) {
-        account.allowedClasses?.firstOrNull()
-            ?: account.currentClass?.takeIf { it.uppercase() in ShikhoApiClient.ALLOWED_CLASS_CODES }?.uppercase()
-            ?: ""
+        account.allowedClasses?.firstOrNull()?.trim()?.uppercase()
+            ?: account.currentClass?.trim()?.uppercase()?.takeIf { it in ShikhoApiClient.ALLOWED_CLASS_CODES }
+            ?: "C10"
     }
-    val initialGroup = remember(account) {
-        account.allowedGroups?.firstOrNull()
-            ?: account.currentGroup?.takeIf { it.isNotBlank() && it != "None" }
-            ?: "Science"
+    val initialGroup = remember(account, initialClass) {
+        val savedGroup = account.allowedGroups?.firstOrNull()?.takeIf { it.isNotBlank() }
+        if (savedGroup != null) {
+            ShikhoApiClient.normalizeGroupCode(savedGroup, initialClass)
+        } else {
+            ShikhoApiClient.normalizeGroupCode(account.currentGroup, initialClass)
+        }
     }
     val initialBatch = remember(account) {
-        account.allowedBatches?.firstOrNull()
-            ?: account.currentBatch?.replace(Regex("^(SSC|HSC)\\s*", RegexOption.IGNORE_CASE), "")?.trim()
-            ?: ""
+        val savedBatch = account.allowedBatches?.firstOrNull()?.let { ShikhoApiClient.extractBatchYear(it) }
+        if (!savedBatch.isNullOrBlank()) {
+            savedBatch
+        } else {
+            ShikhoApiClient.extractBatchYear(account.currentBatch).ifBlank { "2026" }
+        }
     }
 
     var selectedClassCode by remember(account) { mutableStateOf(initialClass) }
     var selectedGroupCode by remember(account) { mutableStateOf(initialGroup) }
     var selectedBatchYear by remember(account) { mutableStateOf(initialBatch) }
+    var customYearInput by remember { mutableStateOf("") }
     var selectedProgramIds by remember(account) {
         mutableStateOf(account.allowedPrograms.orEmpty().toSet())
     }
 
     var isAccessGranted by remember(account) { mutableStateOf(true) }
-    var isRestricted by remember(account) { mutableStateOf(true) }
+    // If the account previously had isAccessGranted = true and isRestricted = false (all courses open), preserve that
+    var allowAllCoursesInClass by remember(account) {
+        mutableStateOf(
+            account.isAccessGranted && !account.isRestricted && account.allowedPrograms.isNullOrEmpty()
+        )
+    }
     var revokeOtherAccounts by remember(account) { mutableStateOf(true) }
 
     val requiresGroup = selectedClassCode in ShikhoApiClient.GROUP_REQUIRED_CLASSES
+
+    // Combine API batch years + guaranteed fallback years (2026, 2027, 2028)
+    val displayBatchYears = remember(shikhoBatchYears, selectedClassCode) {
+        ShikhoApiClient.mergeWithFallbackBatchYears(shikhoBatchYears, selectedClassCode)
+    }
 
     // Step 1: Load real class list automatically when Shikho token is connected
     LaunchedEffect(isShikhoConnected) {
@@ -980,26 +1015,22 @@ private fun AccountRealCoursePermissionConfigurator(
 
     // Step 3: Load real batch options automatically when class changes
     LaunchedEffect(isShikhoConnected, selectedClassCode) {
-        if (isShikhoConnected && selectedClassCode.isNotBlank()) {
+        if (selectedClassCode.isNotBlank()) {
             onLoadRealBatches(selectedClassCode)
         }
     }
 
-    // Auto-select first returned batch year if none selected or current not in list
-    LaunchedEffect(shikhoBatchYears) {
-        if (shikhoBatchYears.isNotEmpty() && selectedBatchYear.isBlank()) {
-            selectedBatchYear = shikhoBatchYears.first().year
+    // Auto-select first returned batch year if none selected
+    LaunchedEffect(displayBatchYears) {
+        if (displayBatchYears.isNotEmpty() && selectedBatchYear.isBlank()) {
+            selectedBatchYear = displayBatchYears.first().year
         }
     }
 
-    // Step 4: Load real academic programs automatically when class, group, and batch year are ready
+    // Step 4: Load real academic programs (ChangeSyllabus -> UpdateExamYear -> GetAcademicProgram)
     LaunchedEffect(isShikhoConnected, selectedClassCode, selectedGroupCode, selectedBatchYear) {
         if (isShikhoConnected && selectedClassCode.isNotBlank() && selectedBatchYear.isNotBlank()) {
-            val effectiveGroup = if (selectedClassCode in ShikhoApiClient.GROUP_REQUIRED_CLASSES) {
-                selectedGroupCode.ifBlank { "Science" }
-            } else {
-                "None"
-            }
+            val effectiveGroup = ShikhoApiClient.normalizeGroupCode(selectedGroupCode, selectedClassCode)
             onLoadRealPrograms(selectedClassCode, effectiveGroup, selectedBatchYear)
         }
     }
@@ -1050,7 +1081,7 @@ private fun AccountRealCoursePermissionConfigurator(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "📞 ${account.userPhone ?: "N/A"} • ID: ${account.shikhoUserId}",
+                        text = "📞 ${account.userPhone ?: "N/A"} • আইডি: ${account.shikhoUserId}",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = NeonCyan,
                             fontFamily = FontFamily.Monospace
@@ -1095,7 +1126,7 @@ private fun AccountRealCoursePermissionConfigurator(
                                 )
                             )
                             Text(
-                                text = "https://api.shikho.com থেকে ১০০% রিয়েল শ্রেণি, বিভাগ, ব্যাচ এবং কোর্সের তালিকা লোড করতে প্রথমে আপনার শিখো অ্যাকাউন্ট লগইন করুন।",
+                                text = "শিখোর অফিসিয়াল সার্ভার থেকে ১০০% রিয়েল শ্রেণি, বিভাগ, ব্যাচ এবং কোর্সের তালিকা লোড করতে প্রথমে আপনার শিখো অ্যাকাউন্ট লগইন করুন।",
                                 style = MaterialTheme.typography.bodySmall.copy(color = Color.White)
                             )
                             Button(
@@ -1106,14 +1137,14 @@ private fun AccountRealCoursePermissionConfigurator(
                             ) {
                                 Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("শিখো অ্যাকাউন্ট কানেক্ট করুন (Shikho API Login)", fontWeight = FontWeight.Bold)
+                                Text("শিখো অ্যাকাউন্ট কানেক্ট করুন", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
             }
 
-            // Revoke Other Accounts Toggle (Part 4 requirement)
+            // Account Lock & Revoke Other Accounts Toggle (Clean Bengali UI - Bug 5 Fix)
             item {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Slate850),
@@ -1137,7 +1168,7 @@ private fun AccountRealCoursePermissionConfigurator(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "অন্যান্য সকল অ্যাকাউন্টে কোর্স এক্সেস বন্ধ রাখুন",
+                                    text = "অন্যান্য অ্যাকাউন্ট ব্লক রাখুন",
                                     style = MaterialTheme.typography.titleSmall.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White,
@@ -1145,7 +1176,7 @@ private fun AccountRealCoursePermissionConfigurator(
                                     )
                                 )
                                 Text(
-                                    text = "p_revoke_other_accounts = $revokeOtherAccounts • স্টুডেন্ট অন্য কোনো শিখো অ্যাকাউন্ট লগইন করলে একটি কোর্সও দেখতে পাবে না",
+                                    text = "স্টুডেন্ট অন্য নাম্বার দিয়ে লগইন করলে কোনো কোর্স দেখবে না",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         color = if (revokeOtherAccounts) EmeraldSuccess else Slate400,
                                         fontSize = 11.sp
@@ -1172,8 +1203,9 @@ private fun AccountRealCoursePermissionConfigurator(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "এই অ্যাকাউন্টে কোর্স এক্সেস সক্রিয় (p_is_access_granted)",
-                                style = MaterialTheme.typography.labelMedium.copy(color = Slate200)
+                                text = "এই অ্যাকাউন্টে কাস্টম কোর্স ও সিলেবাস লক সক্রিয় করুন",
+                                style = MaterialTheme.typography.labelMedium.copy(color = Slate200),
+                                modifier = Modifier.weight(1f)
                             )
                             Switch(
                                 checked = isAccessGranted,
@@ -1190,9 +1222,25 @@ private fun AccountRealCoursePermissionConfigurator(
             }
 
             // =========================================================================
-            // STEP 1: Real Class List (`GET https://api.shikho.com/class_list?vendor=BD&type=syllabus`)
+            // STEP 1: Class Selection
             // =========================================================================
             item {
+                val classesToRender = remember(shikhoClassList) {
+                    if (shikhoClassList.isNotEmpty()) {
+                        shikhoClassList
+                    } else {
+                        ShikhoApiClient.CLASS_BENGALI_NAMES.entries.map { (code, bn) ->
+                            ShikhoClassItem(
+                                code = code,
+                                titleBn = bn,
+                                nameEn = code,
+                                serial = ShikhoApiClient.DEFAULT_CLASS_SERIAL[code] ?: 99,
+                                isActive = true
+                            )
+                        }
+                    }
+                }
+
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Slate800),
                     shape = RoundedCornerShape(16.dp),
@@ -1209,20 +1257,19 @@ private fun AccountRealCoursePermissionConfigurator(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "ধাপ ১: শ্রেণি নির্বাচন (Real Class List API)",
+                                    text = "ধাপ ১: শ্রেণি নির্বাচন করুন",
                                     style = MaterialTheme.typography.titleSmall.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = NeonCyan
                                     )
                                 )
                                 Text(
-                                    text = "GET /class_list?vendor=BD&type=syllabus",
+                                    text = "শিক্ষার্থীর জন্য অনুমোদিত শ্রেণি সিলেক্ট করুন",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         color = Slate400,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 10.sp
+                                        fontSize = 11.sp
                                     )
                                 )
                             }
@@ -1256,59 +1303,46 @@ private fun AccountRealCoursePermissionConfigurator(
                             )
                         }
 
-                        if (isLoadingClassList && shikhoClassList.isEmpty()) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = NeonCyan, strokeWidth = 2.dp)
-                                Text("শিখো সার্ভার থেকে রিয়েল শ্রেণির তালিকা লোড হচ্ছে...", fontSize = 12.sp, color = Slate400)
-                            }
-                        } else if (shikhoClassList.isEmpty()) {
-                            Text(
-                                text = if (isShikhoConnected) "শ্রেণি লোড করতে ডানপাশের রিফ্রেশ বাটনে চাপুন।" else "শ্রেণির তালিকা লোড করতে আগে শিখো অ্যাকাউন্ট লগইন করুন।",
-                                style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
-                            )
-                        } else {
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                shikhoClassList.forEach { cls ->
-                                    val isSelected = selectedClassCode.equals(cls.code, ignoreCase = true)
-                                    FilterChip(
-                                        selected = isSelected,
-                                        onClick = {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            classesToRender.forEach { cls ->
+                                val isSelected = selectedClassCode.equals(cls.code, ignoreCase = true)
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = {
+                                        if (!selectedClassCode.equals(cls.code, ignoreCase = true)) {
                                             selectedClassCode = cls.code
                                             if (cls.code !in ShikhoApiClient.GROUP_REQUIRED_CLASSES) {
                                                 selectedGroupCode = "None"
                                             } else if (selectedGroupCode == "None" || selectedGroupCode.isBlank()) {
                                                 selectedGroupCode = "Science"
                                             }
-                                        },
-                                        label = {
-                                            Text(
-                                                text = "${cls.code} (${cls.titleBn})",
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                fontSize = 12.sp
-                                            )
-                                        },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = ElectricBlue,
-                                            selectedLabelColor = Color.White,
-                                            containerColor = Slate900,
-                                            labelColor = Slate200
-                                        ),
-                                        border = FilterChipDefaults.filterChipBorder(
-                                            enabled = true,
-                                            selected = isSelected,
-                                            borderColor = Slate700,
-                                            selectedBorderColor = NeonCyan
-                                        ),
-                                        modifier = Modifier.testTag("chip_real_class_${cls.code}")
-                                    )
-                                }
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "${cls.code} (${cls.titleBn})",
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            fontSize = 12.sp
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = ElectricBlue,
+                                        selectedLabelColor = Color.White,
+                                        containerColor = Slate900,
+                                        labelColor = Slate200
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = isSelected,
+                                        borderColor = Slate700,
+                                        selectedBorderColor = NeonCyan
+                                    ),
+                                    modifier = Modifier.testTag("chip_real_class_${cls.code}")
+                                )
                             }
                         }
                     }
@@ -1316,7 +1350,7 @@ private fun AccountRealCoursePermissionConfigurator(
             }
 
             // =========================================================================
-            // STEP 2: Study Group Selection (`C9`, `C10`, `C11`, `C12` -> Science, Humanities, BusinessStudies)
+            // STEP 2: Study Group Selection (`C9`, `C10`, `C11`, `C12`)
             // =========================================================================
             if (selectedClassCode.isNotBlank()) {
                 item {
@@ -1332,7 +1366,7 @@ private fun AccountRealCoursePermissionConfigurator(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Text(
-                                text = "ধাপ ২: বিভাগ নির্বাচন (Study Group)",
+                                text = "ধাপ ২: বিভাগ নির্বাচন করুন",
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = NeonCyan
@@ -1381,7 +1415,7 @@ private fun AccountRealCoursePermissionConfigurator(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(
-                                        text = "ℹ️ $selectedClassCode শ্রেণির জন্য কোনো আলাদা বিভাগ নেই (API-তে স্বয়ংক্রিয়ভাবে group: \"None\" পাঠানো হবে)",
+                                        text = "ℹ️ ${ShikhoApiClient.CLASS_BENGALI_NAMES[selectedClassCode] ?: selectedClassCode}-এর জন্য আলাদা বিভাগের প্রয়োজন নেই।",
                                         style = MaterialTheme.typography.labelSmall.copy(color = Slate200),
                                         modifier = Modifier.padding(10.dp)
                                     )
@@ -1393,12 +1427,10 @@ private fun AccountRealCoursePermissionConfigurator(
             }
 
             // =========================================================================
-            // STEP 3: Real Batch / Exam Year (`BatchOptions` GraphQL API)
+            // STEP 3: Batch / Exam Year Selection (Bug 1 Fix: options + 2026, 2027, 2028)
             // =========================================================================
             if (selectedClassCode.isNotBlank()) {
                 item {
-                    val computedBatchId = ShikhoApiClient.buildBatchId(selectedClassCode, selectedBatchYear)
-
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Slate800),
                         shape = RoundedCornerShape(16.dp),
@@ -1415,27 +1447,26 @@ private fun AccountRealCoursePermissionConfigurator(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "ধাপ ৩: ব্যাচ / পরীক্ষার বছর নির্বাচন (Real BatchOptions API)",
+                                        text = "ধাপ ৩: পরীক্ষার সাল / ব্যাচ নির্বাচন করুন",
                                         style = MaterialTheme.typography.titleSmall.copy(
                                             fontWeight = FontWeight.Bold,
                                             color = NeonCyan
                                         )
                                     )
                                     Text(
-                                        text = "POST /graphql (operationName: BatchOptions, class: $selectedClassCode)",
+                                        text = "ব্যাচ সিলেক্ট করুন অথবা কাস্টম সাল যোগ করুন",
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             color = Slate400,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 10.sp
+                                            fontSize = 11.sp
                                         )
                                     )
                                 }
 
                                 IconButton(
                                     onClick = { onLoadRealBatches(selectedClassCode) },
-                                    enabled = isShikhoConnected && !isLoadingBatches,
+                                    enabled = !isLoadingBatches,
                                     modifier = Modifier.size(32.dp)
                                 ) {
                                     if (isLoadingBatches) {
@@ -1455,80 +1486,80 @@ private fun AccountRealCoursePermissionConfigurator(
                                 }
                             }
 
-                            if (!batchesError.isNullOrBlank()) {
-                                Text(
-                                    text = "⚠️ $batchesError",
-                                    style = MaterialTheme.typography.labelSmall.copy(color = CoralDanger)
-                                )
-                            }
-
-                            if (isLoadingBatches && shikhoBatchYears.isEmpty()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = NeonCyan, strokeWidth = 2.dp)
-                                    Text("BatchOptions GraphQL থেকে রিয়েল ব্যাচ লোড হচ্ছে...", fontSize = 12.sp, color = Slate400)
-                                }
-                            } else if (shikhoBatchYears.isEmpty()) {
-                                Text(
-                                    text = "এই শ্রেণির জন্য কোনো ব্যাচ পাওয়া যায়নি। রিফ্রেশ বাটনে চাপুন।",
-                                    style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
-                                )
-                            } else {
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    shikhoBatchYears.forEach { batchItem ->
-                                        val isSelected = selectedBatchYear == batchItem.year
-                                        FilterChip(
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                displayBatchYears.forEach { batchItem ->
+                                    val isSelected = selectedBatchYear == batchItem.year
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = { selectedBatchYear = batchItem.year },
+                                        label = {
+                                            Text(
+                                                text = if (batchItem.label != batchItem.year) {
+                                                    "${batchItem.label} (${batchItem.year})"
+                                                } else {
+                                                    batchItem.year
+                                                },
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                fontSize = 12.sp
+                                            )
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = ElectricBlue,
+                                            selectedLabelColor = Color.White,
+                                            containerColor = Slate900,
+                                            labelColor = Slate200
+                                        ),
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            enabled = true,
                                             selected = isSelected,
-                                            onClick = { selectedBatchYear = batchItem.year },
-                                            label = {
-                                                Text(
-                                                    text = if (batchItem.label != batchItem.year) {
-                                                        "${batchItem.label} (${batchItem.year})"
-                                                    } else {
-                                                        batchItem.year
-                                                    },
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                    fontSize = 12.sp
-                                                )
-                                            },
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = ElectricBlue,
-                                                selectedLabelColor = Color.White,
-                                                containerColor = Slate900,
-                                                labelColor = Slate200
-                                            ),
-                                            border = FilterChipDefaults.filterChipBorder(
-                                                enabled = true,
-                                                selected = isSelected,
-                                                borderColor = Slate700,
-                                                selectedBorderColor = NeonCyan
-                                            ),
-                                            modifier = Modifier.testTag("chip_real_batch_${batchItem.year}")
-                                        )
-                                    }
+                                            borderColor = Slate700,
+                                            selectedBorderColor = NeonCyan
+                                        ),
+                                        modifier = Modifier.testTag("chip_real_batch_${batchItem.year}")
+                                    )
                                 }
                             }
 
-                            if (computedBatchId.isNotBlank()) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Slate950,
-                                    border = BorderStroke(0.8.dp, Slate700)
+                            // Custom Batch Year Input Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = customYearInput,
+                                    onValueChange = { customYearInput = it.filter { ch -> ch.isDigit() }.take(4) },
+                                    placeholder = { Text("অন্য সাল লিখুন (যেমন: 2029)", fontSize = 12.sp, color = Slate400) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = Slate900,
+                                        unfocusedContainerColor = Slate900,
+                                        focusedBorderColor = NeonCyan,
+                                        unfocusedBorderColor = Slate700,
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Button(
+                                    onClick = {
+                                        val yr = customYearInput.trim()
+                                        if (yr.length == 4) {
+                                            selectedBatchYear = yr
+                                            customYearInput = ""
+                                        } else {
+                                            onShowToast("৪ সংখ্যার সঠিক সাল লিখুন (যেমন: 2028)")
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Slate700),
+                                    shape = RoundedCornerShape(10.dp)
                                 ) {
-                                    Text(
-                                        text = "⚡ GraphQL Batch ID: \"$computedBatchId\"",
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = NeonCyan,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                    )
+                                    Text("সিলেক্ট", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -1537,12 +1568,12 @@ private fun AccountRealCoursePermissionConfigurator(
             }
 
             // =========================================================================
-            // STEP 4: Real Course Selection (`GetAcademicProgram` GraphQL API)
+            // STEP 4: Real Course Selection (Bug 2 & Bug 4 Fix)
             // =========================================================================
             if (selectedClassCode.isNotBlank() && selectedBatchYear.isNotBlank()) {
                 item {
-                    val effectiveGroup = if (requiresGroup) selectedGroupCode.ifBlank { "Science" } else "None"
-                    val computedBatchId = ShikhoApiClient.buildBatchId(selectedClassCode, selectedBatchYear)
+                    val effectiveGroup = ShikhoApiClient.normalizeGroupCode(selectedGroupCode, selectedClassCode)
+                    val classDisplayName = ShikhoApiClient.CLASS_BENGALI_NAMES[selectedClassCode] ?: selectedClassCode
 
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Slate800),
@@ -1562,18 +1593,17 @@ private fun AccountRealCoursePermissionConfigurator(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "ধাপ ৪: রিয়েল কোর্স নির্বাচন (${selectedProgramIds.size} টি সিলেক্টেড)",
+                                        text = "ধাপ ৪: কোর্স নির্বাচন করুন (${if (allowAllCoursesInClass) "সব কোর্স উন্মুক্ত" else "${selectedProgramIds.size} টি সিলেক্টেড"})",
                                         style = MaterialTheme.typography.titleSmall.copy(
                                             fontWeight = FontWeight.Bold,
                                             color = NeonCyan
                                         )
                                     )
                                     Text(
-                                        text = "GetAcademicProgram • batch_id: \"$computedBatchId\" • class: \"$selectedClassCode\" • group: \"$effectiveGroup\"",
+                                        text = "$classDisplayName • ব্যাচ $selectedBatchYear-এর অনুমোদিত কোর্সসমূহ",
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             color = Slate400,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 10.sp
+                                            fontSize = 11.sp
                                         )
                                     )
                                 }
@@ -1602,91 +1632,146 @@ private fun AccountRealCoursePermissionConfigurator(
                                 }
                             }
 
-                            // Select All / Clear All quick buttons
-                            if (shikhoPrograms.isNotEmpty()) {
+                            // BUG 4 FIX: Toggle to open all courses of this selected class without picking individual ones
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (allowAllCoursesInClass) EmeraldSuccess.copy(alpha = 0.14f) else Slate900,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (allowAllCoursesInClass) EmeraldSuccess.copy(alpha = 0.7f) else Slate700
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = "মোট ${shikhoPrograms.size} টি রিয়েল কোর্স পাওয়া গেছে",
-                                        style = MaterialTheme.typography.labelSmall.copy(color = EmeraldSuccess)
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        TextButton(
-                                            onClick = {
-                                                selectedProgramIds = selectedProgramIds + shikhoPrograms.map { it.id }
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            modifier = Modifier.height(28.dp)
-                                        ) {
-                                            Text("সব সিলেক্ট", fontSize = 11.sp, color = NeonCyan)
-                                        }
-                                        TextButton(
-                                            onClick = { selectedProgramIds = emptySet() },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            modifier = Modifier.height(28.dp)
-                                        ) {
-                                            Text("সব মুছুন", fontSize = 11.sp, color = CoralDanger)
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (!programsError.isNullOrBlank()) {
-                                Text(
-                                    text = "⚠️ $programsError",
-                                    style = MaterialTheme.typography.labelSmall.copy(color = CoralDanger)
-                                )
-                            }
-
-                            if (isLoadingPrograms) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 24.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(28.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "শিখো সার্ভার থেকে রিয়েল কোর্সের তালিকা লোড হচ্ছে...",
-                                            style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
+                                            text = "এই শ্রেণির সকল কোর্স উন্মুক্ত রাখুন",
+                                            style = MaterialTheme.typography.labelMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                        )
+                                        Text(
+                                            text = if (allowAllCoursesInClass) {
+                                                "এই শ্রেণির সবগুলো কোর্স স্টুডেন্ট দেখতে পাবে"
+                                            } else {
+                                                "শুধুমাত্র নিচে টিক দেওয়া নির্দিষ্ট কোর্সগুলো স্টুডেন্ট দেখতে পাবে"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                color = if (allowAllCoursesInClass) EmeraldSuccess else Slate400,
+                                                fontSize = 11.sp
+                                            )
                                         )
                                     }
-                                }
-                            } else if (shikhoPrograms.isEmpty()) {
-                                Surface(
-                                    color = Slate900,
-                                    shape = RoundedCornerShape(10.dp),
-                                    border = BorderStroke(1.dp, Slate700),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = "এই সিলেবাসের ($selectedClassCode • $effectiveGroup • $computedBatchId) জন্য কোনো কোর্স পাওয়া যায়নি।",
-                                        style = MaterialTheme.typography.bodySmall.copy(color = Slate400),
-                                        modifier = Modifier.padding(12.dp)
+                                    Switch(
+                                        checked = allowAllCoursesInClass,
+                                        onCheckedChange = { allowAllCoursesInClass = it },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = EmeraldSuccess
+                                        ),
+                                        modifier = Modifier.testTag("switch_allow_all_courses_in_class")
                                     )
                                 }
-                            } else {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    shikhoPrograms.forEach { program ->
-                                        val isChecked = program.id in selectedProgramIds
-                                        RealShikhoProgramItemCard(
-                                            program = program,
-                                            isSelected = isChecked,
-                                            onToggle = {
-                                                selectedProgramIds = if (isChecked) {
-                                                    selectedProgramIds - program.id
-                                                } else {
-                                                    selectedProgramIds + program.id
-                                                }
-                                            }
+                            }
+
+                            if (!allowAllCoursesInClass) {
+                                // Select All / Clear All quick buttons
+                                if (shikhoPrograms.isNotEmpty()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "মোট ${shikhoPrograms.size} টি কোর্স পাওয়া গেছে",
+                                            style = MaterialTheme.typography.labelSmall.copy(color = EmeraldSuccess)
                                         )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            TextButton(
+                                                onClick = {
+                                                    selectedProgramIds = selectedProgramIds + shikhoPrograms.map { it.id }
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                modifier = Modifier.height(28.dp)
+                                            ) {
+                                                Text("সব সিলেক্ট", fontSize = 11.sp, color = NeonCyan)
+                                            }
+                                            TextButton(
+                                                onClick = { selectedProgramIds = emptySet() },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                modifier = Modifier.height(28.dp)
+                                            ) {
+                                                Text("সব মুছুন", fontSize = 11.sp, color = CoralDanger)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (!programsError.isNullOrBlank()) {
+                                    Text(
+                                        text = "⚠️ $programsError",
+                                        style = MaterialTheme.typography.labelSmall.copy(color = CoralDanger)
+                                    )
+                                }
+
+                                if (isLoadingPrograms) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 24.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(28.dp))
+                                            Text(
+                                                text = "সিলেবাস পরিবর্তন ও রিয়েল কোর্সের তালিকা লোড হচ্ছে...",
+                                                style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
+                                            )
+                                        }
+                                    }
+                                } else if (shikhoPrograms.isEmpty()) {
+                                    Surface(
+                                        color = Slate900,
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, Slate700),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = if (isShikhoConnected) {
+                                                "এই সিলেবাসের জন্য কোনো কোর্স পাওয়া যায়নি। ডানপাশের রিফ্রেশ বাটনে চাপুন অথবা উপরের 'এই শ্রেণির সকল কোর্স উন্মুক্ত রাখুন' চালু করুন।"
+                                            } else {
+                                                "কোর্সের তালিকা দেখতে আগে উপরে আপনার শিখো অ্যাকাউন্ট লগইন করুন।"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall.copy(color = Slate400),
+                                            modifier = Modifier.padding(12.dp)
+                                        )
+                                    }
+                                } else {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        shikhoPrograms.forEach { program ->
+                                            val isChecked = program.id in selectedProgramIds
+                                            RealShikhoProgramItemCard(
+                                                program = program,
+                                                isSelected = isChecked,
+                                                onToggle = {
+                                                    selectedProgramIds = if (isChecked) {
+                                                        selectedProgramIds - program.id
+                                                    } else {
+                                                        selectedProgramIds + program.id
+                                                    }
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1722,13 +1807,24 @@ private fun AccountRealCoursePermissionConfigurator(
 
                 Button(
                     onClick = {
+                        // BUG 4 FIX: Validate that at least 1 course is selected unless allowAllCoursesInClass is ON
+                        if (isAccessGranted && !allowAllCoursesInClass && selectedProgramIds.isEmpty()) {
+                            onShowToast(
+                                "অনুগ্রহ করে অন্তত ১টি কোর্স সিলেক্ট করুন অথবা 'এই শ্রেণির সকল কোর্স উন্মুক্ত রাখুন' অপশনটি চালু করুন"
+                            )
+                            return@Button
+                        }
+
                         val allowedClassesList = if (selectedClassCode.isNotBlank()) {
                             listOf(selectedClassCode)
                         } else {
                             emptyList()
                         }
-                        val allowedGroupsList = if (selectedClassCode in ShikhoApiClient.GROUP_REQUIRED_CLASSES && selectedGroupCode.isNotBlank() && selectedGroupCode != "None") {
-                            listOf(selectedGroupCode)
+                        val allowedGroupsList = if (selectedClassCode in ShikhoApiClient.GROUP_REQUIRED_CLASSES &&
+                            selectedGroupCode.isNotBlank() &&
+                            selectedGroupCode != "None"
+                        ) {
+                            listOf(ShikhoApiClient.normalizeGroupCode(selectedGroupCode, selectedClassCode))
                         } else {
                             emptyList()
                         }
@@ -1743,11 +1839,11 @@ private fun AccountRealCoursePermissionConfigurator(
                             shikhoUserId = account.shikhoUserId,
                             userPhone = account.userPhone.orEmpty(),
                             isAccessGranted = isAccessGranted,
-                            isRestricted = isRestricted,
+                            isRestricted = !allowAllCoursesInClass,
                             allowedClasses = allowedClassesList,
                             allowedGroups = allowedGroupsList,
                             allowedBatches = allowedBatchesList,
-                            allowedPrograms = selectedProgramIds.toList(),
+                            allowedPrograms = if (allowAllCoursesInClass) emptyList() else selectedProgramIds.toList(),
                             revokeOtherAccounts = revokeOtherAccounts
                         )
                         onSaveAccountPermissions(rpcPayload)
@@ -1776,8 +1872,13 @@ private fun AccountRealCoursePermissionConfigurator(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
+                        val saveBtnLabel = when {
+                            !isAccessGranted -> "এক্সেস বন্ধ করে সেভ করুন"
+                            allowAllCoursesInClass -> "পারমিশন সেভ করুন (সকল কোর্স)"
+                            else -> "পারমিশন সেভ করুন (${selectedProgramIds.size} টি কোর্স)"
+                        }
                         Text(
-                            text = "পারমিশন সেভ করুন (${selectedProgramIds.size} কোর্স)",
+                            text = saveBtnLabel,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White
                         )
@@ -1857,23 +1958,14 @@ private fun RealShikhoProgramItemCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "ID: ${program.id}",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = NeonCyan,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp
-                        )
-                    )
-
-                    if (program.isFree) {
+                    if (program.classes.isNotEmpty()) {
                         Surface(
-                            color = EmeraldSuccess.copy(alpha = 0.2f),
+                            color = Slate800,
                             shape = RoundedCornerShape(4.dp)
                         ) {
                             Text(
-                                text = "FREE",
-                                color = EmeraldSuccess,
+                                text = program.classes.joinToString(", "),
+                                color = NeonCyan,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
@@ -1881,13 +1973,26 @@ private fun RealShikhoProgramItemCard(
                         }
                     }
 
-                    if (program.isEnrolledProgram) {
+                    if (program.isFree) {
                         Surface(
-                            color = ElectricBlue.copy(alpha = 0.25f),
+                            color = EmeraldSuccess.copy(alpha = 0.2f),
                             shape = RoundedCornerShape(4.dp)
                         ) {
                             Text(
-                                text = "ENROLLED",
+                                text = "ফ্রি কোর্স",
+                                color = EmeraldSuccess,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
+                    } else {
+                        Surface(
+                            color = ElectricBlue.copy(alpha = 0.22f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "একাডেমিক প্রোগ্রাম",
                                 color = ElectricBlueLight,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,

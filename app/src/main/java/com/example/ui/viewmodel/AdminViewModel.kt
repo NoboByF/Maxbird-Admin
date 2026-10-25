@@ -920,8 +920,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadRealShikhoBatches(classCode: String) {
+        if (classCode.isBlank()) return
         val token = adminPreferences.getShikhoAccessToken()
-        if (token.isBlank() || classCode.isBlank()) return
+        if (token.isBlank()) {
+            _shikhoBatchYears.value = ShikhoApiClient.mergeWithFallbackBatchYears(emptyList(), classCode)
+            return
+        }
         viewModelScope.launch {
             try {
                 _isLoadingShikhoBatches.value = true
@@ -930,9 +934,11 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 if (result.isSuccess) {
                     _shikhoBatchYears.value = result.getOrNull().orEmpty()
                 } else {
+                    _shikhoBatchYears.value = ShikhoApiClient.mergeWithFallbackBatchYears(emptyList(), classCode)
                     _shikhoBatchesError.value = result.exceptionOrNull()?.message
                 }
             } catch (e: Throwable) {
+                _shikhoBatchYears.value = ShikhoApiClient.mergeWithFallbackBatchYears(emptyList(), classCode)
                 _shikhoBatchesError.value = e.message
             } finally {
                 _isLoadingShikhoBatches.value = false
@@ -954,7 +960,18 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     year = batchYear
                 )
                 if (result.isSuccess) {
-                    _shikhoPrograms.value = result.getOrNull().orEmpty()
+                    val fetchResult = result.getOrThrow()
+                    // Save the newly issued JWT access_token from ChangeSyllabus immediately!
+                    if (fetchResult.updatedAccessToken.isNotBlank() && fetchResult.updatedAccessToken != token) {
+                        adminPreferences.saveShikhoSession(
+                            accessToken = fetchResult.updatedAccessToken,
+                            refreshToken = fetchResult.updatedRefreshToken ?: adminPreferences.getShikhoRefreshToken(),
+                            userId = adminPreferences.getShikhoUserId(),
+                            phone = adminPreferences.getShikhoPhone()
+                        )
+                        _shikhoAccessToken.value = fetchResult.updatedAccessToken
+                    }
+                    _shikhoPrograms.value = fetchResult.programs
                 } else {
                     _shikhoPrograms.value = emptyList()
                     _shikhoProgramsError.value = result.exceptionOrNull()?.message
