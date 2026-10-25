@@ -165,6 +165,13 @@ class MainActivity : ComponentActivity() {
                                 val code by viewModel.genCode.collectAsStateWithLifecycle()
                                 val maxDevices by viewModel.genMaxDevices.collectAsStateWithLifecycle()
                                 val note by viewModel.genNote.collectAsStateWithLifecycle()
+                                val isRestricted by viewModel.genIsRestricted.collectAsStateWithLifecycle()
+                                val allowedClasses by viewModel.genAllowedClasses.collectAsStateWithLifecycle()
+                                val allowedGroups by viewModel.genAllowedGroups.collectAsStateWithLifecycle()
+                                val allowedBatches by viewModel.genAllowedBatches.collectAsStateWithLifecycle()
+                                val allowedPrograms by viewModel.genAllowedPrograms.collectAsStateWithLifecycle()
+                                val coursesCatalog by viewModel.coursesCatalog.collectAsStateWithLifecycle()
+                                val isLoadingCatalog by viewModel.isLoadingCatalog.collectAsStateWithLifecycle()
                                 val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
                                 val generatorError by viewModel.generatorError.collectAsStateWithLifecycle()
                                 val successCode by viewModel.generatedSuccessCode.collectAsStateWithLifecycle()
@@ -174,6 +181,13 @@ class MainActivity : ComponentActivity() {
                                     code = code,
                                     maxDevices = maxDevices,
                                     note = note,
+                                    isRestricted = isRestricted,
+                                    allowedClasses = allowedClasses,
+                                    allowedGroups = allowedGroups,
+                                    allowedBatches = allowedBatches,
+                                    allowedPrograms = allowedPrograms,
+                                    coursesCatalog = coursesCatalog,
+                                    isLoadingCatalog = isLoadingCatalog,
                                     isGenerating = isGenerating,
                                     errorMessage = generatorError,
                                     successCode = successCode,
@@ -181,6 +195,10 @@ class MainActivity : ComponentActivity() {
                                     onCodeChange = { viewModel.setGenCode(it) },
                                     onMaxDevicesChange = { viewModel.setGenMaxDevices(it) },
                                     onNoteChange = { viewModel.setGenNote(it) },
+                                    onCoursePermissionsChange = { restricted, classes, groups, batches, programs ->
+                                        viewModel.setGenCoursePermissions(restricted, classes, groups, batches, programs)
+                                    },
+                                    onRefreshCatalog = { viewModel.loadAvailableCoursesCatalog(forceRefresh = true) },
                                     onGenerateRandom = { prefix -> viewModel.generateRandomCode(prefix) },
                                     onSubmit = { viewModel.submitCreateCode() },
                                     onDismissSuccess = { viewModel.dismissSuccessDialog() },
@@ -196,6 +214,9 @@ class MainActivity : ComponentActivity() {
                                 val selectedCodeForDevices by viewModel.selectedCodeForDevices.collectAsStateWithLifecycle()
                                 val linkedDevices by viewModel.linkedDevices.collectAsStateWithLifecycle()
                                 val isLoadingLinkedDevices by viewModel.isLoadingLinkedDevices.collectAsStateWithLifecycle()
+                                val coursesCatalog by viewModel.coursesCatalog.collectAsStateWithLifecycle()
+                                val isLoadingCatalog by viewModel.isLoadingCatalog.collectAsStateWithLifecycle()
+                                val isSavingPermissions by viewModel.isSavingCoursePermissions.collectAsStateWithLifecycle()
 
                                 CodeManagementScreen(
                                     codes = codes,
@@ -205,13 +226,28 @@ class MainActivity : ComponentActivity() {
                                     selectedCodeForDevices = selectedCodeForDevices,
                                     linkedDevices = linkedDevices,
                                     isLoadingLinkedDevices = isLoadingLinkedDevices,
+                                    coursesCatalog = coursesCatalog,
+                                    isLoadingCatalog = isLoadingCatalog,
+                                    isSavingPermissions = isSavingPermissions,
                                     onSearchChange = { viewModel.setCodeSearchQuery(it) },
                                     onFilterChange = { viewModel.setCodeFilter(it) },
                                     onRefresh = { viewModel.loadCodes() },
+                                    onRefreshCatalog = { viewModel.loadAvailableCoursesCatalog(forceRefresh = true) },
                                     onToggleActive = { target -> viewModel.toggleCodeStatus(target) },
                                     onDeleteCode = { target -> viewModel.deleteCode(target) },
                                     onOpenLinkedDevices = { target -> viewModel.openLinkedDevices(target) },
                                     onCloseLinkedDevices = { viewModel.closeLinkedDevices() },
+                                    onSaveCodeCoursePermissions = { targetCode, restricted, classes, groups, batches, programs, onSuccess ->
+                                        viewModel.saveAccessCodeCoursePermissions(
+                                            targetCode,
+                                            restricted,
+                                            classes,
+                                            groups,
+                                            batches,
+                                            programs,
+                                            onSuccess
+                                        )
+                                    },
                                     onShowToast = { msg -> viewModel.showToast(msg) }
                                 )
                             }
@@ -221,17 +257,35 @@ class MainActivity : ComponentActivity() {
                                 val searchQuery by viewModel.deviceSearchQuery.collectAsStateWithLifecycle()
                                 val filter by viewModel.deviceFilter.collectAsStateWithLifecycle()
                                 val isLoadingDevices by viewModel.isLoadingDevices.collectAsStateWithLifecycle()
+                                val coursesCatalog by viewModel.coursesCatalog.collectAsStateWithLifecycle()
+                                val isLoadingCatalog by viewModel.isLoadingCatalog.collectAsStateWithLifecycle()
+                                val isSavingPermissions by viewModel.isSavingCoursePermissions.collectAsStateWithLifecycle()
 
                                 DeviceManagementScreen(
                                     devices = userDevices,
                                     searchQuery = searchQuery,
                                     filter = filter,
                                     isLoading = isLoadingDevices,
+                                    coursesCatalog = coursesCatalog,
+                                    isLoadingCatalog = isLoadingCatalog,
+                                    isSavingPermissions = isSavingPermissions,
                                     onSearchChange = { viewModel.setDeviceSearchQuery(it) },
                                     onFilterChange = { viewModel.setDeviceFilter(it) },
                                     onRefresh = { viewModel.loadUserDevices(forceRefresh = true) },
+                                    onRefreshCatalog = { viewModel.loadAvailableCoursesCatalog(forceRefresh = true) },
                                     onToggleBan = { device, reason -> viewModel.toggleUserDeviceBan(device, reason) },
                                     onDeleteDevice = { device -> viewModel.deleteUserDevice(device) },
+                                    onSaveCoursePermissions = { device, restricted, classes, groups, batches, programs, onSuccess ->
+                                        viewModel.saveDeviceCoursePermissions(
+                                            device,
+                                            restricted,
+                                            classes,
+                                            groups,
+                                            batches,
+                                            programs,
+                                            onSuccess
+                                        )
+                                    },
                                     onShowToast = { msg -> viewModel.showToast(msg) }
                                 )
                             }

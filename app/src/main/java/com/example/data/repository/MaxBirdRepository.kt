@@ -5,6 +5,7 @@ import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
+import com.example.data.model.CourseCatalogItem
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
@@ -77,5 +78,26 @@ interface MaxBirdRepository {
     suspend fun toggleUserDeviceBan(deviceId: String, isBanned: Boolean, banReason: String?): Result<Unit>
 
     suspend fun deleteUserDevice(deviceId: String): Result<Unit>
+
+    suspend fun getAvailableCoursesCatalog(forceRefresh: Boolean = false): Result<List<CourseCatalogItem>>
+
+    suspend fun setDeviceCoursePermissions(
+        device: UserDevice,
+        isRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>
+    ): Result<Unit>
+
+    suspend fun setAccessCodeCoursePermissions(
+        codeId: String,
+        isRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>
+    ): Result<Unit>
 }
+
 

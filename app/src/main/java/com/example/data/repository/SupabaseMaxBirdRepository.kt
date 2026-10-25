@@ -5,13 +5,16 @@ import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
+import com.example.data.model.CourseCatalogItem
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.SetDeviceCoursePermissionsRpcPayload
 import com.example.data.model.UpdateCodeStatusPayload
+import com.example.data.model.UpdateCoursePermissionsPayload
 import com.example.data.model.UpdateDeviceBlockedPayload
 import com.example.data.model.UpdateAppUpdateStatusPayload
 import com.example.data.model.UpdateAppNoticeStatusPayload
@@ -39,6 +42,7 @@ class SupabaseMaxBirdRepository(
     private val cachedNotices = mutableListOf<AppNotice>()
     private val cachedSupportLinks = mutableListOf<ActivationSupportLink>()
     private val cachedUserDevices = mutableListOf<UserDevice>()
+    private val cachedCourseCatalog = mutableListOf<CourseCatalogItem>()
     private var isInitializedWithSampleData = false
 
 
@@ -317,7 +321,161 @@ class SupabaseMaxBirdRepository(
                         isBanned = false,
                         banReason = null,
                         status = "active",
-                        lastSeen = now
+                        lastSeen = now,
+                        isAccessRestricted = true,
+                        allowedClasses = listOf("C9", "C10"),
+                        allowedGroups = listOf("Science"),
+                        allowedBatches = listOf("2026", "2027"),
+                        allowedPrograms = listOf("prog_c9_sci_2026", "এসএসসি ২০২৬ ফুল একাডেমিক প্রোগ্রাম (বিজ্ঞান)")
+                    )
+                )
+            )
+
+            cachedCourseCatalog.addAll(
+                listOf(
+                    CourseCatalogItem(
+                        programId = "prog_c5_all_2026",
+                        titleBn = "৫ম শ্রেণি - বার্ষিক প্রস্তুতি ও বৃত্তি প্রোগ্রাম ২০২৬",
+                        classCode = "C5",
+                        groupCode = null,
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c6_all_2026",
+                        titleBn = "৬ষ্ঠ শ্রেণি - একাডেমিক পূর্ণাঙ্গ কোর্স ২০২৬",
+                        classCode = "C6",
+                        groupCode = null,
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c7_all_2026",
+                        titleBn = "৭ম শ্রেণি - একাডেমিক পূর্ণাঙ্গ কোর্স ২০২৬",
+                        classCode = "C7",
+                        groupCode = null,
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c8_all_2026",
+                        titleBn = "৮ম শ্রেণি - জুনিয়র বৃত্তি ও একাডেমিক কোর্স ২০২৬",
+                        classCode = "C8",
+                        groupCode = null,
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c9_sci_2026",
+                        titleBn = "নবম শ্রেণি - একাডেমিক প্রোগ্রাম (বিজ্ঞান)",
+                        classCode = "C9",
+                        groupCode = "Science",
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c9_hum_2026",
+                        titleBn = "নবম শ্রেণি - একাডেমিক প্রোগ্রাম (মানবিক)",
+                        classCode = "C9",
+                        groupCode = "Humanities",
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c9_bus_2026",
+                        titleBn = "নবম শ্রেণি - একাডেমিক প্রোগ্রাম (ব্যবসায় শিক্ষা)",
+                        classCode = "C9",
+                        groupCode = "BusinessStudies",
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c10_sci_2026",
+                        titleBn = "দশম শ্রেণি ও এসএসসি ফাইনাল প্রস্তুতি (বিজ্ঞান)",
+                        classCode = "C10",
+                        groupCode = "Science",
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c10_hum_2026",
+                        titleBn = "দশম শ্রেণি ও এসএসসি ফাইনাল প্রস্তুতি (মানবিক)",
+                        classCode = "C10",
+                        groupCode = "Humanities",
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c10_bus_2026",
+                        titleBn = "দশম শ্রেণি ও এসএসসি ফাইনাল প্রস্তুতি (ব্যবসায় শিক্ষা)",
+                        classCode = "C10",
+                        groupCode = "BusinessStudies",
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c11_sci_2027",
+                        titleBn = "একাদশ শ্রেণি - এইচএসসি একাডেমিক প্রোগ্রাম (বিজ্ঞান)",
+                        classCode = "C11",
+                        groupCode = "Science",
+                        batchId = "2027",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c11_hum_2027",
+                        titleBn = "একাদশ শ্রেণি - এইচএসসি একাডেমিক প্রোগ্রাম (মানবিক)",
+                        classCode = "C11",
+                        groupCode = "Humanities",
+                        batchId = "2027",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c11_bus_2027",
+                        titleBn = "একাদশ শ্রেণি - এইচএসসি একাডেমিক প্রোগ্রাম (ব্যবসায় শিক্ষা)",
+                        classCode = "C11",
+                        groupCode = "BusinessStudies",
+                        batchId = "2027",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c12_sci_2026",
+                        titleBn = "দ্বাদশ শ্রেণি ও এইচএসসি টেস্ট পেপার সলভ (বিজ্ঞান)",
+                        classCode = "C12",
+                        groupCode = "Science",
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c12_hum_2026",
+                        titleBn = "দ্বাদশ শ্রেণি ও এইচএসসি টেস্ট পেপার সলভ (মানবিক)",
+                        classCode = "C12",
+                        groupCode = "Humanities",
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
+                    ),
+                    CourseCatalogItem(
+                        programId = "prog_c12_bus_2026",
+                        titleBn = "দ্বাদশ শ্রেণি ও এইচএসসি টেস্ট পেপার সলভ (ব্যবসায় শিক্ষা)",
+                        classCode = "C12",
+                        groupCode = "BusinessStudies",
+                        batchId = "2026",
+                        bannerUrl = null,
+                        isFree = false
                     )
                 )
             )
@@ -349,7 +507,12 @@ class SupabaseMaxBirdRepository(
             maxDevices = payload.maxDevices,
             isActive = payload.isActive,
             createdAt = now,
-            note = payload.note
+            note = payload.note,
+            isAccessRestricted = payload.isAccessRestricted,
+            allowedClasses = payload.allowedClasses,
+            allowedGroups = payload.allowedGroups,
+            allowedBatches = payload.allowedBatches,
+            allowedPrograms = payload.allowedPrograms
         )
 
         try {
@@ -904,5 +1067,128 @@ class SupabaseMaxBirdRepository(
             Result.success(Unit)
         }
     }
+
+    override suspend fun getAvailableCoursesCatalog(forceRefresh: Boolean): Result<List<CourseCatalogItem>> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val remoteCatalog = api.getAvailableCoursesCatalog()
+            if (remoteCatalog.isNotEmpty()) {
+                cachedCourseCatalog.clear()
+                cachedCourseCatalog.addAll(remoteCatalog)
+                Result.success(remoteCatalog)
+            } else {
+                initSampleDataIfNeeded()
+                Result.success(cachedCourseCatalog.toList())
+            }
+        } catch (e: Exception) {
+            initSampleDataIfNeeded()
+            Result.success(cachedCourseCatalog.toList())
+        }
+    }
+
+    override suspend fun setDeviceCoursePermissions(
+        device: UserDevice,
+        isRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        // Update local cache immediately
+        val idx = cachedUserDevices.indexOfFirst {
+            (device.id.isNotBlank() && it.id == device.id) ||
+            (device.deviceHash.isNotBlank() && it.deviceHash == device.deviceHash)
+        }
+        if (idx != -1) {
+            val existing = cachedUserDevices[idx]
+            cachedUserDevices[idx] = existing.copy(
+                isAccessRestricted = isRestricted,
+                allowedClasses = allowedClasses,
+                allowedGroups = allowedGroups,
+                allowedBatches = allowedBatches,
+                allowedPrograms = allowedPrograms
+            )
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            var rpcSucceeded = false
+
+            // 1. Primary: Call Supabase RPC `admin_set_device_course_permissions`
+            if (device.deviceHash.isNotBlank()) {
+                try {
+                    val rpcPayload = SetDeviceCoursePermissionsRpcPayload(
+                        deviceHash = device.deviceHash,
+                        isRestricted = isRestricted,
+                        allowedClasses = allowedClasses,
+                        allowedGroups = allowedGroups,
+                        allowedBatches = allowedBatches,
+                        allowedPrograms = allowedPrograms
+                    )
+                    val rpcResponse = api.setDeviceCoursePermissionsRpc(rpcPayload)
+                    rpcSucceeded = rpcResponse.isSuccessful
+                } catch (_: Exception) {
+                    rpcSucceeded = false
+                }
+            }
+
+            // 2. Also ensure `public.devices` row is updated via PATCH if RPC didn't succeed or device_hash was empty
+            if (!rpcSucceeded) {
+                val patchPayload = UpdateCoursePermissionsPayload(
+                    isAccessRestricted = isRestricted,
+                    allowedClasses = allowedClasses,
+                    allowedGroups = allowedGroups,
+                    allowedBatches = allowedBatches,
+                    allowedPrograms = allowedPrograms
+                )
+                if (device.deviceHash.isNotBlank()) {
+                    api.updateDeviceCoursePermissionsByHash("eq.${device.deviceHash}", patchPayload)
+                } else if (device.id.isNotBlank()) {
+                    api.updateDeviceCoursePermissionsById("eq.${device.id}", patchPayload)
+                }
+            }
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun setAccessCodeCoursePermissions(
+        codeId: String,
+        isRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val idx = cachedCodes.indexOfFirst { it.id == codeId }
+        if (idx != -1) {
+            val existing = cachedCodes[idx]
+            cachedCodes[idx] = existing.copy(
+                isAccessRestricted = isRestricted,
+                allowedClasses = allowedClasses,
+                allowedGroups = allowedGroups,
+                allowedBatches = allowedBatches,
+                allowedPrograms = allowedPrograms
+            )
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            val patchPayload = UpdateCoursePermissionsPayload(
+                isAccessRestricted = isRestricted,
+                allowedClasses = allowedClasses,
+                allowedGroups = allowedGroups,
+                allowedBatches = allowedBatches,
+                allowedPrograms = allowedPrograms
+            )
+            api.updateAccessCodeCoursePermissions("eq.$codeId", patchPayload)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
 }
+
 

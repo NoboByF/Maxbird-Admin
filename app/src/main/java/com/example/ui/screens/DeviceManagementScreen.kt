@@ -72,7 +72,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.CourseCatalogItem
 import com.example.data.model.UserDevice
+import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CoralDanger
 import com.example.ui.theme.CoralDark
 import com.example.ui.theme.ElectricBlue
@@ -100,11 +102,24 @@ fun DeviceManagementScreen(
     searchQuery: String,
     filter: String,
     isLoading: Boolean,
+    coursesCatalog: List<CourseCatalogItem> = emptyList(),
+    isLoadingCatalog: Boolean = false,
+    isSavingPermissions: Boolean = false,
     onSearchChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
     onRefresh: () -> Unit,
+    onRefreshCatalog: () -> Unit = {},
     onToggleBan: (UserDevice, String?) -> Unit,
     onDeleteDevice: (UserDevice) -> Unit,
+    onSaveCoursePermissions: (
+        device: UserDevice,
+        isRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>,
+        onSuccess: () -> Unit
+    ) -> Unit = { _, _, _, _, _, _, _ -> },
     onShowToast: (String) -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -115,6 +130,9 @@ fun DeviceManagementScreen(
 
     // Dialog state for deleting a device record
     var deviceToDelete by remember { mutableStateOf<UserDevice?>(null) }
+
+    // BottomSheet state for configuring Device-Specific Granular Syllabus & Course Access Control
+    var deviceForCourseAccess by remember { mutableStateOf<UserDevice?>(null) }
 
     // Filter and search logic
     val filteredDevices = remember(devices, searchQuery, filter) {
@@ -129,6 +147,7 @@ fun DeviceManagementScreen(
 
             val matchesFilter = when (filter) {
                 "ACTIVE" -> !dev.isBanned
+                "RESTRICTED" -> dev.isAccessRestricted
                 "BANNED" -> dev.isBanned
                 else -> true
             }
@@ -139,6 +158,7 @@ fun DeviceManagementScreen(
 
     val totalCount = devices.size
     val activeCount = devices.count { !it.isBanned }
+    val restrictedCount = devices.count { it.isAccessRestricted }
     val bannedCount = devices.count { it.isBanned }
 
     LazyColumn(
@@ -342,15 +362,15 @@ fun DeviceManagementScreen(
                     )
                 )
 
-                // Filter Tabs: All, Active, Banned
+                // Filter Tabs: All, Active, Restricted, Banned
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     FilterChip(
                         selected = filter == "ALL",
                         onClick = { onFilterChange("ALL") },
-                        label = { Text("সকল ডিভাইস ($totalCount)") },
+                        label = { Text("সব ($totalCount)", fontSize = 11.sp) },
                         modifier = Modifier.testTag("filter_all_devices"),
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = ElectricBlue,
@@ -369,7 +389,7 @@ fun DeviceManagementScreen(
                     FilterChip(
                         selected = filter == "ACTIVE",
                         onClick = { onFilterChange("ACTIVE") },
-                        label = { Text("সক্রিয় ($activeCount)") },
+                        label = { Text("সক্রিয় ($activeCount)", fontSize = 11.sp) },
                         modifier = Modifier.testTag("filter_active_devices"),
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = EmeraldSuccess,
@@ -386,9 +406,28 @@ fun DeviceManagementScreen(
                     )
 
                     FilterChip(
+                        selected = filter == "RESTRICTED",
+                        onClick = { onFilterChange("RESTRICTED") },
+                        label = { Text("🔒 কোর্স লক ($restrictedCount)", fontSize = 11.sp) },
+                        modifier = Modifier.testTag("filter_restricted_devices"),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AmberWarning,
+                            selectedLabelColor = Color.White,
+                            containerColor = Slate800,
+                            labelColor = Slate400
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = filter == "RESTRICTED",
+                            borderColor = Slate700,
+                            selectedBorderColor = AmberWarning
+                        )
+                    )
+
+                    FilterChip(
                         selected = filter == "BANNED",
                         onClick = { onFilterChange("BANNED") },
-                        label = { Text("🚫 ব্যান করা ($bannedCount)") },
+                        label = { Text("🚫 ব্যান ($bannedCount)", fontSize = 11.sp) },
                         modifier = Modifier.testTag("filter_banned_devices"),
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CoralDanger,
@@ -464,6 +503,9 @@ fun DeviceManagementScreen(
                         clipboardManager.setText(AnnotatedString(toCopy))
                         onShowToast("ডিভাইস আইডি কপি করা হয়েছে: $toCopy")
                     },
+                    onCourseAccessClick = {
+                        deviceForCourseAccess = device
+                    },
                     onBanClick = {
                         banReasonInput = "অ্যাডমিন কর্তৃক ব্যান করা হয়েছে"
                         deviceToBan = device
@@ -477,6 +519,43 @@ fun DeviceManagementScreen(
                 )
             }
         }
+    }
+
+    // Device-Specific Granular Syllabus & Course Access Control BottomSheet
+    deviceForCourseAccess?.let { targetDevice ->
+        // Keep up-to-date with latest device in list if refreshed
+        val latestDevice = devices.find {
+            (targetDevice.id.isNotBlank() && it.id == targetDevice.id) ||
+                    (targetDevice.deviceHash.isNotBlank() && it.deviceHash == targetDevice.deviceHash)
+        } ?: targetDevice
+
+        CourseAccessControlBottomSheet(
+            targetTitle = "📱 ${latestDevice.deviceBrand?.let { "$it " } ?: ""}${latestDevice.deviceModel}",
+            targetSubtitle = "ID: ${latestDevice.displayDeviceId.ifBlank { latestDevice.deviceHash }}",
+            targetBadge = latestDevice.appliedCode?.takeIf { it.isNotBlank() }?.let { "কোড: $it" },
+            initialIsRestricted = latestDevice.isAccessRestricted,
+            initialAllowedClasses = latestDevice.allowedClasses.orEmpty(),
+            initialAllowedGroups = latestDevice.allowedGroups.orEmpty(),
+            initialAllowedBatches = latestDevice.allowedBatches.orEmpty(),
+            initialAllowedPrograms = latestDevice.allowedPrograms.orEmpty(),
+            coursesCatalog = coursesCatalog,
+            isLoadingCatalog = isLoadingCatalog,
+            isSaving = isSavingPermissions,
+            onRefreshCatalog = onRefreshCatalog,
+            onDismiss = { deviceForCourseAccess = null },
+            onSave = { isRestricted, allowedClasses, allowedGroups, allowedBatches, allowedPrograms ->
+                onSaveCoursePermissions(
+                    latestDevice,
+                    isRestricted,
+                    allowedClasses,
+                    allowedGroups,
+                    allowedBatches,
+                    allowedPrograms
+                ) {
+                    deviceForCourseAccess = null
+                }
+            }
+        )
     }
 
     // Ban Confirmation Modal with Custom Reason Input
@@ -658,6 +737,7 @@ fun DeviceManagementScreen(
 private fun RealDeviceCard(
     device: UserDevice,
     onCopyId: () -> Unit,
+    onCourseAccessClick: () -> Unit,
     onBanClick: () -> Unit,
     onUnbanClick: () -> Unit,
     onDeleteClick: () -> Unit
@@ -889,6 +969,17 @@ private fun RealDeviceCard(
                     }
                 }
             }
+
+            // Granular Syllabus & Course Access Control Section & Button
+            CourseAccessSummarySection(
+                isRestricted = device.isAccessRestricted,
+                allowedClasses = device.allowedClasses,
+                allowedGroups = device.allowedGroups,
+                allowedBatches = device.allowedBatches,
+                allowedPrograms = device.allowedPrograms,
+                onConfigureClick = onCourseAccessClick,
+                testTagPrefix = device.displayDeviceId.ifBlank { device.id }
+            )
 
             // Action Buttons: Ban / Unban & Delete
             Row(

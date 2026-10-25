@@ -15,7 +15,12 @@ data class AccessCode(
     @Json(name = "max_devices") val maxDevices: Int = 1,
     @Json(name = "is_active") val isActive: Boolean = true,
     @Json(name = "created_at") val createdAt: String = "",
-    @Json(name = "note") val note: String? = null
+    @Json(name = "note") val note: String? = null,
+    @Json(name = "is_access_restricted") val isAccessRestricted: Boolean = false,
+    @Json(name = "allowed_classes") val allowedClasses: List<String>? = emptyList(),
+    @Json(name = "allowed_groups") val allowedGroups: List<String>? = emptyList(),
+    @Json(name = "allowed_batches") val allowedBatches: List<String>? = emptyList(),
+    @Json(name = "allowed_programs") val allowedPrograms: List<String>? = emptyList()
 )
 
 /**
@@ -42,7 +47,12 @@ data class CreateAccessCodePayload(
     @Json(name = "student_name") val studentName: String,
     @Json(name = "max_devices") val maxDevices: Int = 1,
     @Json(name = "is_active") val isActive: Boolean = true,
-    @Json(name = "note") val note: String? = null
+    @Json(name = "note") val note: String? = null,
+    @Json(name = "is_access_restricted") val isAccessRestricted: Boolean = false,
+    @Json(name = "allowed_classes") val allowedClasses: List<String> = emptyList(),
+    @Json(name = "allowed_groups") val allowedGroups: List<String> = emptyList(),
+    @Json(name = "allowed_batches") val allowedBatches: List<String> = emptyList(),
+    @Json(name = "allowed_programs") val allowedPrograms: List<String> = emptyList()
 )
 
 /**
@@ -222,7 +232,12 @@ data class UserDevice(
     @Json(name = "is_banned") val isBanned: Boolean = false,
     @Json(name = "ban_reason") val banReason: String? = null,
     @Json(name = "status") val status: String = "active",
-    @Json(name = "last_seen") val lastSeen: String? = null
+    @Json(name = "last_seen") val lastSeen: String? = null,
+    @Json(name = "is_access_restricted") val isAccessRestricted: Boolean = false,
+    @Json(name = "allowed_classes") val allowedClasses: List<String>? = emptyList(),
+    @Json(name = "allowed_groups") val allowedGroups: List<String>? = emptyList(),
+    @Json(name = "allowed_batches") val allowedBatches: List<String>? = emptyList(),
+    @Json(name = "allowed_programs") val allowedPrograms: List<String>? = emptyList()
 )
 
 /**
@@ -234,4 +249,44 @@ data class UpdateDeviceBanPayload(
     @Json(name = "status") val status: String,
     @Json(name = "ban_reason") val banReason: String?
 )
+
+/**
+ * Course catalog item representing a course in `public.available_courses_catalog`.
+ */
+@JsonClass(generateAdapter = true)
+data class CourseCatalogItem(
+    @Json(name = "program_id") val programId: String = "",
+    @Json(name = "title_bn") val titleBn: String = "",
+    @Json(name = "class_code") val classCode: String? = null,
+    @Json(name = "group_code") val groupCode: String? = null,
+    @Json(name = "batch_id") val batchId: String? = null,
+    @Json(name = "banner_url") val bannerUrl: String? = null,
+    @Json(name = "is_free") val isFree: Boolean? = false
+)
+
+/**
+ * RPC payload for `admin_set_device_course_permissions`.
+ */
+@JsonClass(generateAdapter = true)
+data class SetDeviceCoursePermissionsRpcPayload(
+    @Json(name = "p_device_hash") val deviceHash: String,
+    @Json(name = "p_is_restricted") val isRestricted: Boolean,
+    @Json(name = "p_allowed_classes") val allowedClasses: List<String>,
+    @Json(name = "p_allowed_groups") val allowedGroups: List<String>,
+    @Json(name = "p_allowed_batches") val allowedBatches: List<String>,
+    @Json(name = "p_allowed_programs") val allowedPrograms: List<String>
+)
+
+/**
+ * Direct table PATCH payload for updating course & syllabus permissions on `public.devices` or `public.access_codes`.
+ */
+@JsonClass(generateAdapter = true)
+data class UpdateCoursePermissionsPayload(
+    @Json(name = "is_access_restricted") val isAccessRestricted: Boolean,
+    @Json(name = "allowed_classes") val allowedClasses: List<String>,
+    @Json(name = "allowed_groups") val allowedGroups: List<String>,
+    @Json(name = "allowed_batches") val allowedBatches: List<String>,
+    @Json(name = "allowed_programs") val allowedPrograms: List<String>
+)
+
 

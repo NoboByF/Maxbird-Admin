@@ -48,6 +48,10 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +68,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AccessCode
+import com.example.data.model.CourseCatalogItem
 import com.example.ui.theme.CardBorderGradientEnd
 import com.example.ui.theme.CardBorderGradientStart
 import com.example.ui.theme.ElectricBlue
@@ -88,6 +93,13 @@ fun CodeGeneratorScreen(
     code: String,
     maxDevices: Int,
     note: String,
+    isRestricted: Boolean = false,
+    allowedClasses: List<String> = emptyList(),
+    allowedGroups: List<String> = emptyList(),
+    allowedBatches: List<String> = emptyList(),
+    allowedPrograms: List<String> = emptyList(),
+    coursesCatalog: List<CourseCatalogItem> = emptyList(),
+    isLoadingCatalog: Boolean = false,
     isGenerating: Boolean,
     errorMessage: String?,
     successCode: AccessCode?,
@@ -95,6 +107,8 @@ fun CodeGeneratorScreen(
     onCodeChange: (String) -> Unit,
     onMaxDevicesChange: (Int) -> Unit,
     onNoteChange: (String) -> Unit,
+    onCoursePermissionsChange: (Boolean, List<String>, List<String>, List<String>, List<String>) -> Unit = { _, _, _, _, _ -> },
+    onRefreshCatalog: () -> Unit = {},
     onGenerateRandom: (String) -> Unit,
     onSubmit: () -> Unit,
     onDismissSuccess: () -> Unit,
@@ -102,6 +116,7 @@ fun CodeGeneratorScreen(
 ) {
     val context = LocalContext.current
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
+    var showCourseAccessSheet by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -494,6 +509,17 @@ fun CodeGeneratorScreen(
                         )
                     }
 
+                    // Field 5: Optional Course & Syllabus Access Control
+                    CourseAccessSummarySection(
+                        isRestricted = isRestricted,
+                        allowedClasses = allowedClasses,
+                        allowedGroups = allowedGroups,
+                        allowedBatches = allowedBatches,
+                        allowedPrograms = allowedPrograms,
+                        onConfigureClick = { showCourseAccessSheet = true },
+                        testTagPrefix = "generator"
+                    )
+
                     if (!errorMessage.isNullOrBlank()) {
                         Surface(
                             color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
@@ -695,7 +721,7 @@ fun CodeGeneratorScreen(
                     Text("হোয়াটসঅ্যাপ/টেলিগ্রামে পাঠান", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             },
-            dismissButton = {
+                dismissButton = {
                 Button(
                     onClick = {
                         clipboardManager.setText(AnnotatedString(successCode.code))
@@ -713,4 +739,28 @@ fun CodeGeneratorScreen(
             }
         )
     }
+
+    if (showCourseAccessSheet) {
+        CourseAccessControlBottomSheet(
+            targetTitle = studentName.ifBlank { "নতুন শিক্ষার্থী" },
+            targetSubtitle = "Access Key: $code",
+            targetBadge = "ডিভাইস সীমা: $maxDevices",
+            initialIsRestricted = isRestricted,
+            initialAllowedClasses = allowedClasses,
+            initialAllowedGroups = allowedGroups,
+            initialAllowedBatches = allowedBatches,
+            initialAllowedPrograms = allowedPrograms,
+            coursesCatalog = coursesCatalog,
+            isLoadingCatalog = isLoadingCatalog,
+            isSaving = false,
+            onRefreshCatalog = onRefreshCatalog,
+            onDismiss = { showCourseAccessSheet = false },
+            onSave = { newRestricted, newClasses, newGroups, newBatches, newPrograms ->
+                onCoursePermissionsChange(newRestricted, newClasses, newGroups, newBatches, newPrograms)
+                showCourseAccessSheet = false
+                onShowToast("কোডের কোর্স ও সিলেবাস পারমিশন সেট করা হয়েছে")
+            }
+        )
+    }
 }
+

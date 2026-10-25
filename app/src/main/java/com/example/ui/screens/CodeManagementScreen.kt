@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
+import com.example.data.model.CourseCatalogItem
 import com.example.ui.theme.CardBorderGradientEnd
 import com.example.ui.theme.CardBorderGradientStart
 import com.example.ui.theme.CoralDanger
@@ -92,17 +93,31 @@ fun CodeManagementScreen(
     selectedCodeForDevices: AccessCode?,
     linkedDevices: List<ActivatedDevice>,
     isLoadingLinkedDevices: Boolean,
+    coursesCatalog: List<CourseCatalogItem> = emptyList(),
+    isLoadingCatalog: Boolean = false,
+    isSavingPermissions: Boolean = false,
     onSearchChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
     onRefresh: () -> Unit,
+    onRefreshCatalog: () -> Unit = {},
     onToggleActive: (AccessCode) -> Unit,
     onDeleteCode: (AccessCode) -> Unit,
     onOpenLinkedDevices: (AccessCode) -> Unit,
     onCloseLinkedDevices: () -> Unit,
+    onSaveCodeCoursePermissions: (
+        code: AccessCode,
+        isRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>,
+        onSuccess: () -> Unit
+    ) -> Unit = { _, _, _, _, _, _, _ -> },
     onShowToast: (String) -> Unit
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
     var codeToDelete by remember { mutableStateOf<AccessCode?>(null) }
+    var codeForCourseAccess by remember { mutableStateOf<AccessCode?>(null) }
 
     val filteredCodes = remember(codes, searchQuery, filter) {
         codes.filter { item ->
@@ -361,7 +376,8 @@ fun CodeManagementScreen(
                     },
                     onToggleActive = { onToggleActive(code) },
                     onDeleteClick = { codeToDelete = code },
-                    onViewDevices = { onOpenLinkedDevices(code) }
+                    onViewDevices = { onOpenLinkedDevices(code) },
+                    onCourseAccessClick = { codeForCourseAccess = code }
                 )
             }
         }
@@ -369,6 +385,39 @@ fun CodeManagementScreen(
         item {
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+
+    // Access Code Course & Syllabus Access Control BottomSheet
+    codeForCourseAccess?.let { targetCode ->
+        val latestCode = codes.find { it.id == targetCode.id } ?: targetCode
+
+        CourseAccessControlBottomSheet(
+            targetTitle = "🎓 ${latestCode.studentName}",
+            targetSubtitle = "Access Code: ${latestCode.code}",
+            targetBadge = "সর্বোচ্চ ডিভাইস: ${latestCode.maxDevices}",
+            initialIsRestricted = latestCode.isAccessRestricted,
+            initialAllowedClasses = latestCode.allowedClasses.orEmpty(),
+            initialAllowedGroups = latestCode.allowedGroups.orEmpty(),
+            initialAllowedBatches = latestCode.allowedBatches.orEmpty(),
+            initialAllowedPrograms = latestCode.allowedPrograms.orEmpty(),
+            coursesCatalog = coursesCatalog,
+            isLoadingCatalog = isLoadingCatalog,
+            isSaving = isSavingPermissions,
+            onRefreshCatalog = onRefreshCatalog,
+            onDismiss = { codeForCourseAccess = null },
+            onSave = { isRestricted, allowedClasses, allowedGroups, allowedBatches, allowedPrograms ->
+                onSaveCodeCoursePermissions(
+                    latestCode,
+                    isRestricted,
+                    allowedClasses,
+                    allowedGroups,
+                    allowedBatches,
+                    allowedPrograms
+                ) {
+                    codeForCourseAccess = null
+                }
+            }
+        )
     }
 
     // Delete Confirmation Dialog
@@ -590,7 +639,8 @@ private fun StudentCodeCard(
     onCopyCode: () -> Unit,
     onToggleActive: () -> Unit,
     onDeleteClick: () -> Unit,
-    onViewDevices: () -> Unit
+    onViewDevices: () -> Unit,
+    onCourseAccessClick: () -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Slate850),
@@ -706,7 +756,20 @@ private fun StudentCodeCard(
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Course & Syllabus Access Summary & Button for Access Code
+            CourseAccessSummarySection(
+                isRestricted = code.isAccessRestricted,
+                allowedClasses = code.allowedClasses,
+                allowedGroups = code.allowedGroups,
+                allowedBatches = code.allowedBatches,
+                allowedPrograms = code.allowedPrograms,
+                onConfigureClick = onCourseAccessClick,
+                testTagPrefix = code.code
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Action Buttons Row: View Linked Devices + Delete
             Row(

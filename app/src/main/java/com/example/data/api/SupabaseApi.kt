@@ -12,7 +12,10 @@ import com.example.data.model.UpdateDeviceBlockedPayload
 import com.example.data.model.UpdateAppUpdateStatusPayload
 import com.example.data.model.UpdateAppNoticeStatusPayload
 import com.example.data.model.ActivationSupportLink
+import com.example.data.model.CourseCatalogItem
 import com.example.data.model.CreateSupportLinkPayload
+import com.example.data.model.SetDeviceCoursePermissionsRpcPayload
+import com.example.data.model.UpdateCoursePermissionsPayload
 import com.example.data.model.UpdateSupportLinkStatusPayload
 import com.example.data.model.UserDevice
 import com.example.data.model.UpdateDeviceBanPayload
@@ -47,6 +50,12 @@ interface SupabaseApi {
     suspend fun updateAccessCodeStatus(
         @Query("id") idQuery: String, // e.g. "eq.<uuid>"
         @Body payload: UpdateCodeStatusPayload
+    ): Response<Unit>
+
+    @PATCH("rest/v1/access_codes")
+    suspend fun updateAccessCodeCoursePermissions(
+        @Query("id") idQuery: String, // e.g. "eq.<uuid>"
+        @Body payload: UpdateCoursePermissionsPayload
     ): Response<Unit>
 
     @DELETE("rest/v1/access_codes")
@@ -190,5 +199,28 @@ interface SupabaseApi {
     suspend fun deleteDeviceRecord(
         @Query("id") idQuery: String
     ): Response<Unit>
+
+    @GET("rest/v1/available_courses_catalog")
+    suspend fun getAvailableCoursesCatalog(
+        @Query("select") select: String = "*"
+    ): List<CourseCatalogItem>
+
+    @POST("rest/v1/rpc/admin_set_device_course_permissions")
+    suspend fun setDeviceCoursePermissionsRpc(
+        @Body payload: SetDeviceCoursePermissionsRpcPayload
+    ): Response<Unit>
+
+    @PATCH("rest/v1/devices")
+    suspend fun updateDeviceCoursePermissionsByHash(
+        @Query("device_hash") deviceHashQuery: String,
+        @Body payload: UpdateCoursePermissionsPayload
+    ): Response<Unit>
+
+    @PATCH("rest/v1/devices")
+    suspend fun updateDeviceCoursePermissionsById(
+        @Query("id") idQuery: String,
+        @Body payload: UpdateCoursePermissionsPayload
+    ): Response<Unit>
 }
+
 

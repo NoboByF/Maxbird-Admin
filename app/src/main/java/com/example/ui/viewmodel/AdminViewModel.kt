@@ -9,6 +9,7 @@ import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
+import com.example.data.model.CourseCatalogItem
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
@@ -75,6 +76,21 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _genNote = MutableStateFlow("")
     val genNote: StateFlow<String> = _genNote.asStateFlow()
 
+    private val _genIsRestricted = MutableStateFlow(false)
+    val genIsRestricted: StateFlow<Boolean> = _genIsRestricted.asStateFlow()
+
+    private val _genAllowedClasses = MutableStateFlow<List<String>>(emptyList())
+    val genAllowedClasses: StateFlow<List<String>> = _genAllowedClasses.asStateFlow()
+
+    private val _genAllowedGroups = MutableStateFlow<List<String>>(emptyList())
+    val genAllowedGroups: StateFlow<List<String>> = _genAllowedGroups.asStateFlow()
+
+    private val _genAllowedBatches = MutableStateFlow<List<String>>(emptyList())
+    val genAllowedBatches: StateFlow<List<String>> = _genAllowedBatches.asStateFlow()
+
+    private val _genAllowedPrograms = MutableStateFlow<List<String>>(emptyList())
+    val genAllowedPrograms: StateFlow<List<String>> = _genAllowedPrograms.asStateFlow()
+
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
@@ -123,6 +139,16 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isLoadingDevices = MutableStateFlow(false)
     val isLoadingDevices: StateFlow<Boolean> = _isLoadingDevices.asStateFlow()
+
+    // Course Catalog & Course Permissions State
+    private val _coursesCatalog = MutableStateFlow<List<CourseCatalogItem>>(emptyList())
+    val coursesCatalog: StateFlow<List<CourseCatalogItem>> = _coursesCatalog.asStateFlow()
+
+    private val _isLoadingCatalog = MutableStateFlow(false)
+    val isLoadingCatalog: StateFlow<Boolean> = _isLoadingCatalog.asStateFlow()
+
+    private val _isSavingCoursePermissions = MutableStateFlow(false)
+    val isSavingCoursePermissions: StateFlow<Boolean> = _isSavingCoursePermissions.asStateFlow()
 
     // App Updates Management State
     private val _appUpdates = MutableStateFlow<List<AppUpdate>>(emptyList())
@@ -282,6 +308,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         loadCodes()
         loadJoinedDevices()
         loadUserDevices()
+        loadAvailableCoursesCatalog()
         loadAppUpdates()
         loadAppNotices()
         loadActivationSupportLinks()
@@ -321,6 +348,20 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         _genNote.value = note
     }
 
+    fun setGenCoursePermissions(
+        isRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>
+    ) {
+        _genIsRestricted.value = isRestricted
+        _genAllowedClasses.value = allowedClasses
+        _genAllowedGroups.value = allowedGroups
+        _genAllowedBatches.value = allowedBatches
+        _genAllowedPrograms.value = allowedPrograms
+    }
+
     fun generateRandomCode(prefix: String = "MAX") {
         val randNum = Random.nextInt(1000, 9999)
         _genCode.value = "$prefix-$randNum"
@@ -349,7 +390,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     studentName = name,
                     maxDevices = _genMaxDevices.value,
                     isActive = true,
-                    note = _genNote.value.ifBlank { null }
+                    note = _genNote.value.ifBlank { null },
+                    isAccessRestricted = _genIsRestricted.value,
+                    allowedClasses = if (_genIsRestricted.value) _genAllowedClasses.value else emptyList(),
+                    allowedGroups = if (_genIsRestricted.value) _genAllowedGroups.value else emptyList(),
+                    allowedBatches = if (_genIsRestricted.value) _genAllowedBatches.value else emptyList(),
+                    allowedPrograms = if (_genIsRestricted.value) _genAllowedPrograms.value else emptyList()
                 )
 
                 val result = repository.createAccessCode(payload)
@@ -358,6 +404,11 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     _generatedSuccessCode.value = created
                     _genStudentName.value = ""
                     _genNote.value = ""
+                    _genIsRestricted.value = false
+                    _genAllowedClasses.value = emptyList()
+                    _genAllowedGroups.value = emptyList()
+                    _genAllowedBatches.value = emptyList()
+                    _genAllowedPrograms.value = emptyList()
                     generateRandomCode("MAX")
                     loadCodes()
                     refreshStats()
@@ -559,6 +610,132 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Throwable) {
                 showToast("মুছে ফেলতে ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    // Course & Syllabus Granular Access Control Operations
+    fun loadAvailableCoursesCatalog(forceRefresh: Boolean = false) {
+        viewModelScope.launch {
+            try {
+                _isLoadingCatalog.value = true
+                val result = repository.getAvailableCoursesCatalog(forceRefresh)
+                if (result.isSuccess) {
+                    _coursesCatalog.value = result.getOrNull() ?: emptyList()
+                }
+            } catch (_: Throwable) {
+                // Keep cached catalog
+            } finally {
+                _isLoadingCatalog.value = false
+            }
+        }
+    }
+
+    fun saveDeviceCoursePermissions(
+        device: UserDevice,
+        isRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                _isSavingCoursePermissions.value = true
+                val result = repository.setDeviceCoursePermissions(
+                    device = device,
+                    isRestricted = isRestricted,
+                    allowedClasses = allowedClasses,
+                    allowedGroups = allowedGroups,
+                    allowedBatches = allowedBatches,
+                    allowedPrograms = allowedPrograms
+                )
+                if (result.isSuccess) {
+                    // Update current state list immediately and then reload
+                    _userDevices.value = _userDevices.value.map { existing ->
+                        if ((device.id.isNotBlank() && existing.id == device.id) ||
+                            (device.deviceHash.isNotBlank() && existing.deviceHash == device.deviceHash)
+                        ) {
+                            existing.copy(
+                                isAccessRestricted = isRestricted,
+                                allowedClasses = allowedClasses,
+                                allowedGroups = allowedGroups,
+                                allowedBatches = allowedBatches,
+                                allowedPrograms = allowedPrograms
+                            )
+                        } else {
+                            existing
+                        }
+                    }
+                    loadUserDevices(forceRefresh = true)
+                    val msg = if (isRestricted) {
+                        "✅ ডিভাইসের কাস্টম কোর্স ও সিলেবাস পারমিশন সেভ হয়েছে!"
+                    } else {
+                        "✅ ডিভাইসের সকল ক্লাস ও কোর্স উন্মুক্ত করা হয়েছে!"
+                    }
+                    showToast(msg)
+                    onSuccess()
+                } else {
+                    showToast("পারমিশন সেভ করতে ব্যর্থ হয়েছে।")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isSavingCoursePermissions.value = false
+            }
+        }
+    }
+
+    fun saveAccessCodeCoursePermissions(
+        code: AccessCode,
+        isRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                _isSavingCoursePermissions.value = true
+                val result = repository.setAccessCodeCoursePermissions(
+                    codeId = code.id,
+                    isRestricted = isRestricted,
+                    allowedClasses = allowedClasses,
+                    allowedGroups = allowedGroups,
+                    allowedBatches = allowedBatches,
+                    allowedPrograms = allowedPrograms
+                )
+                if (result.isSuccess) {
+                    _codes.value = _codes.value.map { existing ->
+                        if (existing.id == code.id) {
+                            existing.copy(
+                                isAccessRestricted = isRestricted,
+                                allowedClasses = allowedClasses,
+                                allowedGroups = allowedGroups,
+                                allowedBatches = allowedBatches,
+                                allowedPrograms = allowedPrograms
+                            )
+                        } else {
+                            existing
+                        }
+                    }
+                    loadCodes()
+                    val msg = if (isRestricted) {
+                        "✅ কোড ${code.code}-এর কোর্স পারমিশন সেভ হয়েছে!"
+                    } else {
+                        "✅ কোড ${code.code}-এর সকল কোর্স উন্মুক্ত করা হয়েছে!"
+                    }
+                    showToast(msg)
+                    onSuccess()
+                } else {
+                    showToast("পারমিশন সেভ করতে ব্যর্থ হয়েছে।")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isSavingCoursePermissions.value = false
             }
         }
     }
