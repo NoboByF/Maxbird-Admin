@@ -11,7 +11,9 @@ import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
+import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.SetAccountCoursePermissionsRpcPayload
 import com.example.data.model.UserDevice
 import kotlinx.coroutines.flow.Flow
 
@@ -97,6 +99,15 @@ interface MaxBirdRepository {
         allowedGroups: List<String>,
         allowedBatches: List<String>,
         allowedPrograms: List<String>
+    ): Result<Unit>
+
+    suspend fun getDeviceShikhoAccounts(
+        deviceHash: String,
+        displayDeviceId: String
+    ): Result<List<DeviceShikhoAccount>>
+
+    suspend fun setAccountCoursePermissions(
+        payload: SetAccountCoursePermissionsRpcPayload
     ): Result<Unit>
 }
 

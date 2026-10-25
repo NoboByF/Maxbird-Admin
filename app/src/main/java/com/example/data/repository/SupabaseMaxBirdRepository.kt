@@ -11,7 +11,9 @@ import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
+import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.SetAccountCoursePermissionsRpcPayload
 import com.example.data.model.SetDeviceCoursePermissionsRpcPayload
 import com.example.data.model.UpdateCodeStatusPayload
 import com.example.data.model.UpdateCoursePermissionsPayload
@@ -1187,6 +1189,59 @@ class SupabaseMaxBirdRepository(
             Result.success(Unit)
         } catch (e: Exception) {
             Result.success(Unit)
+        }
+    }
+
+    override suspend fun getDeviceShikhoAccounts(
+        deviceHash: String,
+        displayDeviceId: String
+    ): Result<List<DeviceShikhoAccount>> = withContext(Dispatchers.IO) {
+        try {
+            val clauses = mutableListOf<String>()
+            if (deviceHash.isNotBlank()) {
+                clauses.add("device_hash.eq.${deviceHash.trim()}")
+            }
+            if (displayDeviceId.isNotBlank()) {
+                clauses.add("display_device_id.eq.${displayDeviceId.trim()}")
+            }
+            if (clauses.isEmpty()) {
+                return@withContext Result.success(emptyList())
+            }
+
+            val orFilter = "(${clauses.joinToString(",")})"
+            val api = supabaseClient.getApi()
+            val accounts = api.getDeviceShikhoAccounts(
+                orFilter = orFilter,
+                order = "is_access_granted.desc,last_seen_at.desc"
+            )
+            Result.success(accounts)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun setAccountCoursePermissions(
+        payload: SetAccountCoursePermissionsRpcPayload
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val response = api.setAccountCoursePermissionsRpc(payload)
+            if (response.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                val errBody = try {
+                    response.errorBody()?.string().orEmpty()
+                } catch (_: Exception) {
+                    ""
+                }
+                Result.failure(
+                    Exception(
+                        "RPC admin_set_account_course_permissions ব্যর্থ (HTTP ${response.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 }

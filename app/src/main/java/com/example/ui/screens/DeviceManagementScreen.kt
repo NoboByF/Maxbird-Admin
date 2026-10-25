@@ -73,6 +73,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CourseCatalogItem
+import com.example.data.model.DeviceShikhoAccount
+import com.example.data.model.SetAccountCoursePermissionsRpcPayload
+import com.example.data.model.ShikhoAcademicProgram
+import com.example.data.model.ShikhoBatchExamYear
+import com.example.data.model.ShikhoClassItem
 import com.example.data.model.UserDevice
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CoralDanger
@@ -94,7 +99,7 @@ import java.util.TimeZone
 
 /**
  * Clean & modern Material 3 screen for managing real user devices
- * connected to Supabase table `public.devices`.
+ * connected to Supabase table `public.devices` and `public.device_shikho_accounts`.
  */
 @Composable
 fun DeviceManagementScreen(
@@ -105,10 +110,36 @@ fun DeviceManagementScreen(
     coursesCatalog: List<CourseCatalogItem> = emptyList(),
     isLoadingCatalog: Boolean = false,
     isSavingPermissions: Boolean = false,
+    isShikhoConnected: Boolean = false,
+    shikhoConnectedPhone: String = "",
+    shikhoConnectedUserId: String = "",
+    deviceShikhoAccounts: List<DeviceShikhoAccount> = emptyList(),
+    isLoadingDeviceShikhoAccounts: Boolean = false,
+    deviceShikhoAccountsError: String? = null,
+    shikhoClassList: List<ShikhoClassItem> = emptyList(),
+    isLoadingShikhoClasses: Boolean = false,
+    shikhoClassesError: String? = null,
+    shikhoBatchYears: List<ShikhoBatchExamYear> = emptyList(),
+    isLoadingShikhoBatches: Boolean = false,
+    shikhoBatchesError: String? = null,
+    shikhoPrograms: List<ShikhoAcademicProgram> = emptyList(),
+    isLoadingShikhoPrograms: Boolean = false,
+    shikhoProgramsError: String? = null,
     onSearchChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
     onRefresh: () -> Unit,
     onRefreshCatalog: () -> Unit = {},
+    onOpenShikhoLogin: () -> Unit = {},
+    onLogoutShikho: () -> Unit = {},
+    onLoadDeviceShikhoAccounts: (UserDevice) -> Unit = {},
+    onLoadRealShikhoClasses: () -> Unit = {},
+    onLoadRealShikhoBatches: (String) -> Unit = {},
+    onLoadRealShikhoPrograms: (String, String, String) -> Unit = { _, _, _ -> },
+    onSaveAccountCoursePermissions: (
+        device: UserDevice,
+        payload: SetAccountCoursePermissionsRpcPayload,
+        onSuccess: () -> Unit
+    ) -> Unit = { _, _, _ -> },
     onToggleBan: (UserDevice, String?) -> Unit,
     onDeleteDevice: (UserDevice) -> Unit,
     onSaveCoursePermissions: (
@@ -130,6 +161,9 @@ fun DeviceManagementScreen(
 
     // Dialog state for deleting a device record
     var deviceToDelete by remember { mutableStateOf<UserDevice?>(null) }
+
+    // BottomSheet state for viewing device's Shikho Accounts & setting per-account real course access
+    var deviceForShikhoAccounts by remember { mutableStateOf<UserDevice?>(null) }
 
     // BottomSheet state for configuring Device-Specific Granular Syllabus & Course Access Control
     var deviceForCourseAccess by remember { mutableStateOf<UserDevice?>(null) }
@@ -233,6 +267,17 @@ fun DeviceManagementScreen(
                     }
                 }
             }
+        }
+
+        // Admin Shikho Account Login / Connection Banner Card
+        item {
+            ShikhoConnectionBannerCard(
+                isConnected = isShikhoConnected,
+                connectedPhone = shikhoConnectedPhone,
+                connectedUserId = shikhoConnectedUserId,
+                onOpenLoginDialog = onOpenShikhoLogin,
+                onLogout = onLogoutShikho
+            )
         }
 
         // Live Telemetry & Quick Metrics Banner
@@ -504,7 +549,8 @@ fun DeviceManagementScreen(
                         onShowToast("ডিভাইস আইডি কপি করা হয়েছে: $toCopy")
                     },
                     onCourseAccessClick = {
-                        deviceForCourseAccess = device
+                        deviceForShikhoAccounts = device
+                        onLoadDeviceShikhoAccounts(device)
                     },
                     onBanClick = {
                         banReasonInput = "অ্যাডমিন কর্তৃক ব্যান করা হয়েছে"
@@ -519,6 +565,47 @@ fun DeviceManagementScreen(
                 )
             }
         }
+    }
+
+    // Device Shikho Accounts (`public.device_shikho_accounts`) & Real Shikho API Course Selector Sheet
+    deviceForShikhoAccounts?.let { targetDevice ->
+        val latestDevice = devices.find {
+            (targetDevice.id.isNotBlank() && it.id == targetDevice.id) ||
+                    (targetDevice.deviceHash.isNotBlank() && it.deviceHash == targetDevice.deviceHash)
+        } ?: targetDevice
+
+        DeviceShikhoAccountsBottomSheet(
+            device = latestDevice,
+            accounts = deviceShikhoAccounts,
+            isLoadingAccounts = isLoadingDeviceShikhoAccounts,
+            accountsError = deviceShikhoAccountsError,
+            isShikhoConnected = isShikhoConnected,
+            shikhoConnectedPhone = shikhoConnectedPhone,
+            shikhoClassList = shikhoClassList,
+            isLoadingClassList = isLoadingShikhoClasses,
+            classListError = shikhoClassesError,
+            shikhoBatchYears = shikhoBatchYears,
+            isLoadingBatches = isLoadingShikhoBatches,
+            batchesError = shikhoBatchesError,
+            shikhoPrograms = shikhoPrograms,
+            isLoadingPrograms = isLoadingShikhoPrograms,
+            programsError = shikhoProgramsError,
+            isSavingPermissions = isSavingPermissions,
+            onRefreshAccounts = { onLoadDeviceShikhoAccounts(latestDevice) },
+            onOpenShikhoLogin = onOpenShikhoLogin,
+            onLoadRealClasses = onLoadRealShikhoClasses,
+            onLoadRealBatches = onLoadRealShikhoBatches,
+            onLoadRealPrograms = onLoadRealShikhoPrograms,
+            onSaveAccountPermissions = { payload, onSuccess ->
+                onSaveAccountCoursePermissions(latestDevice, payload, onSuccess)
+            },
+            onOpenLegacyDeviceCourseSheet = {
+                deviceForShikhoAccounts = null
+                deviceForCourseAccess = latestDevice
+            },
+            onShowToast = onShowToast,
+            onDismiss = { deviceForShikhoAccounts = null }
+        )
     }
 
     // Device-Specific Granular Syllabus & Course Access Control BottomSheet

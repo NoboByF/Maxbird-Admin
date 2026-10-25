@@ -8,6 +8,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,9 +32,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -69,8 +73,10 @@ import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.DeviceManagementScreen
 import com.example.ui.screens.NoticeManagementScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.ShikhoAccountLoginDialog
 import com.example.ui.screens.UpdatesManagementScreen
 
+import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.MyApplicationTheme
@@ -98,6 +104,15 @@ class MainActivity : ComponentActivity() {
                 val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
                 val toastMessage by viewModel.toastMessage.collectAsStateWithLifecycle()
 
+                // Shikho API Auth states
+                val isShikhoConnected by viewModel.isShikhoConnected.collectAsStateWithLifecycle()
+                val shikhoConnectedPhone by viewModel.shikhoConnectedPhone.collectAsStateWithLifecycle()
+                val shikhoConnectedUserId by viewModel.shikhoConnectedUserId.collectAsStateWithLifecycle()
+                val shikhoAccessToken by viewModel.shikhoAccessToken.collectAsStateWithLifecycle()
+                val isShikhoLoginDialogOpen by viewModel.isShikhoLoginDialogOpen.collectAsStateWithLifecycle()
+                val isLoggingInShikho by viewModel.isLoggingInShikho.collectAsStateWithLifecycle()
+                val shikhoLoginError by viewModel.shikhoLoginError.collectAsStateWithLifecycle()
+
                 val snackbarHostState = remember { SnackbarHostState() }
                 val coroutineScope = rememberCoroutineScope()
 
@@ -117,6 +132,20 @@ class MainActivity : ComponentActivity() {
                     viewModel.navigateTo(Screen.Dashboard)
                 }
 
+                // Global Shikho Account Login Dialog
+                ShikhoAccountLoginDialog(
+                    isOpen = isShikhoLoginDialogOpen,
+                    isConnected = isShikhoConnected,
+                    connectedPhone = shikhoConnectedPhone,
+                    connectedUserId = shikhoConnectedUserId,
+                    accessTokenPreview = shikhoAccessToken,
+                    isLoggingIn = isLoggingInShikho,
+                    errorMessage = shikhoLoginError,
+                    onDismiss = { viewModel.closeShikhoLoginDialog() },
+                    onLoginSubmit = { phone, pin -> viewModel.loginShikhoAccount(phone, pin) },
+                    onLogout = { viewModel.logoutShikhoAccount() }
+                )
+
                 Scaffold(
                     contentWindowInsets = WindowInsets.safeDrawing,
                     snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -125,6 +154,9 @@ class MainActivity : ComponentActivity() {
                         AdminTopHeaderBar(
                             currentScreen = currentScreen,
                             isLoading = isLoadingStats,
+                            isShikhoConnected = isShikhoConnected,
+                            shikhoConnectedPhone = shikhoConnectedPhone,
+                            onOpenShikhoLogin = { viewModel.openShikhoLoginDialog() },
                             onRefresh = { viewModel.refreshStats() },
                             onNavigate = { screen -> viewModel.navigateTo(screen) }
                         )
@@ -261,6 +293,19 @@ class MainActivity : ComponentActivity() {
                                 val isLoadingCatalog by viewModel.isLoadingCatalog.collectAsStateWithLifecycle()
                                 val isSavingPermissions by viewModel.isSavingCoursePermissions.collectAsStateWithLifecycle()
 
+                                val deviceShikhoAccounts by viewModel.deviceShikhoAccounts.collectAsStateWithLifecycle()
+                                val isLoadingDeviceShikhoAccounts by viewModel.isLoadingDeviceShikhoAccounts.collectAsStateWithLifecycle()
+                                val deviceShikhoAccountsError by viewModel.deviceShikhoAccountsError.collectAsStateWithLifecycle()
+                                val shikhoClassList by viewModel.shikhoClassList.collectAsStateWithLifecycle()
+                                val isLoadingShikhoClasses by viewModel.isLoadingShikhoClasses.collectAsStateWithLifecycle()
+                                val shikhoClassesError by viewModel.shikhoClassesError.collectAsStateWithLifecycle()
+                                val shikhoBatchYears by viewModel.shikhoBatchYears.collectAsStateWithLifecycle()
+                                val isLoadingShikhoBatches by viewModel.isLoadingShikhoBatches.collectAsStateWithLifecycle()
+                                val shikhoBatchesError by viewModel.shikhoBatchesError.collectAsStateWithLifecycle()
+                                val shikhoPrograms by viewModel.shikhoPrograms.collectAsStateWithLifecycle()
+                                val isLoadingShikhoPrograms by viewModel.isLoadingShikhoPrograms.collectAsStateWithLifecycle()
+                                val shikhoProgramsError by viewModel.shikhoProgramsError.collectAsStateWithLifecycle()
+
                                 DeviceManagementScreen(
                                     devices = userDevices,
                                     searchQuery = searchQuery,
@@ -269,10 +314,36 @@ class MainActivity : ComponentActivity() {
                                     coursesCatalog = coursesCatalog,
                                     isLoadingCatalog = isLoadingCatalog,
                                     isSavingPermissions = isSavingPermissions,
+                                    isShikhoConnected = isShikhoConnected,
+                                    shikhoConnectedPhone = shikhoConnectedPhone,
+                                    shikhoConnectedUserId = shikhoConnectedUserId,
+                                    deviceShikhoAccounts = deviceShikhoAccounts,
+                                    isLoadingDeviceShikhoAccounts = isLoadingDeviceShikhoAccounts,
+                                    deviceShikhoAccountsError = deviceShikhoAccountsError,
+                                    shikhoClassList = shikhoClassList,
+                                    isLoadingShikhoClasses = isLoadingShikhoClasses,
+                                    shikhoClassesError = shikhoClassesError,
+                                    shikhoBatchYears = shikhoBatchYears,
+                                    isLoadingShikhoBatches = isLoadingShikhoBatches,
+                                    shikhoBatchesError = shikhoBatchesError,
+                                    shikhoPrograms = shikhoPrograms,
+                                    isLoadingShikhoPrograms = isLoadingShikhoPrograms,
+                                    shikhoProgramsError = shikhoProgramsError,
                                     onSearchChange = { viewModel.setDeviceSearchQuery(it) },
                                     onFilterChange = { viewModel.setDeviceFilter(it) },
                                     onRefresh = { viewModel.loadUserDevices(forceRefresh = true) },
                                     onRefreshCatalog = { viewModel.loadAvailableCoursesCatalog(forceRefresh = true) },
+                                    onOpenShikhoLogin = { viewModel.openShikhoLoginDialog() },
+                                    onLogoutShikho = { viewModel.logoutShikhoAccount() },
+                                    onLoadDeviceShikhoAccounts = { device -> viewModel.loadDeviceShikhoAccounts(device) },
+                                    onLoadRealShikhoClasses = { viewModel.loadRealShikhoClasses() },
+                                    onLoadRealShikhoBatches = { classCode -> viewModel.loadRealShikhoBatches(classCode) },
+                                    onLoadRealShikhoPrograms = { classCode, groupCode, batchYear ->
+                                        viewModel.loadRealShikhoPrograms(classCode, groupCode, batchYear)
+                                    },
+                                    onSaveAccountCoursePermissions = { device, payload, onSuccess ->
+                                        viewModel.saveAccountCoursePermissions(device, payload, onSuccess)
+                                    },
                                     onToggleBan = { device, reason -> viewModel.toggleUserDeviceBan(device, reason) },
                                     onDeleteDevice = { device -> viewModel.deleteUserDevice(device) },
                                     onSaveCoursePermissions = { device, restricted, classes, groups, batches, programs, onSuccess ->
@@ -482,7 +553,12 @@ class MainActivity : ComponentActivity() {
                                     onKeyChange = { viewModel.updateSupabaseKey(it) },
                                     onSaveSettings = { viewModel.saveSupabaseSettings() },
                                     onTestConnection = { viewModel.testSupabaseConnection() },
-                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                    onShowToast = { msg -> viewModel.showToast(msg) },
+                                    isShikhoConnected = isShikhoConnected,
+                                    shikhoConnectedPhone = shikhoConnectedPhone,
+                                    shikhoConnectedUserId = shikhoConnectedUserId,
+                                    onOpenShikhoLogin = { viewModel.openShikhoLoginDialog() },
+                                    onLogoutShikho = { viewModel.logoutShikhoAccount() }
                                 )
                             }
                         }
@@ -497,6 +573,9 @@ class MainActivity : ComponentActivity() {
 private fun AdminTopHeaderBar(
     currentScreen: Screen,
     isLoading: Boolean,
+    isShikhoConnected: Boolean = false,
+    shikhoConnectedPhone: String = "",
+    onOpenShikhoLogin: () -> Unit = {},
     onRefresh: () -> Unit,
     onNavigate: (Screen) -> Unit
 ) {
@@ -568,11 +647,43 @@ private fun AdminTopHeaderBar(
                         }
                     }
 
-                    // Dashboard Actions: Refresh & Settings
+                    // Dashboard Actions: Shikho API Login, Refresh & Settings
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Surface(
+                            color = if (isShikhoConnected) EmeraldSuccess.copy(alpha = 0.16f) else AmberWarning.copy(alpha = 0.16f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .border(
+                                    1.dp,
+                                    if (isShikhoConnected) EmeraldSuccess.copy(alpha = 0.4f) else AmberWarning.copy(alpha = 0.4f),
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .clickable(onClick = onOpenShikhoLogin)
+                                .testTag("top_btn_shikho_login")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isShikhoConnected) Icons.Default.VerifiedUser else Icons.Default.Key,
+                                    contentDescription = "Shikho API Login",
+                                    tint = if (isShikhoConnected) EmeraldSuccess else AmberWarning,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = if (isShikhoConnected) "শিখো API" else "শিখো লগইন",
+                                    color = if (isShikhoConnected) EmeraldSuccess else AmberWarning,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
                         IconButton(
                             onClick = onRefresh,
                             modifier = Modifier
@@ -654,21 +765,58 @@ private fun AdminTopHeaderBar(
                         }
                     }
 
-                    // Direct Home icon
-                    IconButton(
-                        onClick = { onNavigate(Screen.Dashboard) },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Slate800)
-                            .testTag("top_btn_home_shortcut")
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Home,
-                            contentDescription = "Home",
-                            tint = Slate400,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Surface(
+                            color = if (isShikhoConnected) EmeraldSuccess.copy(alpha = 0.16f) else AmberWarning.copy(alpha = 0.16f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .border(
+                                    1.dp,
+                                    if (isShikhoConnected) EmeraldSuccess.copy(alpha = 0.4f) else AmberWarning.copy(alpha = 0.4f),
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .clickable(onClick = onOpenShikhoLogin)
+                                .testTag("top_btn_shikho_login_sub")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isShikhoConnected) Icons.Default.VerifiedUser else Icons.Default.Key,
+                                    contentDescription = "Shikho API Login",
+                                    tint = if (isShikhoConnected) EmeraldSuccess else AmberWarning,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = if (isShikhoConnected) "শিখো API" else "শিখো লগইন",
+                                    color = if (isShikhoConnected) EmeraldSuccess else AmberWarning,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Direct Home icon
+                        IconButton(
+                            onClick = { onNavigate(Screen.Dashboard) },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Slate800)
+                                .testTag("top_btn_home_shortcut")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Home,
+                                contentDescription = "Home",
+                                tint = Slate400,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }

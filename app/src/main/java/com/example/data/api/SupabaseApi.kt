@@ -14,6 +14,8 @@ import com.example.data.model.UpdateAppNoticeStatusPayload
 import com.example.data.model.ActivationSupportLink
 import com.example.data.model.CourseCatalogItem
 import com.example.data.model.CreateSupportLinkPayload
+import com.example.data.model.DeviceShikhoAccount
+import com.example.data.model.SetAccountCoursePermissionsRpcPayload
 import com.example.data.model.SetDeviceCoursePermissionsRpcPayload
 import com.example.data.model.UpdateCoursePermissionsPayload
 import com.example.data.model.UpdateSupportLinkStatusPayload
@@ -220,6 +222,18 @@ interface SupabaseApi {
     suspend fun updateDeviceCoursePermissionsById(
         @Query("id") idQuery: String,
         @Body payload: UpdateCoursePermissionsPayload
+    ): Response<Unit>
+
+    @GET("rest/v1/device_shikho_accounts")
+    suspend fun getDeviceShikhoAccounts(
+        @Query("or") orFilter: String,
+        @Query("order") order: String = "is_access_granted.desc,last_seen_at.desc",
+        @Query("select") select: String = "*"
+    ): List<DeviceShikhoAccount>
+
+    @POST("rest/v1/rpc/admin_set_account_course_permissions")
+    suspend fun setAccountCoursePermissionsRpc(
+        @Body payload: SetAccountCoursePermissionsRpcPayload
     ): Response<Unit>
 }
 

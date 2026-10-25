@@ -182,7 +182,12 @@ fun SettingsScreen(
     onKeyChange: (String) -> Unit,
     onSaveSettings: () -> Unit,
     onTestConnection: () -> Unit,
-    onShowToast: (String) -> Unit
+    onShowToast: (String) -> Unit,
+    isShikhoConnected: Boolean = false,
+    shikhoConnectedPhone: String = "",
+    shikhoConnectedUserId: String = "",
+    onOpenShikhoLogin: () -> Unit = {},
+    onLogoutShikho: () -> Unit = {}
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
 
@@ -193,6 +198,17 @@ fun SettingsScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Shikho Account API Connection Card
+        item {
+            ShikhoConnectionBannerCard(
+                isConnected = isShikhoConnected,
+                connectedPhone = shikhoConnectedPhone,
+                connectedUserId = shikhoConnectedUserId,
+                onOpenLoginDialog = onOpenShikhoLogin,
+                onLogout = onLogoutShikho
+            )
+        }
+
         // Modern Header Card
         item {
             Card(

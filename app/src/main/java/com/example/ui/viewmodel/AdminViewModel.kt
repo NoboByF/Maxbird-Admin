@@ -14,10 +14,16 @@ import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
 import com.example.data.api.CloudinaryClient
+import com.example.data.api.ShikhoApiClient
 import com.example.data.model.CloudinaryHistoryItem
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
+import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.SetAccountCoursePermissionsRpcPayload
+import com.example.data.model.ShikhoAcademicProgram
+import com.example.data.model.ShikhoBatchExamYear
+import com.example.data.model.ShikhoClassItem
 import com.example.data.model.UserDevice
 import com.example.data.preferences.AdminPreferences
 import com.example.data.repository.MaxBirdRepository
@@ -35,6 +41,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val supabaseClient = SupabaseClient(adminPreferences)
     private val repository: MaxBirdRepository = SupabaseMaxBirdRepository(supabaseClient, adminPreferences)
     private val cloudinaryClient = CloudinaryClient(application)
+    private val shikhoApiClient = ShikhoApiClient()
 
     // Navigation State
     private val _currentScreen = MutableStateFlow<Screen>(Screen.Dashboard)
@@ -149,6 +156,66 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isSavingCoursePermissions = MutableStateFlow(false)
     val isSavingCoursePermissions: StateFlow<Boolean> = _isSavingCoursePermissions.asStateFlow()
+
+    // Admin Shikho Account Login State (Real Shikho API)
+    private val _isShikhoConnected = MutableStateFlow(adminPreferences.isShikhoConnected())
+    val isShikhoConnected: StateFlow<Boolean> = _isShikhoConnected.asStateFlow()
+
+    private val _shikhoConnectedPhone = MutableStateFlow(adminPreferences.getShikhoPhone())
+    val shikhoConnectedPhone: StateFlow<String> = _shikhoConnectedPhone.asStateFlow()
+
+    private val _shikhoConnectedUserId = MutableStateFlow(adminPreferences.getShikhoUserId())
+    val shikhoConnectedUserId: StateFlow<String> = _shikhoConnectedUserId.asStateFlow()
+
+    private val _shikhoAccessToken = MutableStateFlow(adminPreferences.getShikhoAccessToken())
+    val shikhoAccessToken: StateFlow<String> = _shikhoAccessToken.asStateFlow()
+
+    private val _isShikhoLoginDialogOpen = MutableStateFlow(false)
+    val isShikhoLoginDialogOpen: StateFlow<Boolean> = _isShikhoLoginDialogOpen.asStateFlow()
+
+    private val _isLoggingInShikho = MutableStateFlow(false)
+    val isLoggingInShikho: StateFlow<Boolean> = _isLoggingInShikho.asStateFlow()
+
+    private val _shikhoLoginError = MutableStateFlow<String?>(null)
+    val shikhoLoginError: StateFlow<String?> = _shikhoLoginError.asStateFlow()
+
+    // Device Shikho Accounts (`public.device_shikho_accounts`) State
+    private val _deviceShikhoAccounts = MutableStateFlow<List<DeviceShikhoAccount>>(emptyList())
+    val deviceShikhoAccounts: StateFlow<List<DeviceShikhoAccount>> = _deviceShikhoAccounts.asStateFlow()
+
+    private val _isLoadingDeviceShikhoAccounts = MutableStateFlow(false)
+    val isLoadingDeviceShikhoAccounts: StateFlow<Boolean> = _isLoadingDeviceShikhoAccounts.asStateFlow()
+
+    private val _deviceShikhoAccountsError = MutableStateFlow<String?>(null)
+    val deviceShikhoAccountsError: StateFlow<String?> = _deviceShikhoAccountsError.asStateFlow()
+
+    // Real Shikho API Syllabus & Course Selector State
+    private val _shikhoClassList = MutableStateFlow<List<ShikhoClassItem>>(emptyList())
+    val shikhoClassList: StateFlow<List<ShikhoClassItem>> = _shikhoClassList.asStateFlow()
+
+    private val _isLoadingShikhoClasses = MutableStateFlow(false)
+    val isLoadingShikhoClasses: StateFlow<Boolean> = _isLoadingShikhoClasses.asStateFlow()
+
+    private val _shikhoClassesError = MutableStateFlow<String?>(null)
+    val shikhoClassesError: StateFlow<String?> = _shikhoClassesError.asStateFlow()
+
+    private val _shikhoBatchYears = MutableStateFlow<List<ShikhoBatchExamYear>>(emptyList())
+    val shikhoBatchYears: StateFlow<List<ShikhoBatchExamYear>> = _shikhoBatchYears.asStateFlow()
+
+    private val _isLoadingShikhoBatches = MutableStateFlow(false)
+    val isLoadingShikhoBatches: StateFlow<Boolean> = _isLoadingShikhoBatches.asStateFlow()
+
+    private val _shikhoBatchesError = MutableStateFlow<String?>(null)
+    val shikhoBatchesError: StateFlow<String?> = _shikhoBatchesError.asStateFlow()
+
+    private val _shikhoPrograms = MutableStateFlow<List<ShikhoAcademicProgram>>(emptyList())
+    val shikhoPrograms: StateFlow<List<ShikhoAcademicProgram>> = _shikhoPrograms.asStateFlow()
+
+    private val _isLoadingShikhoPrograms = MutableStateFlow(false)
+    val isLoadingShikhoPrograms: StateFlow<Boolean> = _isLoadingShikhoPrograms.asStateFlow()
+
+    private val _shikhoProgramsError = MutableStateFlow<String?>(null)
+    val shikhoProgramsError: StateFlow<String?> = _shikhoProgramsError.asStateFlow()
 
     // App Updates Management State
     private val _appUpdates = MutableStateFlow<List<AppUpdate>>(emptyList())
@@ -731,6 +798,197 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     onSuccess()
                 } else {
                     showToast("পারমিশন সেভ করতে ব্যর্থ হয়েছে।")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isSavingCoursePermissions.value = false
+            }
+        }
+    }
+
+    // =========================================================================
+    // Part 1: Admin Shikho Account Login Operations
+    // =========================================================================
+    fun openShikhoLoginDialog() {
+        _shikhoLoginError.value = null
+        _isShikhoLoginDialogOpen.value = true
+    }
+
+    fun closeShikhoLoginDialog() {
+        _isShikhoLoginDialogOpen.value = false
+        _shikhoLoginError.value = null
+    }
+
+    fun loginShikhoAccount(rawPhone: String, pin: String) {
+        viewModelScope.launch {
+            try {
+                _isLoggingInShikho.value = true
+                _shikhoLoginError.value = null
+                val result = shikhoApiClient.loginWithPin(rawPhone, pin)
+                if (result.isSuccess) {
+                    val session = result.getOrThrow()
+                    adminPreferences.saveShikhoSession(
+                        accessToken = session.accessToken,
+                        refreshToken = session.refreshToken,
+                        userId = session.userId,
+                        phone = session.phone
+                    )
+                    _shikhoAccessToken.value = session.accessToken
+                    _shikhoConnectedPhone.value = session.phone
+                    _shikhoConnectedUserId.value = session.userId
+                    _isShikhoConnected.value = true
+                    _isShikhoLoginDialogOpen.value = false
+                    showToast("✅ শিখো অ্যাকাউন্ট লগইন সফল হয়েছে! রিয়েল সিলেবাস লোড হচ্ছে...")
+                    loadRealShikhoClasses()
+                } else {
+                    val err = result.exceptionOrNull()?.message ?: "শিখো লগইন ব্যর্থ হয়েছে"
+                    _shikhoLoginError.value = err
+                }
+            } catch (e: Throwable) {
+                _shikhoLoginError.value = e.message ?: "লগইনে ত্রুটি ঘটেছে"
+            } finally {
+                _isLoggingInShikho.value = false
+            }
+        }
+    }
+
+    fun logoutShikhoAccount() {
+        adminPreferences.clearShikhoSession()
+        _shikhoAccessToken.value = ""
+        _shikhoConnectedPhone.value = ""
+        _shikhoConnectedUserId.value = ""
+        _isShikhoConnected.value = false
+        _shikhoClassList.value = emptyList()
+        _shikhoBatchYears.value = emptyList()
+        _shikhoPrograms.value = emptyList()
+        showToast("শিখো অ্যাকাউন্ট লগআউট করা হয়েছে।")
+    }
+
+    // =========================================================================
+    // Part 2: Device Shikho Accounts (`public.device_shikho_accounts`) Operations
+    // =========================================================================
+    fun loadDeviceShikhoAccounts(device: UserDevice) {
+        viewModelScope.launch {
+            try {
+                _isLoadingDeviceShikhoAccounts.value = true
+                _deviceShikhoAccountsError.value = null
+                val result = repository.getDeviceShikhoAccounts(
+                    deviceHash = device.deviceHash,
+                    displayDeviceId = device.displayDeviceId
+                )
+                if (result.isSuccess) {
+                    _deviceShikhoAccounts.value = result.getOrNull().orEmpty()
+                } else {
+                    _deviceShikhoAccounts.value = emptyList()
+                    _deviceShikhoAccountsError.value = result.exceptionOrNull()?.message
+                }
+            } catch (e: Throwable) {
+                _deviceShikhoAccounts.value = emptyList()
+                _deviceShikhoAccountsError.value = e.message
+            } finally {
+                _isLoadingDeviceShikhoAccounts.value = false
+            }
+        }
+    }
+
+    // =========================================================================
+    // Part 3: Real Shikho API Class -> Group -> Batch -> Course Operations
+    // =========================================================================
+    fun loadRealShikhoClasses() {
+        val token = adminPreferences.getShikhoAccessToken()
+        if (token.isBlank()) {
+            _shikhoClassesError.value = "শিখো অ্যাকাউন্ট লগইন করা নেই।"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                _isLoadingShikhoClasses.value = true
+                _shikhoClassesError.value = null
+                val result = shikhoApiClient.fetchClassList(token)
+                if (result.isSuccess) {
+                    _shikhoClassList.value = result.getOrNull().orEmpty()
+                } else {
+                    _shikhoClassesError.value = result.exceptionOrNull()?.message
+                }
+            } catch (e: Throwable) {
+                _shikhoClassesError.value = e.message
+            } finally {
+                _isLoadingShikhoClasses.value = false
+            }
+        }
+    }
+
+    fun loadRealShikhoBatches(classCode: String) {
+        val token = adminPreferences.getShikhoAccessToken()
+        if (token.isBlank() || classCode.isBlank()) return
+        viewModelScope.launch {
+            try {
+                _isLoadingShikhoBatches.value = true
+                _shikhoBatchesError.value = null
+                val result = shikhoApiClient.fetchBatchOptions(token, classCode)
+                if (result.isSuccess) {
+                    _shikhoBatchYears.value = result.getOrNull().orEmpty()
+                } else {
+                    _shikhoBatchesError.value = result.exceptionOrNull()?.message
+                }
+            } catch (e: Throwable) {
+                _shikhoBatchesError.value = e.message
+            } finally {
+                _isLoadingShikhoBatches.value = false
+            }
+        }
+    }
+
+    fun loadRealShikhoPrograms(classCode: String, groupCode: String, batchYear: String) {
+        val token = adminPreferences.getShikhoAccessToken()
+        if (token.isBlank() || classCode.isBlank() || batchYear.isBlank()) return
+        viewModelScope.launch {
+            try {
+                _isLoadingShikhoPrograms.value = true
+                _shikhoProgramsError.value = null
+                val result = shikhoApiClient.fetchAcademicPrograms(
+                    accessToken = token,
+                    className = classCode,
+                    group = groupCode,
+                    year = batchYear
+                )
+                if (result.isSuccess) {
+                    _shikhoPrograms.value = result.getOrNull().orEmpty()
+                } else {
+                    _shikhoPrograms.value = emptyList()
+                    _shikhoProgramsError.value = result.exceptionOrNull()?.message
+                }
+            } catch (e: Throwable) {
+                _shikhoPrograms.value = emptyList()
+                _shikhoProgramsError.value = e.message
+            } finally {
+                _isLoadingShikhoPrograms.value = false
+            }
+        }
+    }
+
+    // =========================================================================
+    // Part 4: Save Account Course Permissions via Supabase RPC `admin_set_account_course_permissions`
+    // =========================================================================
+    fun saveAccountCoursePermissions(
+        device: UserDevice,
+        payload: SetAccountCoursePermissionsRpcPayload,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                _isSavingCoursePermissions.value = true
+                val result = repository.setAccountCoursePermissions(payload)
+                if (result.isSuccess) {
+                    // Refresh accounts for this device and userDevices list
+                    loadDeviceShikhoAccounts(device)
+                    loadUserDevices(forceRefresh = true)
+                    showToast("✅ শিখো অ্যাকাউন্ট (${payload.userPhone.ifBlank { payload.shikhoUserId }})-এ কোর্স পারমিশন সফলভাবে সেভ হয়েছে!")
+                    onSuccess()
+                } else {
+                    val err = result.exceptionOrNull()?.message ?: "পারমিশন সেভ করতে ব্যর্থ হয়েছে।"
+                    showToast("⚠️ $err")
                 }
             } catch (e: Throwable) {
                 showToast("ত্রুটি: ${e.message}")
