@@ -26,10 +26,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v6
         with:
-          java-version: "17"
+          java-version: "21"
           distribution: temurin
           cache: gradle
 
@@ -89,15 +89,17 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SERVICE_ROLE: ${{ secrets.SERVICE_ROLE }}
         run: |
           set -euo pipefail
           umask 077
           {
-            printf 'SUPABASE_URL=%s\n' "$SUPABASE_URL"
-            printf 'SUPABASE_ANON_KEY=%s\n' "$SUPABASE_ANON_KEY"
+            printf 'SERVICE_ROLE=%s\n' "${SERVICE_ROLE:-your-service-role-key}"
+            printf 'SUPABASE_URL=%s\n' "${SUPABASE_URL:-https://your-project-ref.supabase.co}"
+            printf 'SUPABASE_ANON_KEY=%s\n' "${SUPABASE_ANON_KEY:-your-supabase-anon-key}"
             # Client-side apps must use the public anon/publishable key.
             # Do not embed a Supabase service-role/secret key in an APK.
-            printf 'SUPABASE_KEY=%s\n' "$SUPABASE_ANON_KEY"
+            printf 'SUPABASE_KEY=%s\n' "${SUPABASE_ANON_KEY:-your-supabase-key}"
           } > .env
           echo "Supabase client configuration prepared."
 
