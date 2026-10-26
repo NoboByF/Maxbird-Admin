@@ -231,11 +231,30 @@ interface SupabaseApi {
     ): Response<Unit>
 
     @GET("rest/v1/device_shikho_accounts")
+    suspend fun getDeviceShikhoAccountsByDeviceId(
+        @Query("device_id") deviceIdQuery: String, // e.g. "in.(hash,displayId)"
+        @Query("order") order: String = "last_login_at.desc.nullslast",
+        @Query("select") select: String = "*"
+    ): List<DeviceShikhoAccount>
+
+    @GET("rest/v1/device_shikho_accounts")
     suspend fun getDeviceShikhoAccounts(
         @Query("or") orFilter: String,
         @Query("order") order: String = "is_access_granted.desc,last_seen_at.desc",
         @Query("select") select: String = "*"
     ): List<DeviceShikhoAccount>
+
+    @GET("rest/v1/device_shikho_accounts")
+    suspend fun getAllDeviceShikhoAccounts(
+        @Query("select") select: String = "*"
+    ): List<DeviceShikhoAccount>
+
+    @PATCH("rest/v1/device_shikho_accounts")
+    suspend fun patchDeviceShikhoAccount(
+        @Query("device_id") deviceIdQuery: String,
+        @Query("shikho_user_id") shikhoUserIdQuery: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
 
     @POST("rest/v1/rpc/admin_set_account_course_permissions")
     suspend fun setAccountCoursePermissionsRpc(
@@ -268,7 +287,7 @@ interface SupabaseApi {
     @GET("rest/v1/course_access_enrollments")
     suspend fun getCourseAccessEnrollments(
         @Query("select") select: String = "*",
-        @Query("order") order: String = "updated_at.desc.nullslast,created_at.desc"
+        @Query("order") order: String = "updated_at.desc.nullslast,requested_at.desc.nullslast"
     ): List<CourseAccessEnrollment>
 
     @PATCH("rest/v1/course_access_enrollments")
@@ -280,8 +299,14 @@ interface SupabaseApi {
     @GET("rest/v1/course_payment_transactions")
     suspend fun getCoursePaymentTransactions(
         @Query("select") select: String = "*",
-        @Query("order") order: String = "submitted_at.desc"
+        @Query("order") order: String = "submitted_at.desc.nullslast"
     ): List<CoursePaymentTransaction>
+
+    @PATCH("rest/v1/course_payment_transactions")
+    suspend fun patchCoursePaymentTransaction(
+        @Query("id") idQuery: String, // e.g. "eq.15"
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
 
     @POST("rest/v1/rpc/admin_approve_course_access_request")
     suspend fun approveCourseAccessRequestRpc(
@@ -291,6 +316,11 @@ interface SupabaseApi {
     @POST("rest/v1/rpc/admin_review_course_payment")
     suspend fun reviewCoursePaymentRpc(
         @Body payload: ReviewCoursePaymentRpcPayload
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/admin_review_course_payment")
+    suspend fun reviewCoursePaymentRpcRaw(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
 
     @POST("rest/v1/rpc/enforce_overdue_course_installments")

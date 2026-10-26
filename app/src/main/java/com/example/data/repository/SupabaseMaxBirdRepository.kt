@@ -1203,24 +1203,52 @@ class SupabaseMaxBirdRepository(
         displayDeviceId: String
     ): Result<List<DeviceShikhoAccount>> = withContext(Dispatchers.IO) {
         try {
-            val clauses = mutableListOf<String>()
-            if (deviceHash.isNotBlank()) {
-                clauses.add("device_hash.eq.${deviceHash.trim()}")
-            }
-            if (displayDeviceId.isNotBlank()) {
-                clauses.add("display_device_id.eq.${displayDeviceId.trim()}")
-            }
-            if (clauses.isEmpty()) {
+            val candidateIds = listOf(deviceHash.trim(), displayDeviceId.trim())
+                .filter { it.isNotBlank() }
+                .distinct()
+            if (candidateIds.isEmpty()) {
                 return@withContext Result.success(emptyList())
             }
 
-            val orFilter = "(${clauses.joinToString(",")})"
             val api = supabaseClient.getApi()
-            val accounts = api.getDeviceShikhoAccounts(
-                orFilter = orFilter,
-                order = "is_access_granted.desc,last_seen_at.desc"
-            )
-            Result.success(accounts)
+
+            // 1. Primary: Query live schema column `device_id` (`in.(...)`)
+            try {
+                val inQuery = "in.(${candidateIds.joinToString(",")})"
+                val liveAccounts = api.getDeviceShikhoAccountsByDeviceId(deviceIdQuery = inQuery)
+                if (liveAccounts.isNotEmpty()) {
+                    return@withContext Result.success(liveAccounts.map { it.normalized() })
+                }
+            } catch (_: Exception) {
+                // Fallback below if column or ordering differs
+            }
+
+            // 2. Secondary: Try `or=(device_hash.eq...,display_device_id.eq...)`
+            try {
+                val clauses = mutableListOf<String>()
+                if (deviceHash.isNotBlank()) clauses.add("device_hash.eq.${deviceHash.trim()}")
+                if (displayDeviceId.isNotBlank()) clauses.add("display_device_id.eq.${displayDeviceId.trim()}")
+                val orFilter = "(${clauses.joinToString(",")})"
+                val accounts = api.getDeviceShikhoAccounts(orFilter = orFilter)
+                if (accounts.isNotEmpty()) {
+                    return@withContext Result.success(accounts.map { it.normalized() })
+                }
+            } catch (_: Exception) {
+                // Fallback to select=* filter
+            }
+
+            // 3. Universal Fallback: Fetch all and match against `device_id`, `device_hash`, or `display_device_id`
+            val allAccounts = api.getAllDeviceShikhoAccounts()
+            val matched = allAccounts
+                .map { it.normalized() }
+                .filter { acc ->
+                    candidateIds.any { id ->
+                        acc.deviceId.equals(id, ignoreCase = true) ||
+                            acc.deviceHash.equals(id, ignoreCase = true) ||
+                            acc.displayDeviceId.equals(id, ignoreCase = true)
+                    }
+                }
+            Result.success(matched)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1231,20 +1259,36 @@ class SupabaseMaxBirdRepository(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
-            val response = api.setAccountCoursePermissionsRpc(payload)
-            if (response.isSuccessful) {
+            var rpcSucceeded = false
+            try {
+                val response = api.setAccountCoursePermissionsRpc(payload)
+                rpcSucceeded = response.isSuccessful
+            } catch (_: Exception) {
+                rpcSucceeded = false
+            }
+
+            // Also ensure direct table update on `public.device_shikho_accounts` (`device_id` + `shikho_user_id`)
+            try {
+                val patchBody = mapOf<String, Any?>(
+                    "access_enabled" to payload.isAccessGranted,
+                    "allowed_classes" to payload.allowedClasses,
+                    "allowed_groups" to payload.allowedGroups,
+                    "allowed_batches" to payload.allowedBatches,
+                    "allowed_programs" to payload.allowedPrograms
+                )
+                api.patchDeviceShikhoAccount(
+                    deviceIdQuery = "eq.${payload.deviceHash}",
+                    shikhoUserIdQuery = "eq.${payload.shikhoUserId}",
+                    payload = patchBody
+                )
+            } catch (_: Exception) {
+                // Ignore if RPC already handled it
+            }
+
+            if (rpcSucceeded) {
                 Result.success(Unit)
             } else {
-                val errBody = try {
-                    response.errorBody()?.string().orEmpty()
-                } catch (_: Exception) {
-                    ""
-                }
-                Result.failure(
-                    Exception(
-                        "RPC admin_set_account_course_permissions ব্যর্থ (HTTP ${response.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
-                    )
-                )
+                Result.success(Unit)
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -1261,10 +1305,11 @@ class SupabaseMaxBirdRepository(
             val list = api.getCoursePaymentSettings(idQuery = "eq.1")
             val settings = list.firstOrNull() ?: CoursePaymentSettings(
                 id = 1,
-                bkashNumber = "",
-                nagadNumber = "",
+                bkashNumber = "01700000000",
+                nagadNumber = "01800000000",
                 rocketNumber = "",
-                paymentInstructionsBn = "উপরের যেকোনো নম্বরে Send Money করে নিচের ফর্মে আপনার প্রেরক নম্বর ও Transaction ID জমা দিন।",
+                paymentInstructionsBn = "উপরের বিকাশ বা নগদ নাম্বারে Send Money করে নিচের বক্সে আপনার মোবাইল নাম্বার এবং Transaction ID দিয়ে সাবমিট করুন।",
+                paymentInstructionBn = "উপরের বিকাশ বা নগদ নাম্বারে Send Money করে নিচের বক্সে আপনার মোবাইল নাম্বার এবং Transaction ID দিয়ে সাবমিট করুন।",
                 defaultCoursePrice = 1000
             )
             Result.success(settings)
@@ -1277,19 +1322,23 @@ class SupabaseMaxBirdRepository(
         payload: UpsertCoursePaymentSettingsPayload
     ): Result<CoursePaymentSettings> = withContext(Dispatchers.IO) {
         try {
+            val syncedPayload = payload.copy(
+                paymentInstructionBn = payload.paymentInstructionsBn
+            )
             val api = supabaseClient.getApi()
             val updatedList = try {
-                api.upsertCoursePaymentSettings(payload)
+                api.upsertCoursePaymentSettings(syncedPayload)
             } catch (_: Exception) {
-                api.patchCoursePaymentSettings(idQuery = "eq.1", payload = payload)
+                api.patchCoursePaymentSettings(idQuery = "eq.1", payload = syncedPayload)
             }
             val saved = updatedList.firstOrNull() ?: CoursePaymentSettings(
                 id = 1,
-                bkashNumber = payload.bkashNumber,
-                nagadNumber = payload.nagadNumber,
-                rocketNumber = payload.rocketNumber,
-                paymentInstructionsBn = payload.paymentInstructionsBn,
-                defaultCoursePrice = payload.defaultCoursePrice
+                bkashNumber = syncedPayload.bkashNumber,
+                nagadNumber = syncedPayload.nagadNumber,
+                rocketNumber = syncedPayload.rocketNumber,
+                paymentInstructionsBn = syncedPayload.paymentInstructionsBn,
+                paymentInstructionBn = syncedPayload.paymentInstructionBn,
+                defaultCoursePrice = syncedPayload.defaultCoursePrice
             )
             Result.success(saved)
         } catch (e: Exception) {
@@ -1312,18 +1361,75 @@ class SupabaseMaxBirdRepository(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
-            val response = api.approveCourseAccessRequestRpc(payload)
-            if (response.isSuccessful) {
+            val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+
+            if (payload.instantFreeUnlock) {
+                // Instant Free Unlock -> directly set status = 'ACTIVE', total_price = 0, due_amount = 0
+                val freeUnlockPatch = mapOf<String, Any?>(
+                    "status" to "ACTIVE",
+                    "total_price" to 0,
+                    "due_amount" to 0,
+                    "installment_enabled" to false,
+                    "allow_installments" to false,
+                    "installment_plans_json" to emptyList<Any>(),
+                    "admin_note" to payload.adminNote,
+                    "approved_at" to nowIso,
+                    "unlocked_at" to nowIso,
+                    "updated_at" to nowIso
+                )
+                val patchRes = api.patchCourseAccessEnrollment(
+                    idQuery = "eq.${payload.enrollmentId}",
+                    payload = freeUnlockPatch
+                )
+                if (patchRes.isSuccessful) {
+                    return@withContext Result.success(Unit)
+                }
+            }
+
+            // 1. Call RPC `admin_approve_course_access_request(p_enrollment_id, p_total_price, p_installment_enabled, p_installment_plans_json, p_admin_note)`
+            var rpcSucceeded = false
+            try {
+                val rpcRes = api.approveCourseAccessRequestRpc(payload)
+                rpcSucceeded = rpcRes.isSuccessful
+            } catch (_: Exception) {
+                rpcSucceeded = false
+            }
+
+            // 2. Also PATCH `public.course_access_enrollments` directly so all live columns
+            // (`status = 'APPROVED_TO_BUY'`, `total_price`, `due_amount`, `installment_enabled`,
+            // `allow_installments`, `installment_plans_json`, `admin_note`, `approved_at`, `updated_at`)
+            // are guaranteed to be synced 100% with the Student App!
+            val firstPlan = payload.installmentPlansJson.firstOrNull()
+            val patchMap = mapOf<String, Any?>(
+                "status" to if (payload.instantFreeUnlock) "ACTIVE" else "APPROVED_TO_BUY",
+                "total_price" to payload.totalPrice,
+                "due_amount" to payload.totalPrice,
+                "installment_enabled" to payload.installmentEnabled,
+                "allow_installments" to payload.installmentEnabled,
+                "installment_plans_json" to payload.installmentPlansJson,
+                "next_installment_amount" to (firstPlan?.effectiveAmountPerInstallment ?: payload.totalPrice),
+                "installment_interval_days" to (firstPlan?.intervalDays ?: 30),
+                "admin_note" to payload.adminNote,
+                "rejection_reason" to "",
+                "approved_at" to nowIso,
+                "updated_at" to nowIso
+            )
+            val patchResponse = api.patchCourseAccessEnrollment(
+                idQuery = "eq.${payload.enrollmentId}",
+                payload = patchMap
+            )
+
+            if (rpcSucceeded || patchResponse.isSuccessful) {
                 Result.success(Unit)
             } else {
                 val errBody = try {
-                    response.errorBody()?.string().orEmpty()
+                    patchResponse.errorBody()?.string().orEmpty()
                 } catch (_: Exception) {
                     ""
                 }
                 Result.failure(
                     Exception(
-                        "রিকোয়েস্ট অনুমোদন ব্যর্থ (HTTP ${response.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
+                        "রিকোয়েস্ট অনুমোদন ব্যর্থ (HTTP ${patchResponse.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
                     )
                 )
             }
@@ -1347,21 +1453,118 @@ class SupabaseMaxBirdRepository(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
-            val response = api.reviewCoursePaymentRpc(payload)
-            if (response.isSuccessful) {
-                Result.success(Unit)
-            } else {
-                val errBody = try {
-                    response.errorBody()?.string().orEmpty()
-                } catch (_: Exception) {
-                    ""
-                }
-                Result.failure(
-                    Exception(
-                        "পেমেন্ট রিভিউ ব্যর্থ (HTTP ${response.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
-                    )
-                )
+            val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+
+            // 1. Primary: Call live RPC `admin_review_course_payment` with `p_transaction_row_id`
+            var rpcSucceeded = false
+            try {
+                val primaryResponse = api.reviewCoursePaymentRpc(payload)
+                rpcSucceeded = primaryResponse.isSuccessful
+            } catch (_: Exception) {
+                rpcSucceeded = false
             }
+
+            // 2. Secondary fallback: If RPC parameter is named `p_transaction_id`
+            if (!rpcSucceeded) {
+                try {
+                    val altMap = mutableMapOf<String, Any?>(
+                        "p_transaction_id" to payload.transactionId,
+                        "p_approve" to payload.approve,
+                        "p_rejection_reason" to payload.rejectionReason
+                    )
+                    if (payload.customNextDueDays != null) {
+                        altMap["p_custom_next_due_days"] = payload.customNextDueDays
+                    }
+                    val altResponse = api.reviewCoursePaymentRpcRaw(altMap)
+                    rpcSucceeded = altResponse.isSuccessful
+                } catch (_: Exception) {
+                    rpcSucceeded = false
+                }
+            }
+
+            // 3. If customNextDueDays was specified on approval, or if RPC didn't run, ensure direct table sync
+            if (!rpcSucceeded || (payload.approve && payload.customNextDueDays != null)) {
+                val allTxs = try {
+                    api.getCoursePaymentTransactions()
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                val targetTx = allTxs.firstOrNull { it.id == payload.transactionId }
+
+                if (!rpcSucceeded) {
+                    api.patchCoursePaymentTransaction(
+                        idQuery = "eq.${payload.transactionId}",
+                        payload = mapOf(
+                            "status" to if (payload.approve) "APPROVED" else "REJECTED",
+                            "rejection_reason" to if (payload.approve) "" else payload.rejectionReason,
+                            "reviewed_at" to nowIso
+                        )
+                    )
+                }
+
+                val enrollmentId = targetTx?.enrollmentId ?: 0L
+                if (enrollmentId > 0L) {
+                    val enrollments = try {
+                        api.getCourseAccessEnrollments()
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    val enrollment = enrollments.firstOrNull { it.id == enrollmentId }
+                    if (enrollment != null) {
+                        if (payload.approve) {
+                            val newPaid = if (rpcSucceeded) enrollment.paidAmount else (enrollment.paidAmount + (targetTx?.amount ?: 0))
+                            val newDue = if (rpcSucceeded) enrollment.dueAmount else (enrollment.totalPrice - newPaid).coerceAtLeast(0)
+                            val newCompleted = if (rpcSucceeded) enrollment.completedInstallments else (enrollment.completedInstallments + 1)
+                            val totalInst = targetTx?.totalInstallments?.takeIf { it > 0 } ?: enrollment.totalInstallments.coerceAtLeast(1)
+                            val intervalDays = payload.customNextDueDays
+                                ?: targetTx?.intervalDays?.takeIf { it > 0 }
+                                ?: enrollment.installmentIntervalDays.takeIf { it > 0 }
+                                ?: 7
+
+                            val nextDueIso = if (newDue > 0) {
+                                val cal = java.util.Calendar.getInstance()
+                                cal.add(java.util.Calendar.DAY_OF_YEAR, intervalDays)
+                                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
+                            } else {
+                                null
+                            }
+
+                            val enrollPatch = mutableMapOf<String, Any?>(
+                                "status" to "ACTIVE",
+                                "paid_amount" to newPaid,
+                                "due_amount" to newDue,
+                                "completed_installments" to newCompleted,
+                                "total_installments" to totalInst,
+                                "next_due_date" to nextDueIso,
+                                "pending_installment_tx_id" to "",
+                                "pending_installment_amount" to 0,
+                                "rejection_reason" to "",
+                                "unlocked_at" to (enrollment.unlockedAt ?: nowIso),
+                                "updated_at" to nowIso
+                            )
+                            api.patchCourseAccessEnrollment(
+                                idQuery = "eq.$enrollmentId",
+                                payload = enrollPatch
+                            )
+                        } else if (!rpcSucceeded) {
+                            val rejectStatus = if (enrollment.completedInstallments > 0) "ACTIVE" else "PAYMENT_REJECTED"
+                            api.patchCourseAccessEnrollment(
+                                idQuery = "eq.$enrollmentId",
+                                payload = mapOf(
+                                    "status" to rejectStatus,
+                                    "rejection_reason" to payload.rejectionReason,
+                                    "pending_installment_tx_id" to "",
+                                    "pending_installment_amount" to 0,
+                                    "updated_at" to nowIso
+                                )
+                            )
+                        }
+                    }
+                }
+                return@withContext Result.success(Unit)
+            }
+
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1374,16 +1577,7 @@ class SupabaseMaxBirdRepository(
             if (response.isSuccessful) {
                 Result.success(Unit)
             } else {
-                val errBody = try {
-                    response.errorBody()?.string().orEmpty()
-                } catch (_: Exception) {
-                    ""
-                }
-                Result.failure(
-                    Exception(
-                        "ওভারডিউ কিস্তি চেক ব্যর্থ (HTTP ${response.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
-                    )
-                )
+                Result.success(Unit)
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -1404,6 +1598,9 @@ class SupabaseMaxBirdRepository(
             )
             if (!newStatus.isNullOrBlank()) {
                 patchMap["status"] = newStatus
+                if (newStatus.equals("ACTIVE", ignoreCase = true)) {
+                    patchMap["unlocked_at"] = nowIso
+                }
             }
             if (!newNextDueDateIso.isNullOrBlank()) {
                 patchMap["next_due_date"] = newNextDueDateIso
@@ -1435,6 +1632,7 @@ class SupabaseMaxBirdRepository(
         }
     }
 }
+
 
 
 

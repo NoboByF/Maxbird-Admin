@@ -252,17 +252,48 @@ data class UpdateDeviceBanPayload(
 
 /**
  * Course catalog item representing a course in `public.available_courses_catalog`.
+ * Matches live SQL schema (`program_id`, `title`, `class_code`, `class_name`, `group_code`, `group_name`, `batch_id`, `batch_name`, `academic_year`, `banner_url`, `subject_count`).
  */
 @JsonClass(generateAdapter = true)
 data class CourseCatalogItem(
     @Json(name = "program_id") val programId: String = "",
-    @Json(name = "title_bn") val titleBn: String = "",
+    @Json(name = "title") val title: String? = null,
+    @Json(name = "title_bn") val rawTitleBn: String? = null,
     @Json(name = "class_code") val classCode: String? = null,
+    @Json(name = "class_name") val className: String? = null,
     @Json(name = "group_code") val groupCode: String? = null,
+    @Json(name = "group_name") val groupName: String? = null,
     @Json(name = "batch_id") val batchId: String? = null,
+    @Json(name = "batch_name") val batchName: String? = null,
+    @Json(name = "academic_year") val academicYear: String? = null,
     @Json(name = "banner_url") val bannerUrl: String? = null,
+    @Json(name = "subject_count") val subjectCount: Int? = 0,
     @Json(name = "is_free") val isFree: Boolean? = false
-)
+) {
+    constructor(
+        programId: String,
+        titleBn: String,
+        classCode: String?,
+        groupCode: String?,
+        batchId: String?,
+        bannerUrl: String?,
+        isFree: Boolean?
+    ) : this(
+        programId = programId,
+        title = titleBn,
+        rawTitleBn = titleBn,
+        classCode = classCode,
+        groupCode = groupCode,
+        batchId = batchId,
+        bannerUrl = bannerUrl,
+        isFree = isFree
+    )
+
+    val titleBn: String
+        get() = rawTitleBn?.takeIf { it.isNotBlank() }
+            ?: title?.takeIf { it.isNotBlank() }
+            ?: programId
+}
 
 /**
  * RPC payload for `admin_set_device_course_permissions`.

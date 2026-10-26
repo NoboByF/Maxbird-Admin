@@ -466,13 +466,8 @@ fun CourseSalesManagementScreen(
                     onEnforceOverdue = onEnforceOverdueInstallments,
                     onExtendDueDays = { enrollment, days -> onExtendDueDate(enrollment, days) },
                     onOpenCustomDaysDialog = { enrollmentForCustomDaysDialog = it },
-                    onToggleLockUnlock = { enrollment ->
-                        val nextStatus = if (enrollment.status.equals("ACTIVE", ignoreCase = true)) {
-                            "REVOKED"
-                        } else {
-                            "ACTIVE"
-                        }
-                        onUpdateEnrollmentStatus(enrollment, nextStatus)
+                    onSetStatus = { enrollment, targetStatus ->
+                        onUpdateEnrollmentStatus(enrollment, targetStatus)
                     },
                     onOpenEditPlans = { enrollmentForPricingDialog = it },
                     onCopyText = { label, text ->
@@ -516,11 +511,11 @@ private fun AccessRequestsSubTab(
             val query = searchQuery.trim().lowercase()
             val queryMatch = query.isEmpty() ||
                 (item.studentName?.lowercase()?.contains(query) == true) ||
-                (item.studentPhone?.lowercase()?.contains(query) == true) ||
-                (item.deviceId?.lowercase()?.contains(query) == true) ||
-                (item.shikhoAccountKey?.lowercase()?.contains(query) == true) ||
+                (item.effectivePhone?.lowercase()?.contains(query) == true) ||
+                (item.effectiveDeviceId?.lowercase()?.contains(query) == true) ||
+                (item.effectiveAccountKey?.lowercase()?.contains(query) == true) ||
                 (item.programTitle?.lowercase()?.contains(query) == true) ||
-                (item.studentClass?.lowercase()?.contains(query) == true)
+                (item.effectiveClass?.lowercase()?.contains(query) == true)
             statusMatch && queryMatch
         }
     }
@@ -673,12 +668,12 @@ private fun EnrollmentRequestCard(
                         )
                         Text(
                             text = buildString {
-                                append(enrollment.studentPhone?.takeIf { it.isNotBlank() } ?: "ফোন নম্বর নেই")
-                                if (!enrollment.studentClass.isNullOrBlank()) {
-                                    append(" • ${formatClassBn(enrollment.studentClass)}")
+                                append(enrollment.effectivePhone?.takeIf { it.isNotBlank() } ?: "ফোন নম্বর নেই")
+                                if (!enrollment.effectiveClass.isNullOrBlank()) {
+                                    append(" • ${formatClassBn(enrollment.effectiveClass)}")
                                 }
-                                if (!enrollment.studentGroup.isNullOrBlank()) {
-                                    append(" (${formatGroupBn(enrollment.studentGroup)})")
+                                if (!enrollment.effectiveGroup.isNullOrBlank()) {
+                                    append(" (${formatGroupBn(enrollment.effectiveGroup)})")
                                 }
                             },
                             style = MaterialTheme.typography.labelSmall.copy(
@@ -737,20 +732,22 @@ private fun EnrollmentRequestCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (!enrollment.deviceId.isNullOrBlank()) {
+                val devId = enrollment.effectiveDeviceId
+                val accKey = enrollment.effectiveAccountKey
+                if (!devId.isNullOrBlank()) {
                     CopyableMetaChip(
                         modifier = Modifier.weight(1f),
                         label = "ডিভাইস",
-                        value = enrollment.deviceId,
-                        onCopy = { onCopyText("ডিভাইস আইডি", enrollment.deviceId) }
+                        value = devId,
+                        onCopy = { onCopyText("ডিভাইস আইডি", devId) }
                     )
                 }
-                if (!enrollment.shikhoAccountKey.isNullOrBlank()) {
+                if (!accKey.isNullOrBlank()) {
                     CopyableMetaChip(
                         modifier = Modifier.weight(1f),
                         label = "অ্যাকাউন্ট কী",
-                        value = enrollment.shikhoAccountKey,
-                        onCopy = { onCopyText("অ্যাকাউন্ট কী", enrollment.shikhoAccountKey) }
+                        value = accKey,
+                        onCopy = { onCopyText("অ্যাকাউন্ট কী", accKey) }
                     )
                 }
             }
@@ -779,7 +776,7 @@ private fun EnrollmentRequestCard(
                                 )
                             )
                             Text(
-                                text = if (enrollment.installmentEnabled) "কিস্তি চালু (${plans.size}টি প্ল্যান)" else "শুধু এককালীন পেমেন্ট",
+                                text = if (enrollment.effectiveInstallmentsEnabled) "কিস্তি চালু (${plans.size}টি প্ল্যান)" else "শুধু এককালীন পেমেন্ট",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = NeonCyan,
                                     fontWeight = FontWeight.SemiBold
@@ -803,7 +800,7 @@ private fun EnrollmentRequestCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "সময়: ${formatIsoTimestampBn(enrollment.createdAt)}",
+                    text = "সময়: ${formatIsoTimestampBn(enrollment.effectiveTimestamp)}",
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = Slate400,
                         fontSize = 11.sp
@@ -1093,9 +1090,10 @@ private fun PaymentTransactionCard(
                             }
                         }
 
-                        if (!transaction.planTitle.isNullOrBlank()) {
+                        val pTitle = transaction.effectivePlanTitle
+                        if (!pTitle.isNullOrBlank()) {
                             Text(
-                                text = transaction.planTitle,
+                                text = pTitle,
                                 style = MaterialTheme.typography.labelSmall.copy(color = Slate400)
                             )
                         }
@@ -1161,7 +1159,7 @@ private fun PaymentTransactionCard(
 
             // Submitted Time
             Text(
-                text = "জমা দেওয়ার সময়: ${formatIsoTimestampBn(transaction.submittedAt)}",
+                text = "জমা দেওয়ার সময়: ${formatIsoTimestampBn(transaction.effectiveSubmittedAt)}",
                 style = MaterialTheme.typography.labelSmall.copy(
                     color = Slate400,
                     fontSize = 11.sp
@@ -1233,7 +1231,7 @@ private fun ActiveInstallmentsSubTab(
     onEnforceOverdue: () -> Unit,
     onExtendDueDays: (CourseAccessEnrollment, Int) -> Unit,
     onOpenCustomDaysDialog: (CourseAccessEnrollment) -> Unit,
-    onToggleLockUnlock: (CourseAccessEnrollment) -> Unit,
+    onSetStatus: (CourseAccessEnrollment, String) -> Unit,
     onOpenEditPlans: (CourseAccessEnrollment) -> Unit,
     onCopyText: (String, String) -> Unit
 ) {
@@ -1253,8 +1251,8 @@ private fun ActiveInstallmentsSubTab(
             val query = searchQuery.trim().lowercase()
             val queryMatch = query.isEmpty() ||
                 (item.studentName?.lowercase()?.contains(query) == true) ||
-                (item.studentPhone?.lowercase()?.contains(query) == true) ||
-                (item.deviceId?.lowercase()?.contains(query) == true) ||
+                (item.effectivePhone?.lowercase()?.contains(query) == true) ||
+                (item.effectiveDeviceId?.lowercase()?.contains(query) == true) ||
                 (item.programTitle?.lowercase()?.contains(query) == true)
             statusMatch && queryMatch
         }
@@ -1406,7 +1404,7 @@ private fun ActiveInstallmentsSubTab(
                     onExtend7Days = { onExtendDueDays(enrollment, 7) },
                     onExtend15Days = { onExtendDueDays(enrollment, 15) },
                     onOpenCustomDays = { onOpenCustomDaysDialog(enrollment) },
-                    onToggleLockUnlock = { onToggleLockUnlock(enrollment) },
+                    onSetStatus = { targetStatus -> onSetStatus(enrollment, targetStatus) },
                     onOpenEditPlans = { onOpenEditPlans(enrollment) },
                     onCopyText = onCopyText
                 )
@@ -1423,7 +1421,7 @@ private fun InstallmentLedgerCard(
     onExtend7Days: () -> Unit,
     onExtend15Days: () -> Unit,
     onOpenCustomDays: () -> Unit,
-    onToggleLockUnlock: () -> Unit,
+    onSetStatus: (String) -> Unit,
     onOpenEditPlans: () -> Unit,
     onCopyText: (String, String) -> Unit
 ) {
@@ -1468,9 +1466,9 @@ private fun InstallmentLedgerCard(
                     )
                     Text(
                         text = buildString {
-                            append(enrollment.studentPhone?.takeIf { it.isNotBlank() } ?: "ফোন নেই")
-                            if (!enrollment.studentClass.isNullOrBlank()) {
-                                append(" • ${formatClassBn(enrollment.studentClass)}")
+                            append(enrollment.effectivePhone?.takeIf { it.isNotBlank() } ?: "ফোন নেই")
+                            if (!enrollment.effectiveClass.isNullOrBlank()) {
+                                append(" • ${formatClassBn(enrollment.effectiveClass)}")
                             }
                         },
                         style = MaterialTheme.typography.labelSmall.copy(color = Slate400)
@@ -1601,6 +1599,36 @@ private fun InstallmentLedgerCard(
                 }
             }
 
+            // Quick Manual Status Control: ACTIVE / OVERDUE / REVOKED
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "স্ট্যাটাস:",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = Slate400,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                SmallActionChip(
+                    label = "ACTIVE (আনলক)",
+                    color = if (isActive) EmeraldSuccess else Slate400,
+                    onClick = { onSetStatus("ACTIVE") }
+                )
+                SmallActionChip(
+                    label = "OVERDUE (লক)",
+                    color = if (isOverdue) AmberWarning else Slate400,
+                    onClick = { onSetStatus("OVERDUE") }
+                )
+                SmallActionChip(
+                    label = "REVOKED (বাতিল)",
+                    color = if (enrollment.status.equals("REVOKED", true)) CoralDanger else Slate400,
+                    onClick = { onSetStatus("REVOKED") }
+                )
+            }
+
             // Bottom Row: Manual Lock/Unlock + Re-configure Price/Plans
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1624,7 +1652,9 @@ private fun InstallmentLedgerCard(
                 }
 
                 Button(
-                    onClick = onToggleLockUnlock,
+                    onClick = {
+                        onSetStatus(if (isActive) "REVOKED" else "ACTIVE")
+                    },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isActive) CoralDanger.copy(alpha = 0.85f) else EmeraldSuccess
                     ),
@@ -1670,7 +1700,7 @@ private fun PaymentGatewaySettingsSubTab(
     }
     var instructionsBn by remember(settings) {
         mutableStateOf(
-            settings.paymentInstructionsBn?.takeIf { it.isNotBlank() }
+            settings.effectiveInstructionsBn.takeIf { it.isNotBlank() }
                 ?: "উপরের যেকোনো নম্বরে Send Money করে নিচের ফর্মে আপনার প্রেরক নম্বর ও Transaction ID জমা দিন।"
         )
     }
@@ -1860,7 +1890,7 @@ private fun ApproveCourseAccessPricingDialog(
 ) {
     val initialPrice = if (enrollment.totalPrice > 0) enrollment.totalPrice else defaultCoursePrice
     var totalPriceText by remember(enrollment) { mutableStateOf(initialPrice.toString()) }
-    var installmentEnabled by remember(enrollment) { mutableStateOf(enrollment.installmentEnabled) }
+    var installmentEnabled by remember(enrollment) { mutableStateOf(enrollment.effectiveInstallmentsEnabled) }
     var adminNote by remember(enrollment) {
         mutableStateOf(
             enrollment.adminNote?.takeIf { it.isNotBlank() }
@@ -2142,14 +2172,13 @@ private fun ApproveCourseAccessPricingDialog(
                                     }
 
                                     plansList.add(
-                                        InstallmentPlanItem(
+                                        InstallmentPlanItem.create(
                                             planId = planId,
-                                            titleBn = title,
-                                            installmentCount = count,
-                                            firstPayment = firstAmt,
-                                            perInstallmentAmount = perAmt,
+                                            titleText = title,
+                                            count = count,
+                                            amountPerInst = perAmt,
                                             intervalDays = intervalDays,
-                                            scheduleAmounts = schedule
+                                            schedule = schedule
                                         )
                                     )
                                     customTitleBn = ""
@@ -2189,7 +2218,7 @@ private fun ApproveCourseAccessPricingDialog(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = plan.titleBn,
+                                        text = plan.effectiveTitle,
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             color = Color.White,
                                             fontWeight = FontWeight.Bold
@@ -2197,8 +2226,8 @@ private fun ApproveCourseAccessPricingDialog(
                                     )
                                     Text(
                                         text = buildString {
-                                            append("কিস্তি: ${plan.installmentCount}টি • ")
-                                            append("ধাপ: ${plan.scheduleAmounts.joinToString(" + ") { "৳$it" }}")
+                                            append("কিস্তি: ${plan.effectiveInstallmentsCount}টি • ")
+                                            append("ধাপ: ${plan.effectiveScheduleAmounts.joinToString(" + ") { "৳$it" }}")
                                             if (plan.intervalDays > 0) {
                                                 append(" • বিরতি: ${plan.intervalDays} দিন")
                                             }
@@ -2247,14 +2276,13 @@ private fun ApproveCourseAccessPricingDialog(
                         val totalPrice = totalPriceText.toIntOrNull()?.coerceAtLeast(0) ?: 1000
                         val finalPlans = if (!installmentEnabled) {
                             listOf(
-                                InstallmentPlanItem(
-                                    planId = "full",
-                                    titleBn = "একবারে সম্পূর্ণ পেমেন্ট (Full Payment)",
-                                    installmentCount = 1,
-                                    firstPayment = totalPrice,
-                                    perInstallmentAmount = totalPrice,
+                                InstallmentPlanItem.create(
+                                    planId = "full_1",
+                                    titleText = "একবারে সম্পূর্ণ পেমেন্ট (Full Payment)",
+                                    count = 1,
+                                    amountPerInst = totalPrice,
                                     intervalDays = 0,
-                                    scheduleAmounts = listOf(totalPrice)
+                                    schedule = listOf(totalPrice)
                                 )
                             )
                         } else if (plansList.isEmpty()) {

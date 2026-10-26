@@ -78,28 +78,60 @@ data class ShikhoAcademicProgram(
 
 /**
  * Represents a row in Supabase `public.device_shikho_accounts`.
+ * Supports both live schema columns (`device_id`, `phone`, `email`, `class_name`, `institution`,
+ * `access_enabled`, `first_login_at`, `last_login_at`) and legacy aliases (`device_hash`, `user_phone`,
+ * `current_class`, `is_access_granted`, `last_seen_at`).
  */
 @JsonClass(generateAdapter = true)
 data class DeviceShikhoAccount(
     @Json(name = "id") val id: String = "",
+    @Json(name = "device_id") val deviceId: String? = null,
     @Json(name = "device_hash") val deviceHash: String = "",
     @Json(name = "display_device_id") val displayDeviceId: String? = null,
     @Json(name = "shikho_user_id") val shikhoUserId: String = "",
+    @Json(name = "phone") val phone: String? = null,
     @Json(name = "user_phone") val userPhone: String? = null,
+    @Json(name = "email") val email: String? = null,
     @Json(name = "student_name") val studentName: String? = null,
+    @Json(name = "institution") val institution: String? = null,
     @Json(name = "user_avatar") val userAvatar: String? = null,
+    @Json(name = "class_name") val className: String? = null,
     @Json(name = "current_class") val currentClass: String? = null,
     @Json(name = "current_group") val currentGroup: String? = null,
     @Json(name = "current_batch") val currentBatch: String? = null,
+    @Json(name = "access_enabled") val accessEnabled: Boolean? = null,
     @Json(name = "is_access_granted") val isAccessGranted: Boolean = false,
     @Json(name = "is_restricted") val isRestricted: Boolean = true,
     @Json(name = "allowed_classes") val allowedClasses: List<String>? = emptyList(),
     @Json(name = "allowed_groups") val allowedGroups: List<String>? = emptyList(),
     @Json(name = "allowed_batches") val allowedBatches: List<String>? = emptyList(),
     @Json(name = "allowed_programs") val allowedPrograms: List<String>? = emptyList(),
+    @Json(name = "first_login_at") val firstLoginAt: String? = null,
+    @Json(name = "last_login_at") val lastLoginAt: String? = null,
     @Json(name = "last_seen_at") val lastSeenAt: String? = null,
     @Json(name = "created_at") val createdAt: String? = null
-)
+) {
+    fun normalized(): DeviceShikhoAccount {
+        val resolvedHash = deviceHash.ifBlank { deviceId.orEmpty() }
+        val resolvedDisplayId = displayDeviceId?.takeIf { it.isNotBlank() } ?: deviceId
+        val resolvedPhone = userPhone?.takeIf { it.isNotBlank() } ?: phone
+        val resolvedClass = currentClass?.takeIf { it.isNotBlank() } ?: className
+        val resolvedAccess = accessEnabled ?: isAccessGranted
+        val resolvedLastSeen = lastSeenAt?.takeIf { it.isNotBlank() }
+            ?: lastLoginAt?.takeIf { it.isNotBlank() }
+            ?: firstLoginAt
+        val resolvedCreated = createdAt?.takeIf { it.isNotBlank() } ?: firstLoginAt
+        return copy(
+            deviceHash = resolvedHash,
+            displayDeviceId = resolvedDisplayId,
+            userPhone = resolvedPhone,
+            currentClass = resolvedClass,
+            isAccessGranted = resolvedAccess,
+            lastSeenAt = resolvedLastSeen,
+            createdAt = resolvedCreated
+        )
+    }
+}
 
 /**
  * Supabase RPC payload for `POST /rest/v1/rpc/admin_set_account_course_permissions`
