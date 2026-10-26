@@ -7,7 +7,6 @@ import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
 import com.example.data.model.ApproveCourseAccessRequestRpcPayload
 import com.example.data.model.CourseAccessEnrollment
-import com.example.data.model.CourseCatalogItem
 import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.CreateAccessCodePayload
@@ -15,17 +14,13 @@ import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
-import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.DeviceWithStudent
 import com.example.data.model.ReviewCoursePaymentRpcPayload
-import com.example.data.model.SetAccountCoursePermissionsRpcPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
-import kotlinx.coroutines.flow.Flow
 
 /**
  * Universal repository contract for MaxBird Access Control & Device Management.
- * Designed to be 100% portable across Android, Desktop (JVM), Web, and iOS.
  */
 interface MaxBirdRepository {
 
@@ -34,6 +29,10 @@ interface MaxBirdRepository {
     suspend fun createAccessCode(payload: CreateAccessCodePayload): Result<AccessCode>
 
     suspend fun toggleCodeStatus(codeId: String, isActive: Boolean): Result<Unit>
+
+    suspend fun extendAccessCodeValidity(codeId: String, extraDays: Int): Result<Unit>
+
+    suspend fun resetDevicesForCode(codeId: String, codeString: String): Result<Unit>
 
     suspend fun deleteAccessCode(codeId: String): Result<Unit>
 
@@ -85,36 +84,9 @@ interface MaxBirdRepository {
 
     suspend fun toggleUserDeviceBan(deviceId: String, isBanned: Boolean, banReason: String?): Result<Unit>
 
+    suspend fun toggleDeviceCanViewProfiles(deviceId: String, canViewProfiles: Boolean): Result<Unit>
+
     suspend fun deleteUserDevice(deviceId: String): Result<Unit>
-
-    suspend fun getAvailableCoursesCatalog(forceRefresh: Boolean = false): Result<List<CourseCatalogItem>>
-
-    suspend fun setDeviceCoursePermissions(
-        device: UserDevice,
-        isRestricted: Boolean,
-        allowedClasses: List<String>,
-        allowedGroups: List<String>,
-        allowedBatches: List<String>,
-        allowedPrograms: List<String>
-    ): Result<Unit>
-
-    suspend fun setAccessCodeCoursePermissions(
-        codeId: String,
-        isRestricted: Boolean,
-        allowedClasses: List<String>,
-        allowedGroups: List<String>,
-        allowedBatches: List<String>,
-        allowedPrograms: List<String>
-    ): Result<Unit>
-
-    suspend fun getDeviceShikhoAccounts(
-        deviceHash: String,
-        displayDeviceId: String
-    ): Result<List<DeviceShikhoAccount>>
-
-    suspend fun setAccountCoursePermissions(
-        payload: SetAccountCoursePermissionsRpcPayload
-    ): Result<Unit>
 
     // Course Sales, Installment Plans & Payment Verification
     suspend fun getCoursePaymentSettings(): Result<CoursePaymentSettings>
@@ -144,6 +116,3 @@ interface MaxBirdRepository {
         adminNote: String? = null
     ): Result<Unit>
 }
-
-
-

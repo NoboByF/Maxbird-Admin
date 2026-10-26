@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.api.CloudinaryClient
 import com.example.data.api.SupabaseClient
 import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
@@ -10,25 +11,17 @@ import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
 import com.example.data.model.ApproveCourseAccessRequestRpcPayload
+import com.example.data.model.CloudinaryHistoryItem
 import com.example.data.model.CourseAccessEnrollment
-import com.example.data.model.CourseCatalogItem
 import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
-import com.example.data.api.CloudinaryClient
-import com.example.data.api.ShikhoApiClient
-import com.example.data.model.CloudinaryHistoryItem
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
-import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.DeviceWithStudent
 import com.example.data.model.ReviewCoursePaymentRpcPayload
-import com.example.data.model.SetAccountCoursePermissionsRpcPayload
-import com.example.data.model.ShikhoAcademicProgram
-import com.example.data.model.ShikhoBatchExamYear
-import com.example.data.model.ShikhoClassItem
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import com.example.data.preferences.AdminPreferences
@@ -47,7 +40,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val supabaseClient = SupabaseClient(adminPreferences)
     private val repository: MaxBirdRepository = SupabaseMaxBirdRepository(supabaseClient, adminPreferences)
     private val cloudinaryClient = CloudinaryClient(application)
-    private val shikhoApiClient = ShikhoApiClient()
 
     // Navigation State
     private val _currentScreen = MutableStateFlow<Screen>(Screen.Dashboard)
@@ -88,21 +80,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _genNote = MutableStateFlow("")
     val genNote: StateFlow<String> = _genNote.asStateFlow()
-
-    private val _genIsRestricted = MutableStateFlow(false)
-    val genIsRestricted: StateFlow<Boolean> = _genIsRestricted.asStateFlow()
-
-    private val _genAllowedClasses = MutableStateFlow<List<String>>(emptyList())
-    val genAllowedClasses: StateFlow<List<String>> = _genAllowedClasses.asStateFlow()
-
-    private val _genAllowedGroups = MutableStateFlow<List<String>>(emptyList())
-    val genAllowedGroups: StateFlow<List<String>> = _genAllowedGroups.asStateFlow()
-
-    private val _genAllowedBatches = MutableStateFlow<List<String>>(emptyList())
-    val genAllowedBatches: StateFlow<List<String>> = _genAllowedBatches.asStateFlow()
-
-    private val _genAllowedPrograms = MutableStateFlow<List<String>>(emptyList())
-    val genAllowedPrograms: StateFlow<List<String>> = _genAllowedPrograms.asStateFlow()
 
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
@@ -152,76 +129,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isLoadingDevices = MutableStateFlow(false)
     val isLoadingDevices: StateFlow<Boolean> = _isLoadingDevices.asStateFlow()
-
-    // Course Catalog & Course Permissions State
-    private val _coursesCatalog = MutableStateFlow<List<CourseCatalogItem>>(emptyList())
-    val coursesCatalog: StateFlow<List<CourseCatalogItem>> = _coursesCatalog.asStateFlow()
-
-    private val _isLoadingCatalog = MutableStateFlow(false)
-    val isLoadingCatalog: StateFlow<Boolean> = _isLoadingCatalog.asStateFlow()
-
-    private val _isSavingCoursePermissions = MutableStateFlow(false)
-    val isSavingCoursePermissions: StateFlow<Boolean> = _isSavingCoursePermissions.asStateFlow()
-
-    // Admin Shikho Account Login State (Real Shikho API)
-    private val _isShikhoConnected = MutableStateFlow(adminPreferences.isShikhoConnected())
-    val isShikhoConnected: StateFlow<Boolean> = _isShikhoConnected.asStateFlow()
-
-    private val _shikhoConnectedPhone = MutableStateFlow(adminPreferences.getShikhoPhone())
-    val shikhoConnectedPhone: StateFlow<String> = _shikhoConnectedPhone.asStateFlow()
-
-    private val _shikhoConnectedUserId = MutableStateFlow(adminPreferences.getShikhoUserId())
-    val shikhoConnectedUserId: StateFlow<String> = _shikhoConnectedUserId.asStateFlow()
-
-    private val _shikhoAccessToken = MutableStateFlow(adminPreferences.getShikhoAccessToken())
-    val shikhoAccessToken: StateFlow<String> = _shikhoAccessToken.asStateFlow()
-
-    private val _isShikhoLoginDialogOpen = MutableStateFlow(false)
-    val isShikhoLoginDialogOpen: StateFlow<Boolean> = _isShikhoLoginDialogOpen.asStateFlow()
-
-    private val _isLoggingInShikho = MutableStateFlow(false)
-    val isLoggingInShikho: StateFlow<Boolean> = _isLoggingInShikho.asStateFlow()
-
-    private val _shikhoLoginError = MutableStateFlow<String?>(null)
-    val shikhoLoginError: StateFlow<String?> = _shikhoLoginError.asStateFlow()
-
-    // Device Shikho Accounts (`public.device_shikho_accounts`) State
-    private val _deviceShikhoAccounts = MutableStateFlow<List<DeviceShikhoAccount>>(emptyList())
-    val deviceShikhoAccounts: StateFlow<List<DeviceShikhoAccount>> = _deviceShikhoAccounts.asStateFlow()
-
-    private val _isLoadingDeviceShikhoAccounts = MutableStateFlow(false)
-    val isLoadingDeviceShikhoAccounts: StateFlow<Boolean> = _isLoadingDeviceShikhoAccounts.asStateFlow()
-
-    private val _deviceShikhoAccountsError = MutableStateFlow<String?>(null)
-    val deviceShikhoAccountsError: StateFlow<String?> = _deviceShikhoAccountsError.asStateFlow()
-
-    // Real Shikho API Syllabus & Course Selector State
-    private val _shikhoClassList = MutableStateFlow<List<ShikhoClassItem>>(emptyList())
-    val shikhoClassList: StateFlow<List<ShikhoClassItem>> = _shikhoClassList.asStateFlow()
-
-    private val _isLoadingShikhoClasses = MutableStateFlow(false)
-    val isLoadingShikhoClasses: StateFlow<Boolean> = _isLoadingShikhoClasses.asStateFlow()
-
-    private val _shikhoClassesError = MutableStateFlow<String?>(null)
-    val shikhoClassesError: StateFlow<String?> = _shikhoClassesError.asStateFlow()
-
-    private val _shikhoBatchYears = MutableStateFlow<List<ShikhoBatchExamYear>>(emptyList())
-    val shikhoBatchYears: StateFlow<List<ShikhoBatchExamYear>> = _shikhoBatchYears.asStateFlow()
-
-    private val _isLoadingShikhoBatches = MutableStateFlow(false)
-    val isLoadingShikhoBatches: StateFlow<Boolean> = _isLoadingShikhoBatches.asStateFlow()
-
-    private val _shikhoBatchesError = MutableStateFlow<String?>(null)
-    val shikhoBatchesError: StateFlow<String?> = _shikhoBatchesError.asStateFlow()
-
-    private val _shikhoPrograms = MutableStateFlow<List<ShikhoAcademicProgram>>(emptyList())
-    val shikhoPrograms: StateFlow<List<ShikhoAcademicProgram>> = _shikhoPrograms.asStateFlow()
-
-    private val _isLoadingShikhoPrograms = MutableStateFlow(false)
-    val isLoadingShikhoPrograms: StateFlow<Boolean> = _isLoadingShikhoPrograms.asStateFlow()
-
-    private val _shikhoProgramsError = MutableStateFlow<String?>(null)
-    val shikhoProgramsError: StateFlow<String?> = _shikhoProgramsError.asStateFlow()
 
     // App Updates Management State
     private val _appUpdates = MutableStateFlow<List<AppUpdate>>(emptyList())
@@ -319,7 +226,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _supportLinkSearchQuery = MutableStateFlow("")
     val supportLinkSearchQuery: StateFlow<String> = _supportLinkSearchQuery.asStateFlow()
 
-    private val _supportLinkFilter = MutableStateFlow("ALL") // ALL, ACTIVE, INACTIVE, TELEGRAM, WHATSAPP, FACEBOOK, PHONE, WEBSITE
+    private val _supportLinkFilter = MutableStateFlow("ALL")
     val supportLinkFilter: StateFlow<String> = _supportLinkFilter.asStateFlow()
 
     private val _isSupportLinkDialogOpen = MutableStateFlow(false)
@@ -413,13 +320,11 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         loadCodes()
         loadJoinedDevices()
         loadUserDevices()
-        loadAvailableCoursesCatalog()
         loadAppUpdates()
         loadAppNotices()
         loadActivationSupportLinks()
         loadCourseSalesData()
     }
-
 
     fun refreshStats() {
         viewModelScope.launch {
@@ -454,20 +359,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         _genNote.value = note
     }
 
-    fun setGenCoursePermissions(
-        isRestricted: Boolean,
-        allowedClasses: List<String>,
-        allowedGroups: List<String>,
-        allowedBatches: List<String>,
-        allowedPrograms: List<String>
-    ) {
-        _genIsRestricted.value = isRestricted
-        _genAllowedClasses.value = allowedClasses
-        _genAllowedGroups.value = allowedGroups
-        _genAllowedBatches.value = allowedBatches
-        _genAllowedPrograms.value = allowedPrograms
-    }
-
     fun generateRandomCode(prefix: String = "MAX") {
         val randNum = Random.nextInt(1000, 9999)
         _genCode.value = "$prefix-$randNum"
@@ -496,12 +387,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     studentName = name,
                     maxDevices = _genMaxDevices.value,
                     isActive = true,
-                    note = _genNote.value.ifBlank { null },
-                    isAccessRestricted = _genIsRestricted.value,
-                    allowedClasses = if (_genIsRestricted.value) _genAllowedClasses.value else emptyList(),
-                    allowedGroups = if (_genIsRestricted.value) _genAllowedGroups.value else emptyList(),
-                    allowedBatches = if (_genIsRestricted.value) _genAllowedBatches.value else emptyList(),
-                    allowedPrograms = if (_genIsRestricted.value) _genAllowedPrograms.value else emptyList()
+                    note = _genNote.value.ifBlank { null }
                 )
 
                 val result = repository.createAccessCode(payload)
@@ -510,11 +396,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     _generatedSuccessCode.value = created
                     _genStudentName.value = ""
                     _genNote.value = ""
-                    _genIsRestricted.value = false
-                    _genAllowedClasses.value = emptyList()
-                    _genAllowedGroups.value = emptyList()
-                    _genAllowedBatches.value = emptyList()
-                    _genAllowedPrograms.value = emptyList()
                     generateRandomCode("MAX")
                     loadCodes()
                     refreshStats()
@@ -572,6 +453,39 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Throwable) {
                 showToast("স্ট্যাটাস আপডেট ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    fun extendCodeValidity(code: AccessCode, extraDays: Int = 30) {
+        viewModelScope.launch {
+            try {
+                val result = repository.extendAccessCodeValidity(code.id, extraDays)
+                if (result.isSuccess) {
+                    loadCodes()
+                    refreshStats()
+                    showToast("✅ ${code.code}-এর মেয়াদ +$extraDays দিন বাড়ানো হয়েছে!")
+                }
+            } catch (e: Throwable) {
+                showToast("মেয়াদ বাড়াতে ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    fun resetDevicesForCode(code: AccessCode) {
+        viewModelScope.launch {
+            try {
+                val result = repository.resetDevicesForCode(code.id, code.code)
+                if (result.isSuccess) {
+                    loadJoinedDevices()
+                    refreshStats()
+                    if (_selectedCodeForDevices.value?.id == code.id) {
+                        openLinkedDevices(code)
+                    }
+                    showToast("🔄 ${code.code}-এর সকল ডিভাইস রিসেট (Unbind) করা হয়েছে!")
+                }
+            } catch (e: Throwable) {
+                showToast("ডিভাইস রিসেট ব্যর্থ হয়েছে।")
             }
         }
     }
@@ -705,6 +619,35 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun toggleDeviceCanViewProfiles(device: UserDevice) {
+        val nextValue = !device.canViewProfiles
+        viewModelScope.launch {
+            try {
+                _userDevices.value = _userDevices.value.map { existing ->
+                    if ((device.id.isNotBlank() && existing.id == device.id) ||
+                        (device.deviceHash.isNotBlank() && existing.deviceHash == device.deviceHash)
+                    ) {
+                        existing.copy(canViewProfiles = nextValue)
+                    } else {
+                        existing
+                    }
+                }
+                val result = repository.toggleDeviceCanViewProfiles(device.id.ifBlank { device.deviceHash }, nextValue)
+                if (result.isSuccess) {
+                    loadUserDevices(forceRefresh = true)
+                    val msg = if (nextValue) {
+                        "✅ এই ডিভাইসে প্রোফাইল দেখা অনুমোদিত (can_view_profiles = ON) করা হয়েছে!"
+                    } else {
+                        "🔒 এই ডিভাইসে প্রোফাইল দেখা বন্ধ (can_view_profiles = OFF) করা হয়েছে!"
+                    }
+                    showToast(msg)
+                }
+            } catch (e: Throwable) {
+                showToast("প্রোফাইল পারমিশন আপডেট ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
     fun deleteUserDevice(device: UserDevice) {
         viewModelScope.launch {
             try {
@@ -716,340 +659,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Throwable) {
                 showToast("মুছে ফেলতে ব্যর্থ হয়েছে।")
-            }
-        }
-    }
-
-    // Course & Syllabus Granular Access Control Operations
-    fun loadAvailableCoursesCatalog(forceRefresh: Boolean = false) {
-        viewModelScope.launch {
-            try {
-                _isLoadingCatalog.value = true
-                val result = repository.getAvailableCoursesCatalog(forceRefresh)
-                if (result.isSuccess) {
-                    _coursesCatalog.value = result.getOrNull() ?: emptyList()
-                }
-            } catch (_: Throwable) {
-                // Keep cached catalog
-            } finally {
-                _isLoadingCatalog.value = false
-            }
-        }
-    }
-
-    fun saveDeviceCoursePermissions(
-        device: UserDevice,
-        isRestricted: Boolean,
-        allowedClasses: List<String>,
-        allowedGroups: List<String>,
-        allowedBatches: List<String>,
-        allowedPrograms: List<String>,
-        onSuccess: () -> Unit = {}
-    ) {
-        viewModelScope.launch {
-            try {
-                _isSavingCoursePermissions.value = true
-                val result = repository.setDeviceCoursePermissions(
-                    device = device,
-                    isRestricted = isRestricted,
-                    allowedClasses = allowedClasses,
-                    allowedGroups = allowedGroups,
-                    allowedBatches = allowedBatches,
-                    allowedPrograms = allowedPrograms
-                )
-                if (result.isSuccess) {
-                    // Update current state list immediately and then reload
-                    _userDevices.value = _userDevices.value.map { existing ->
-                        if ((device.id.isNotBlank() && existing.id == device.id) ||
-                            (device.deviceHash.isNotBlank() && existing.deviceHash == device.deviceHash)
-                        ) {
-                            existing.copy(
-                                isAccessRestricted = isRestricted,
-                                allowedClasses = allowedClasses,
-                                allowedGroups = allowedGroups,
-                                allowedBatches = allowedBatches,
-                                allowedPrograms = allowedPrograms
-                            )
-                        } else {
-                            existing
-                        }
-                    }
-                    loadUserDevices(forceRefresh = true)
-                    val msg = if (isRestricted) {
-                        "✅ ডিভাইসের কাস্টম কোর্স ও সিলেবাস পারমিশন সেভ হয়েছে!"
-                    } else {
-                        "✅ ডিভাইসের সকল ক্লাস ও কোর্স উন্মুক্ত করা হয়েছে!"
-                    }
-                    showToast(msg)
-                    onSuccess()
-                } else {
-                    showToast("পারমিশন সেভ করতে ব্যর্থ হয়েছে।")
-                }
-            } catch (e: Throwable) {
-                showToast("ত্রুটি: ${e.message}")
-            } finally {
-                _isSavingCoursePermissions.value = false
-            }
-        }
-    }
-
-    fun saveAccessCodeCoursePermissions(
-        code: AccessCode,
-        isRestricted: Boolean,
-        allowedClasses: List<String>,
-        allowedGroups: List<String>,
-        allowedBatches: List<String>,
-        allowedPrograms: List<String>,
-        onSuccess: () -> Unit = {}
-    ) {
-        viewModelScope.launch {
-            try {
-                _isSavingCoursePermissions.value = true
-                val result = repository.setAccessCodeCoursePermissions(
-                    codeId = code.id,
-                    isRestricted = isRestricted,
-                    allowedClasses = allowedClasses,
-                    allowedGroups = allowedGroups,
-                    allowedBatches = allowedBatches,
-                    allowedPrograms = allowedPrograms
-                )
-                if (result.isSuccess) {
-                    _codes.value = _codes.value.map { existing ->
-                        if (existing.id == code.id) {
-                            existing.copy(
-                                isAccessRestricted = isRestricted,
-                                allowedClasses = allowedClasses,
-                                allowedGroups = allowedGroups,
-                                allowedBatches = allowedBatches,
-                                allowedPrograms = allowedPrograms
-                            )
-                        } else {
-                            existing
-                        }
-                    }
-                    loadCodes()
-                    val msg = if (isRestricted) {
-                        "✅ কোড ${code.code}-এর কোর্স পারমিশন সেভ হয়েছে!"
-                    } else {
-                        "✅ কোড ${code.code}-এর সকল কোর্স উন্মুক্ত করা হয়েছে!"
-                    }
-                    showToast(msg)
-                    onSuccess()
-                } else {
-                    showToast("পারমিশন সেভ করতে ব্যর্থ হয়েছে।")
-                }
-            } catch (e: Throwable) {
-                showToast("ত্রুটি: ${e.message}")
-            } finally {
-                _isSavingCoursePermissions.value = false
-            }
-        }
-    }
-
-    // =========================================================================
-    // Part 1: Admin Shikho Account Login Operations
-    // =========================================================================
-    fun openShikhoLoginDialog() {
-        _shikhoLoginError.value = null
-        _isShikhoLoginDialogOpen.value = true
-    }
-
-    fun closeShikhoLoginDialog() {
-        _isShikhoLoginDialogOpen.value = false
-        _shikhoLoginError.value = null
-    }
-
-    fun loginShikhoAccount(rawPhone: String, pin: String) {
-        viewModelScope.launch {
-            try {
-                _isLoggingInShikho.value = true
-                _shikhoLoginError.value = null
-                val result = shikhoApiClient.loginWithPin(rawPhone, pin)
-                if (result.isSuccess) {
-                    val session = result.getOrThrow()
-                    adminPreferences.saveShikhoSession(
-                        accessToken = session.accessToken,
-                        refreshToken = session.refreshToken,
-                        userId = session.userId,
-                        phone = session.phone
-                    )
-                    _shikhoAccessToken.value = session.accessToken
-                    _shikhoConnectedPhone.value = session.phone
-                    _shikhoConnectedUserId.value = session.userId
-                    _isShikhoConnected.value = true
-                    _isShikhoLoginDialogOpen.value = false
-                    showToast("✅ শিখো অ্যাকাউন্ট লগইন সফল হয়েছে! রিয়েল সিলেবাস লোড হচ্ছে...")
-                    loadRealShikhoClasses()
-                } else {
-                    val err = result.exceptionOrNull()?.message ?: "শিখো লগইন ব্যর্থ হয়েছে"
-                    _shikhoLoginError.value = err
-                }
-            } catch (e: Throwable) {
-                _shikhoLoginError.value = e.message ?: "লগইনে ত্রুটি ঘটেছে"
-            } finally {
-                _isLoggingInShikho.value = false
-            }
-        }
-    }
-
-    fun logoutShikhoAccount() {
-        adminPreferences.clearShikhoSession()
-        _shikhoAccessToken.value = ""
-        _shikhoConnectedPhone.value = ""
-        _shikhoConnectedUserId.value = ""
-        _isShikhoConnected.value = false
-        _shikhoClassList.value = emptyList()
-        _shikhoBatchYears.value = emptyList()
-        _shikhoPrograms.value = emptyList()
-        showToast("শিখো অ্যাকাউন্ট লগআউট করা হয়েছে।")
-    }
-
-    // =========================================================================
-    // Part 2: Device Shikho Accounts (`public.device_shikho_accounts`) Operations
-    // =========================================================================
-    fun loadDeviceShikhoAccounts(device: UserDevice) {
-        viewModelScope.launch {
-            try {
-                _isLoadingDeviceShikhoAccounts.value = true
-                _deviceShikhoAccountsError.value = null
-                val result = repository.getDeviceShikhoAccounts(
-                    deviceHash = device.deviceHash,
-                    displayDeviceId = device.displayDeviceId
-                )
-                if (result.isSuccess) {
-                    _deviceShikhoAccounts.value = result.getOrNull().orEmpty()
-                } else {
-                    _deviceShikhoAccounts.value = emptyList()
-                    _deviceShikhoAccountsError.value = result.exceptionOrNull()?.message
-                }
-            } catch (e: Throwable) {
-                _deviceShikhoAccounts.value = emptyList()
-                _deviceShikhoAccountsError.value = e.message
-            } finally {
-                _isLoadingDeviceShikhoAccounts.value = false
-            }
-        }
-    }
-
-    // =========================================================================
-    // Part 3: Real Shikho API Class -> Group -> Batch -> Course Operations
-    // =========================================================================
-    fun loadRealShikhoClasses() {
-        val token = adminPreferences.getShikhoAccessToken()
-        if (token.isBlank()) {
-            _shikhoClassesError.value = "শিখো অ্যাকাউন্ট লগইন করা নেই।"
-            return
-        }
-        viewModelScope.launch {
-            try {
-                _isLoadingShikhoClasses.value = true
-                _shikhoClassesError.value = null
-                val result = shikhoApiClient.fetchClassList(token)
-                if (result.isSuccess) {
-                    _shikhoClassList.value = result.getOrNull().orEmpty()
-                } else {
-                    _shikhoClassesError.value = result.exceptionOrNull()?.message
-                }
-            } catch (e: Throwable) {
-                _shikhoClassesError.value = e.message
-            } finally {
-                _isLoadingShikhoClasses.value = false
-            }
-        }
-    }
-
-    fun loadRealShikhoBatches(classCode: String) {
-        if (classCode.isBlank()) return
-        val token = adminPreferences.getShikhoAccessToken()
-        if (token.isBlank()) {
-            _shikhoBatchYears.value = ShikhoApiClient.mergeWithFallbackBatchYears(emptyList(), classCode)
-            return
-        }
-        viewModelScope.launch {
-            try {
-                _isLoadingShikhoBatches.value = true
-                _shikhoBatchesError.value = null
-                val result = shikhoApiClient.fetchBatchOptions(token, classCode)
-                if (result.isSuccess) {
-                    _shikhoBatchYears.value = result.getOrNull().orEmpty()
-                } else {
-                    _shikhoBatchYears.value = ShikhoApiClient.mergeWithFallbackBatchYears(emptyList(), classCode)
-                    _shikhoBatchesError.value = result.exceptionOrNull()?.message
-                }
-            } catch (e: Throwable) {
-                _shikhoBatchYears.value = ShikhoApiClient.mergeWithFallbackBatchYears(emptyList(), classCode)
-                _shikhoBatchesError.value = e.message
-            } finally {
-                _isLoadingShikhoBatches.value = false
-            }
-        }
-    }
-
-    fun loadRealShikhoPrograms(classCode: String, groupCode: String, batchYear: String) {
-        val token = adminPreferences.getShikhoAccessToken()
-        if (token.isBlank() || classCode.isBlank() || batchYear.isBlank()) return
-        viewModelScope.launch {
-            try {
-                _isLoadingShikhoPrograms.value = true
-                _shikhoProgramsError.value = null
-                val result = shikhoApiClient.fetchAcademicPrograms(
-                    accessToken = token,
-                    className = classCode,
-                    group = groupCode,
-                    year = batchYear
-                )
-                if (result.isSuccess) {
-                    val fetchResult = result.getOrThrow()
-                    // Save the newly issued JWT access_token from ChangeSyllabus immediately!
-                    if (fetchResult.updatedAccessToken.isNotBlank() && fetchResult.updatedAccessToken != token) {
-                        adminPreferences.saveShikhoSession(
-                            accessToken = fetchResult.updatedAccessToken,
-                            refreshToken = fetchResult.updatedRefreshToken ?: adminPreferences.getShikhoRefreshToken(),
-                            userId = adminPreferences.getShikhoUserId(),
-                            phone = adminPreferences.getShikhoPhone()
-                        )
-                        _shikhoAccessToken.value = fetchResult.updatedAccessToken
-                    }
-                    _shikhoPrograms.value = fetchResult.programs
-                } else {
-                    _shikhoPrograms.value = emptyList()
-                    _shikhoProgramsError.value = result.exceptionOrNull()?.message
-                }
-            } catch (e: Throwable) {
-                _shikhoPrograms.value = emptyList()
-                _shikhoProgramsError.value = e.message
-            } finally {
-                _isLoadingShikhoPrograms.value = false
-            }
-        }
-    }
-
-    // =========================================================================
-    // Part 4: Save Account Course Permissions via Supabase RPC `admin_set_account_course_permissions`
-    // =========================================================================
-    fun saveAccountCoursePermissions(
-        device: UserDevice,
-        payload: SetAccountCoursePermissionsRpcPayload,
-        onSuccess: () -> Unit = {}
-    ) {
-        viewModelScope.launch {
-            try {
-                _isSavingCoursePermissions.value = true
-                val result = repository.setAccountCoursePermissions(payload)
-                if (result.isSuccess) {
-                    // Refresh accounts for this device and userDevices list
-                    loadDeviceShikhoAccounts(device)
-                    loadUserDevices(forceRefresh = true)
-                    showToast("✅ শিখো অ্যাকাউন্ট (${payload.userPhone.ifBlank { payload.shikhoUserId }})-এ কোর্স পারমিশন সফলভাবে সেভ হয়েছে!")
-                    onSuccess()
-                } else {
-                    val err = result.exceptionOrNull()?.message ?: "পারমিশন সেভ করতে ব্যর্থ হয়েছে।"
-                    showToast("⚠️ $err")
-                }
-            } catch (e: Throwable) {
-                showToast("ত্রুটি: ${e.message}")
-            } finally {
-                _isSavingCoursePermissions.value = false
             }
         }
     }
@@ -1403,7 +1012,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     fun setSupportLinkSubtitle(sub: String) { _supportLinkSubtitle.value = sub }
     fun setSupportLinkIconType(type: String) {
         _supportLinkIconType.value = type
-        // Auto-suggest default color for selected type
         _supportLinkColorHex.value = getDefaultColorForType(type)
     }
     fun setSupportLinkUrl(url: String) { _supportLinkUrl.value = url }
@@ -1498,7 +1106,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Settings Functions
-
     fun updateSupabaseUrl(url: String) {
         _supabaseUrl.value = url
     }
@@ -1542,8 +1149,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Shikho Cloudinary Media Uploader Operations
-
+    // Cloudinary Media Uploader Operations
     fun selectMediaFile(uri: android.net.Uri?) {
         if (uri == null) return
         _selectedMediaUri.value = uri
@@ -1585,7 +1191,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                             uploadedAtFormatted = timeFormatted
                         )
                         _mediaUploadHistory.value = listOf(newItem) + _mediaUploadHistory.value
-                        showToast("✅ ফাইল সফলভাবে Shikho ক্লাউডনারিতে আপলোড হয়েছে!")
+                        showToast("✅ ফাইল সফলভাবে ক্লাউডনারিতে আপলোড হয়েছে!")
                     } else {
                         showToast("আপলোড হয়েছে কিন্তু ডিরেক্ট লিংক পাওয়া যায়নি।")
                     }
@@ -1626,7 +1232,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _isLoadingCourseSales.value = true
-                // Run overdue check silently first so list reflects accurate overdue states
                 try {
                     repository.enforceOverdueCourseInstallments()
                 } catch (_: Throwable) {}
@@ -1734,7 +1339,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 _isProcessingCourseSalesAction.value = true
                 val calendar = java.util.Calendar.getInstance()
                 val isoFormat = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
-                // If current nextDueDate is in the future, add extraDays to it; otherwise add from now
                 val baseDate = try {
                     val raw = enrollment.nextDueDate
                     if (!raw.isNullOrBlank()) {
@@ -1751,8 +1355,9 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 calendar.add(java.util.Calendar.DAY_OF_YEAR, extraDays.coerceAtLeast(1))
                 val newDueIso = isoFormat.format(calendar.time)
 
-                // If it was OVERDUE, restore status to ACTIVE as well
-                val nextStatus = if (enrollment.status.equals("OVERDUE", ignoreCase = true)) "ACTIVE" else null
+                val nextStatus = if (enrollment.status.equals("OVERDUE", ignoreCase = true) ||
+                    enrollment.status.equals("INSTALLMENT_OVERDUE", ignoreCase = true)
+                ) "ACTIVE" else null
 
                 val result = repository.updateEnrollmentStatusOrDueDate(
                     enrollmentId = enrollment.id,
@@ -1807,7 +1412,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 val result = repository.saveCoursePaymentSettings(payload)
                 if (result.isSuccess) {
                     result.getOrNull()?.let { _coursePaymentSettings.value = it }
-                    showToast("✅ বিকাশ / নগদ / রকেট পেমেন্ট সেটিংস সফলভাবে সেভ হয়েছে!")
+                    showToast("✅ পেমেন্ট মেথড ও সেটিংস সফলভাবে সেভ হয়েছে!")
                 } else {
                     showToast("⚠️ ${result.exceptionOrNull()?.message ?: "সেটিংস সেভ ব্যর্থ হয়েছে"}")
                 }
@@ -1827,4 +1432,3 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         _toastMessage.value = null
     }
 }
-

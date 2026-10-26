@@ -19,10 +19,6 @@ class AdminPreferences(context: Context) {
         private const val KEY_ADMIN_PIN = "admin_pin"
         private const val KEY_SUPABASE_URL = "supabase_url"
         private const val KEY_SUPABASE_KEY = "supabase_key"
-        private const val KEY_SHIKHO_ACCESS_TOKEN = "shikho_access_token"
-        private const val KEY_SHIKHO_REFRESH_TOKEN = "shikho_refresh_token"
-        private const val KEY_SHIKHO_USER_ID = "shikho_user_id"
-        private const val KEY_SHIKHO_PHONE = "shikho_phone"
         const val DEFAULT_PIN = "8899"
 
         // Default project fallback
@@ -86,7 +82,6 @@ class AdminPreferences(context: Context) {
 
         val withScheme = if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
             if (!trimmed.contains(".")) {
-                // If user entered only project ref e.g. "aaxonnktltywbwgjxpot"
                 "https://$trimmed.supabase.co"
             } else {
                 "https://$trimmed"
@@ -107,7 +102,6 @@ class AdminPreferences(context: Context) {
         val saved = prefs.getString(KEY_SUPABASE_KEY, "")
         if (!saved.isNullOrBlank()) return saved
 
-        // Check SERVICE_ROLE first (highest priority for Admin operations), then SUPABASE_ANON_KEY, then SUPABASE_KEY
         val candidateKeys = listOf("SERVICE_ROLE", "SUPABASE_ANON_KEY", "SUPABASE_KEY")
         for (fieldKey in candidateKeys) {
             try {
@@ -130,49 +124,5 @@ class AdminPreferences(context: Context) {
     fun isCustomConfigured(): Boolean {
         val url = getSupabaseUrl()
         return !url.contains("your-project-ref") && !url.contains("krmhyxovnpxlqfaptyuv")
-    }
-
-    // Shikho Admin API Auth Token Persistence
-    fun getShikhoAccessToken(): String {
-        return prefs.getString(KEY_SHIKHO_ACCESS_TOKEN, "")?.trim().orEmpty()
-    }
-
-    fun getShikhoRefreshToken(): String {
-        return prefs.getString(KEY_SHIKHO_REFRESH_TOKEN, "")?.trim().orEmpty()
-    }
-
-    fun getShikhoUserId(): String {
-        return prefs.getString(KEY_SHIKHO_USER_ID, "")?.trim().orEmpty()
-    }
-
-    fun getShikhoPhone(): String {
-        return prefs.getString(KEY_SHIKHO_PHONE, "")?.trim().orEmpty()
-    }
-
-    fun isShikhoConnected(): Boolean {
-        return getShikhoAccessToken().isNotBlank()
-    }
-
-    fun saveShikhoSession(
-        accessToken: String,
-        refreshToken: String = "",
-        userId: String = "",
-        phone: String = ""
-    ) {
-        prefs.edit()
-            .putString(KEY_SHIKHO_ACCESS_TOKEN, accessToken.trim())
-            .putString(KEY_SHIKHO_REFRESH_TOKEN, refreshToken.trim())
-            .putString(KEY_SHIKHO_USER_ID, userId.trim())
-            .putString(KEY_SHIKHO_PHONE, phone.trim())
-            .apply()
-    }
-
-    fun clearShikhoSession() {
-        prefs.edit()
-            .remove(KEY_SHIKHO_ACCESS_TOKEN)
-            .remove(KEY_SHIKHO_REFRESH_TOKEN)
-            .remove(KEY_SHIKHO_USER_ID)
-            .remove(KEY_SHIKHO_PHONE)
-            .apply()
     }
 }

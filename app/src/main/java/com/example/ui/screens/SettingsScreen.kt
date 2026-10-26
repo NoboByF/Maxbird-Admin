@@ -2,7 +2,6 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,8 +22,6 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terminal
@@ -66,13 +63,11 @@ import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate400
-import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate850
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
-import com.example.ui.theme.Violet500
 
 private const val SUPABASE_SCHEMA_SQL = """-- MaxBird Supabase Setup SQL Script
 -- Run this in your Supabase Dashboard -> SQL Editor
@@ -108,6 +103,7 @@ CREATE TABLE IF NOT EXISTS access_codes (
     max_devices INT DEFAULT 1,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT now(),
+    expires_at TIMESTAMPTZ,
     note TEXT
 );
 
@@ -178,6 +174,7 @@ CREATE TABLE IF NOT EXISTS devices (
     is_banned BOOLEAN DEFAULT false,
     ban_reason TEXT,
     status TEXT DEFAULT 'active',
+    can_view_profiles BOOLEAN DEFAULT false,
     last_seen TIMESTAMPTZ DEFAULT now()
 );
 
@@ -209,11 +206,6 @@ fun SettingsScreen(
     onSaveSettings: () -> Unit,
     onTestConnection: () -> Unit,
     onShowToast: (String) -> Unit,
-    isShikhoConnected: Boolean = false,
-    shikhoConnectedPhone: String = "",
-    shikhoConnectedUserId: String = "",
-    onOpenShikhoLogin: () -> Unit = {},
-    onLogoutShikho: () -> Unit = {},
     paymentSettings: CoursePaymentSettings = CoursePaymentSettings(),
     isSavingPaymentSettings: Boolean = false,
     onSavePaymentSettings: (UpsertCoursePaymentSettingsPayload) -> Unit = {}
@@ -238,17 +230,6 @@ fun SettingsScreen(
                     onShowToast("$label কপি করা হয়েছে!")
                 },
                 onShowToast = onShowToast
-            )
-        }
-
-        // 2. Shikho Account API Connection Card
-        item {
-            ShikhoConnectionBannerCard(
-                isConnected = isShikhoConnected,
-                connectedPhone = shikhoConnectedPhone,
-                connectedUserId = shikhoConnectedUserId,
-                onOpenLoginDialog = onOpenShikhoLogin,
-                onLogout = onLogoutShikho
             )
         }
 
@@ -684,7 +665,7 @@ fun SettingsScreen(
                                 style = MaterialTheme.typography.labelSmall.copy(color = Color.White)
                             )
                             Text(
-                                text = "• মডিউলসমূহ: নোটিশ ম্যানেজমেন্ট, অ্যাপ আপডেট, কোড ও ডিভাইস কিল-সুইচ",
+                                text = "• মডিউলসমূহ: কোর্স সেলস ও কিস্তি, নোটিশ, অ্যাপ আপডেট, কোড ও ডিভাইস কিল-সুইচ",
                                 style = MaterialTheme.typography.labelSmall.copy(color = EmeraldSuccess)
                             )
                         }

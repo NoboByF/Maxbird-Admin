@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,12 +20,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
@@ -66,7 +66,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
-import com.example.data.model.CourseCatalogItem
 import com.example.ui.theme.CardBorderGradientEnd
 import com.example.ui.theme.CardBorderGradientStart
 import com.example.ui.theme.CoralDanger
@@ -77,7 +76,6 @@ import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.PurpleRoyal
 import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate400
-import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate850
@@ -93,31 +91,19 @@ fun CodeManagementScreen(
     selectedCodeForDevices: AccessCode?,
     linkedDevices: List<ActivatedDevice>,
     isLoadingLinkedDevices: Boolean,
-    coursesCatalog: List<CourseCatalogItem> = emptyList(),
-    isLoadingCatalog: Boolean = false,
-    isSavingPermissions: Boolean = false,
     onSearchChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
     onRefresh: () -> Unit,
-    onRefreshCatalog: () -> Unit = {},
     onToggleActive: (AccessCode) -> Unit,
+    onExtendValidity: (AccessCode, Int) -> Unit = { _, _ -> },
+    onResetDevicesForCode: (AccessCode) -> Unit = {},
     onDeleteCode: (AccessCode) -> Unit,
     onOpenLinkedDevices: (AccessCode) -> Unit,
     onCloseLinkedDevices: () -> Unit,
-    onSaveCodeCoursePermissions: (
-        code: AccessCode,
-        isRestricted: Boolean,
-        allowedClasses: List<String>,
-        allowedGroups: List<String>,
-        allowedBatches: List<String>,
-        allowedPrograms: List<String>,
-        onSuccess: () -> Unit
-    ) -> Unit = { _, _, _, _, _, _, _ -> },
     onShowToast: (String) -> Unit
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
     var codeToDelete by remember { mutableStateOf<AccessCode?>(null) }
-    var codeForCourseAccess by remember { mutableStateOf<AccessCode?>(null) }
 
     val filteredCodes = remember(codes, searchQuery, filter) {
         codes.filter { item ->
@@ -218,7 +204,7 @@ fun CodeManagementScreen(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "মোট ${codes.size} টি কোড • রিমোট নিয়ন্ত্রণ ও ডিভাইস ট্র্যাকিং",
+                                text = "মোট ${codes.size} টি কোড • কোড অ্যাক্টিভেশন, মেয়াদ ও ডিভাইস রিসেট",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = Slate200.copy(alpha = 0.8f)
                                 )
@@ -375,9 +361,10 @@ fun CodeManagementScreen(
                         onShowToast("কোড ${code.code} কপি হয়েছে!")
                     },
                     onToggleActive = { onToggleActive(code) },
+                    onExtendValidity = { onExtendValidity(code, 30) },
+                    onResetDevices = { onResetDevicesForCode(code) },
                     onDeleteClick = { codeToDelete = code },
-                    onViewDevices = { onOpenLinkedDevices(code) },
-                    onCourseAccessClick = { codeForCourseAccess = code }
+                    onViewDevices = { onOpenLinkedDevices(code) }
                 )
             }
         }
@@ -385,39 +372,6 @@ fun CodeManagementScreen(
         item {
             Spacer(modifier = Modifier.height(16.dp))
         }
-    }
-
-    // Access Code Course & Syllabus Access Control BottomSheet
-    codeForCourseAccess?.let { targetCode ->
-        val latestCode = codes.find { it.id == targetCode.id } ?: targetCode
-
-        CourseAccessControlBottomSheet(
-            targetTitle = "🎓 ${latestCode.studentName}",
-            targetSubtitle = "Access Code: ${latestCode.code}",
-            targetBadge = "সর্বোচ্চ ডিভাইস: ${latestCode.maxDevices}",
-            initialIsRestricted = latestCode.isAccessRestricted,
-            initialAllowedClasses = latestCode.allowedClasses.orEmpty(),
-            initialAllowedGroups = latestCode.allowedGroups.orEmpty(),
-            initialAllowedBatches = latestCode.allowedBatches.orEmpty(),
-            initialAllowedPrograms = latestCode.allowedPrograms.orEmpty(),
-            coursesCatalog = coursesCatalog,
-            isLoadingCatalog = isLoadingCatalog,
-            isSaving = isSavingPermissions,
-            onRefreshCatalog = onRefreshCatalog,
-            onDismiss = { codeForCourseAccess = null },
-            onSave = { isRestricted, allowedClasses, allowedGroups, allowedBatches, allowedPrograms ->
-                onSaveCodeCoursePermissions(
-                    latestCode,
-                    isRestricted,
-                    allowedClasses,
-                    allowedGroups,
-                    allowedBatches,
-                    allowedPrograms
-                ) {
-                    codeForCourseAccess = null
-                }
-            }
-        )
     }
 
     // Delete Confirmation Dialog
@@ -638,9 +592,10 @@ private fun StudentCodeCard(
     code: AccessCode,
     onCopyCode: () -> Unit,
     onToggleActive: () -> Unit,
+    onExtendValidity: () -> Unit,
+    onResetDevices: () -> Unit,
     onDeleteClick: () -> Unit,
-    onViewDevices: () -> Unit,
-    onCourseAccessClick: () -> Unit
+    onViewDevices: () -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Slate850),
@@ -756,32 +711,21 @@ private fun StudentCodeCard(
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Course & Syllabus Access Summary & Button for Access Code
-            CourseAccessSummarySection(
-                isRestricted = code.isAccessRestricted,
-                allowedClasses = code.allowedClasses,
-                allowedGroups = code.allowedGroups,
-                allowedBatches = code.allowedBatches,
-                allowedPrograms = code.allowedPrograms,
-                onConfigureClick = onCourseAccessClick,
-                testTagPrefix = code.code
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Action Buttons Row: View Linked Devices + Delete
+            // Action Buttons Row: View Linked Devices, Extend Validity, Device Reset, Delete
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Button(
                     onClick = onViewDevices,
                     colors = ButtonDefaults.buttonColors(containerColor = Slate800),
                     shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                     modifier = Modifier
+                        .weight(1f)
                         .border(1.dp, Slate700, RoundedCornerShape(10.dp))
                         .testTag("btn_view_devices_${code.code}")
                 ) {
@@ -789,10 +733,46 @@ private fun StudentCodeCard(
                         imageVector = Icons.Default.Devices,
                         contentDescription = null,
                         tint = NeonCyan,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("সংযুক্ত ডিভাইস", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text("ডিভাইস লিস্ট", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                }
+
+                Button(
+                    onClick = onExtendValidity,
+                    colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .border(1.dp, EmeraldSuccess.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                        .testTag("btn_extend_code_${code.code}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CalendarMonth,
+                        contentDescription = null,
+                        tint = EmeraldSuccess,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("+৩০ দিন মেয়াদ", color = EmeraldSuccess, style = MaterialTheme.typography.labelSmall)
+                }
+
+                IconButton(
+                    onClick = onResetDevices,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Slate800)
+                        .size(38.dp)
+                        .border(1.dp, ElectricBlue.copy(alpha = 0.4f), CircleShape)
+                        .testTag("btn_reset_devices_${code.code}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.RestartAlt,
+                        contentDescription = "Reset Devices",
+                        tint = ElectricBlueLight,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
 
                 IconButton(

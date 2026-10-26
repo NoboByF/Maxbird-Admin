@@ -14,15 +14,10 @@ import com.example.data.model.UpdateAppNoticeStatusPayload
 import com.example.data.model.ActivationSupportLink
 import com.example.data.model.ApproveCourseAccessRequestRpcPayload
 import com.example.data.model.CourseAccessEnrollment
-import com.example.data.model.CourseCatalogItem
 import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.CreateSupportLinkPayload
-import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.ReviewCoursePaymentRpcPayload
-import com.example.data.model.SetAccountCoursePermissionsRpcPayload
-import com.example.data.model.SetDeviceCoursePermissionsRpcPayload
-import com.example.data.model.UpdateCoursePermissionsPayload
 import com.example.data.model.UpdateSupportLinkStatusPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
@@ -40,7 +35,6 @@ import retrofit2.http.Query
  * Retrofit interface communicating with Supabase PostgREST endpoints.
  */
 interface SupabaseApi {
-
 
     @GET("rest/v1/access_codes")
     suspend fun getAccessCodes(
@@ -61,9 +55,9 @@ interface SupabaseApi {
     ): Response<Unit>
 
     @PATCH("rest/v1/access_codes")
-    suspend fun updateAccessCodeCoursePermissions(
+    suspend fun patchAccessCode(
         @Query("id") idQuery: String, // e.g. "eq.<uuid>"
-        @Body payload: UpdateCoursePermissionsPayload
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
 
     @DELETE("rest/v1/access_codes")
@@ -203,62 +197,15 @@ interface SupabaseApi {
         @Header("Prefer") prefer: String = "return=representation"
     ): List<UserDevice>
 
-    @DELETE("rest/v1/devices")
-    suspend fun deleteDeviceRecord(
-        @Query("id") idQuery: String
-    ): Response<Unit>
-
-    @GET("rest/v1/available_courses_catalog")
-    suspend fun getAvailableCoursesCatalog(
-        @Query("select") select: String = "*"
-    ): List<CourseCatalogItem>
-
-    @POST("rest/v1/rpc/admin_set_device_course_permissions")
-    suspend fun setDeviceCoursePermissionsRpc(
-        @Body payload: SetDeviceCoursePermissionsRpcPayload
-    ): Response<Unit>
-
     @PATCH("rest/v1/devices")
-    suspend fun updateDeviceCoursePermissionsByHash(
-        @Query("device_hash") deviceHashQuery: String,
-        @Body payload: UpdateCoursePermissionsPayload
-    ): Response<Unit>
-
-    @PATCH("rest/v1/devices")
-    suspend fun updateDeviceCoursePermissionsById(
+    suspend fun patchDevice(
         @Query("id") idQuery: String,
-        @Body payload: UpdateCoursePermissionsPayload
-    ): Response<Unit>
-
-    @GET("rest/v1/device_shikho_accounts")
-    suspend fun getDeviceShikhoAccountsByDeviceId(
-        @Query("device_id") deviceIdQuery: String, // e.g. "in.(hash,displayId)"
-        @Query("order") order: String = "last_login_at.desc.nullslast",
-        @Query("select") select: String = "*"
-    ): List<DeviceShikhoAccount>
-
-    @GET("rest/v1/device_shikho_accounts")
-    suspend fun getDeviceShikhoAccounts(
-        @Query("or") orFilter: String,
-        @Query("order") order: String = "is_access_granted.desc,last_seen_at.desc",
-        @Query("select") select: String = "*"
-    ): List<DeviceShikhoAccount>
-
-    @GET("rest/v1/device_shikho_accounts")
-    suspend fun getAllDeviceShikhoAccounts(
-        @Query("select") select: String = "*"
-    ): List<DeviceShikhoAccount>
-
-    @PATCH("rest/v1/device_shikho_accounts")
-    suspend fun patchDeviceShikhoAccount(
-        @Query("device_id") deviceIdQuery: String,
-        @Query("shikho_user_id") shikhoUserIdQuery: String,
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
 
-    @POST("rest/v1/rpc/admin_set_account_course_permissions")
-    suspend fun setAccountCoursePermissionsRpc(
-        @Body payload: SetAccountCoursePermissionsRpcPayload
+    @DELETE("rest/v1/devices")
+    suspend fun deleteDeviceRecord(
+        @Query("id") idQuery: String
     ): Response<Unit>
 
     // =========================================================================
@@ -336,11 +283,13 @@ interface SupabaseApi {
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
 
+    @POST("rest/v1/rpc/admin_verify_course_payment")
+    suspend fun verifyCoursePaymentRpcRaw(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
     @POST("rest/v1/rpc/enforce_overdue_course_installments")
     suspend fun enforceOverdueCourseInstallmentsRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?> = emptyMap()
     ): Response<Unit>
 }
-
-
-

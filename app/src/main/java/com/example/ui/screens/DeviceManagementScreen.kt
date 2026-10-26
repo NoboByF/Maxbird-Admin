@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,21 +20,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -50,10 +45,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -72,22 +68,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.CourseCatalogItem
-import com.example.data.model.DeviceShikhoAccount
-import com.example.data.model.SetAccountCoursePermissionsRpcPayload
-import com.example.data.model.ShikhoAcademicProgram
-import com.example.data.model.ShikhoBatchExamYear
-import com.example.data.model.ShikhoClassItem
 import com.example.data.model.UserDevice
-import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CoralDanger
-import com.example.ui.theme.CoralDark
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricBlueLight
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.Slate400
-import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
@@ -99,7 +86,7 @@ import java.util.TimeZone
 
 /**
  * Clean & modern Material 3 screen for managing real user devices
- * connected to Supabase table `public.devices` and `public.device_shikho_accounts`.
+ * connected to Supabase table `public.devices`.
  */
 @Composable
 fun DeviceManagementScreen(
@@ -107,50 +94,12 @@ fun DeviceManagementScreen(
     searchQuery: String,
     filter: String,
     isLoading: Boolean,
-    coursesCatalog: List<CourseCatalogItem> = emptyList(),
-    isLoadingCatalog: Boolean = false,
-    isSavingPermissions: Boolean = false,
-    isShikhoConnected: Boolean = false,
-    shikhoConnectedPhone: String = "",
-    shikhoConnectedUserId: String = "",
-    deviceShikhoAccounts: List<DeviceShikhoAccount> = emptyList(),
-    isLoadingDeviceShikhoAccounts: Boolean = false,
-    deviceShikhoAccountsError: String? = null,
-    shikhoClassList: List<ShikhoClassItem> = emptyList(),
-    isLoadingShikhoClasses: Boolean = false,
-    shikhoClassesError: String? = null,
-    shikhoBatchYears: List<ShikhoBatchExamYear> = emptyList(),
-    isLoadingShikhoBatches: Boolean = false,
-    shikhoBatchesError: String? = null,
-    shikhoPrograms: List<ShikhoAcademicProgram> = emptyList(),
-    isLoadingShikhoPrograms: Boolean = false,
-    shikhoProgramsError: String? = null,
     onSearchChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
     onRefresh: () -> Unit,
-    onRefreshCatalog: () -> Unit = {},
-    onOpenShikhoLogin: () -> Unit = {},
-    onLogoutShikho: () -> Unit = {},
-    onLoadDeviceShikhoAccounts: (UserDevice) -> Unit = {},
-    onLoadRealShikhoClasses: () -> Unit = {},
-    onLoadRealShikhoBatches: (String) -> Unit = {},
-    onLoadRealShikhoPrograms: (String, String, String) -> Unit = { _, _, _ -> },
-    onSaveAccountCoursePermissions: (
-        device: UserDevice,
-        payload: SetAccountCoursePermissionsRpcPayload,
-        onSuccess: () -> Unit
-    ) -> Unit = { _, _, _ -> },
     onToggleBan: (UserDevice, String?) -> Unit,
+    onToggleCanViewProfiles: (UserDevice) -> Unit = {},
     onDeleteDevice: (UserDevice) -> Unit,
-    onSaveCoursePermissions: (
-        device: UserDevice,
-        isRestricted: Boolean,
-        allowedClasses: List<String>,
-        allowedGroups: List<String>,
-        allowedBatches: List<String>,
-        allowedPrograms: List<String>,
-        onSuccess: () -> Unit
-    ) -> Unit = { _, _, _, _, _, _, _ -> },
     onShowToast: (String) -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -161,12 +110,6 @@ fun DeviceManagementScreen(
 
     // Dialog state for deleting a device record
     var deviceToDelete by remember { mutableStateOf<UserDevice?>(null) }
-
-    // BottomSheet state for viewing device's Shikho Accounts & setting per-account real course access
-    var deviceForShikhoAccounts by remember { mutableStateOf<UserDevice?>(null) }
-
-    // BottomSheet state for configuring Device-Specific Granular Syllabus & Course Access Control
-    var deviceForCourseAccess by remember { mutableStateOf<UserDevice?>(null) }
 
     // Filter and search logic
     val filteredDevices = remember(devices, searchQuery, filter) {
@@ -181,7 +124,6 @@ fun DeviceManagementScreen(
 
             val matchesFilter = when (filter) {
                 "ACTIVE" -> !dev.isBanned
-                "RESTRICTED" -> dev.isAccessRestricted
                 "BANNED" -> dev.isBanned
                 else -> true
             }
@@ -192,7 +134,6 @@ fun DeviceManagementScreen(
 
     val totalCount = devices.size
     val activeCount = devices.count { !it.isBanned }
-    val restrictedCount = devices.count { it.isAccessRestricted }
     val bannedCount = devices.count { it.isBanned }
 
     LazyColumn(
@@ -235,7 +176,7 @@ fun DeviceManagementScreen(
                         )
                     }
                     Text(
-                        text = "ডিভাইস টেলিমেট্রি, শিখো অ্যাকাউন্ট লক ও ব্যান কন্ট্রোল",
+                        text = "ডিভাইস টেলিমেট্রি, প্রোফাইল ভিউ পারমিশন ও ব্যান কন্ট্রোল",
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = NeonCyan,
                             fontWeight = FontWeight.Medium
@@ -267,17 +208,6 @@ fun DeviceManagementScreen(
                     }
                 }
             }
-        }
-
-        // Admin Shikho Account Login / Connection Banner Card
-        item {
-            ShikhoConnectionBannerCard(
-                isConnected = isShikhoConnected,
-                connectedPhone = shikhoConnectedPhone,
-                connectedUserId = shikhoConnectedUserId,
-                onOpenLoginDialog = onOpenShikhoLogin,
-                onLogout = onLogoutShikho
-            )
         }
 
         // Live Telemetry & Quick Metrics Banner
@@ -406,10 +336,10 @@ fun DeviceManagementScreen(
                     )
                 )
 
-                // Filter Tabs: All, Active, Restricted, Banned
+                // Filter Tabs: All, Active, Banned
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     FilterChip(
                         selected = filter == "ALL",
@@ -446,25 +376,6 @@ fun DeviceManagementScreen(
                             selected = filter == "ACTIVE",
                             borderColor = Slate700,
                             selectedBorderColor = EmeraldSuccess
-                        )
-                    )
-
-                    FilterChip(
-                        selected = filter == "RESTRICTED",
-                        onClick = { onFilterChange("RESTRICTED") },
-                        label = { Text("🔒 কোর্স লক ($restrictedCount)", fontSize = 11.sp) },
-                        modifier = Modifier.testTag("filter_restricted_devices"),
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AmberWarning,
-                            selectedLabelColor = Color.White,
-                            containerColor = Slate800,
-                            labelColor = Slate400
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = filter == "RESTRICTED",
-                            borderColor = Slate700,
-                            selectedBorderColor = AmberWarning
                         )
                     )
 
@@ -547,9 +458,8 @@ fun DeviceManagementScreen(
                         clipboardManager.setText(AnnotatedString(toCopy))
                         onShowToast("ডিভাইস আইডি কপি করা হয়েছে: $toCopy")
                     },
-                    onCourseAccessClick = {
-                        deviceForShikhoAccounts = device
-                        onLoadDeviceShikhoAccounts(device)
+                    onToggleCanViewProfiles = {
+                        onToggleCanViewProfiles(device)
                     },
                     onBanClick = {
                         banReasonInput = "অ্যাডমিন কর্তৃক ব্যান করা হয়েছে"
@@ -564,84 +474,6 @@ fun DeviceManagementScreen(
                 )
             }
         }
-    }
-
-    // Device Shikho Accounts (`public.device_shikho_accounts`) & Real Shikho API Course Selector Sheet
-    deviceForShikhoAccounts?.let { targetDevice ->
-        val latestDevice = devices.find {
-            (targetDevice.id.isNotBlank() && it.id == targetDevice.id) ||
-                    (targetDevice.deviceHash.isNotBlank() && it.deviceHash == targetDevice.deviceHash)
-        } ?: targetDevice
-
-        DeviceShikhoAccountsBottomSheet(
-            device = latestDevice,
-            accounts = deviceShikhoAccounts,
-            isLoadingAccounts = isLoadingDeviceShikhoAccounts,
-            accountsError = deviceShikhoAccountsError,
-            isShikhoConnected = isShikhoConnected,
-            shikhoConnectedPhone = shikhoConnectedPhone,
-            shikhoClassList = shikhoClassList,
-            isLoadingClassList = isLoadingShikhoClasses,
-            classListError = shikhoClassesError,
-            shikhoBatchYears = shikhoBatchYears,
-            isLoadingBatches = isLoadingShikhoBatches,
-            batchesError = shikhoBatchesError,
-            shikhoPrograms = shikhoPrograms,
-            isLoadingPrograms = isLoadingShikhoPrograms,
-            programsError = shikhoProgramsError,
-            isSavingPermissions = isSavingPermissions,
-            onRefreshAccounts = { onLoadDeviceShikhoAccounts(latestDevice) },
-            onOpenShikhoLogin = onOpenShikhoLogin,
-            onLoadRealClasses = onLoadRealShikhoClasses,
-            onLoadRealBatches = onLoadRealShikhoBatches,
-            onLoadRealPrograms = onLoadRealShikhoPrograms,
-            onSaveAccountPermissions = { payload, onSuccess ->
-                onSaveAccountCoursePermissions(latestDevice, payload, onSuccess)
-            },
-            onOpenLegacyDeviceCourseSheet = {
-                deviceForShikhoAccounts = null
-                deviceForCourseAccess = latestDevice
-            },
-            onShowToast = onShowToast,
-            onDismiss = { deviceForShikhoAccounts = null }
-        )
-    }
-
-    // Device-Specific Granular Syllabus & Course Access Control BottomSheet
-    deviceForCourseAccess?.let { targetDevice ->
-        // Keep up-to-date with latest device in list if refreshed
-        val latestDevice = devices.find {
-            (targetDevice.id.isNotBlank() && it.id == targetDevice.id) ||
-                    (targetDevice.deviceHash.isNotBlank() && it.deviceHash == targetDevice.deviceHash)
-        } ?: targetDevice
-
-        CourseAccessControlBottomSheet(
-            targetTitle = "📱 ${latestDevice.deviceBrand?.let { "$it " } ?: ""}${latestDevice.deviceModel}",
-            targetSubtitle = "ID: ${latestDevice.displayDeviceId.ifBlank { latestDevice.deviceHash }}",
-            targetBadge = latestDevice.appliedCode?.takeIf { it.isNotBlank() }?.let { "কোড: $it" },
-            initialIsRestricted = latestDevice.isAccessRestricted,
-            initialAllowedClasses = latestDevice.allowedClasses.orEmpty(),
-            initialAllowedGroups = latestDevice.allowedGroups.orEmpty(),
-            initialAllowedBatches = latestDevice.allowedBatches.orEmpty(),
-            initialAllowedPrograms = latestDevice.allowedPrograms.orEmpty(),
-            coursesCatalog = coursesCatalog,
-            isLoadingCatalog = isLoadingCatalog,
-            isSaving = isSavingPermissions,
-            onRefreshCatalog = onRefreshCatalog,
-            onDismiss = { deviceForCourseAccess = null },
-            onSave = { isRestricted, allowedClasses, allowedGroups, allowedBatches, allowedPrograms ->
-                onSaveCoursePermissions(
-                    latestDevice,
-                    isRestricted,
-                    allowedClasses,
-                    allowedGroups,
-                    allowedBatches,
-                    allowedPrograms
-                ) {
-                    deviceForCourseAccess = null
-                }
-            }
-        )
     }
 
     // Ban Confirmation Modal with Custom Reason Input
@@ -823,7 +655,7 @@ fun DeviceManagementScreen(
 private fun RealDeviceCard(
     device: UserDevice,
     onCopyId: () -> Unit,
-    onCourseAccessClick: () -> Unit,
+    onToggleCanViewProfiles: () -> Unit,
     onBanClick: () -> Unit,
     onUnbanClick: () -> Unit,
     onDeleteClick: () -> Unit
@@ -1025,6 +857,65 @@ private fun RealDeviceCard(
                 )
             }
 
+            // Profile View Permission Switch (`can_view_profiles`)
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Slate950,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (device.canViewProfiles) EmeraldSuccess.copy(alpha = 0.5f) else Slate700
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountCircle,
+                            contentDescription = null,
+                            tint = if (device.canViewProfiles) EmeraldSuccess else Slate400,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "প্রোফাইল ভিউ পারমিশন (can_view_profiles)",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                            Text(
+                                text = if (device.canViewProfiles) "অনুমোদিত (ON)" else "বন্ধ আছে (OFF)",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = if (device.canViewProfiles) EmeraldSuccess else Slate400,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                    }
+
+                    Switch(
+                        checked = device.canViewProfiles,
+                        onCheckedChange = { onToggleCanViewProfiles() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = EmeraldSuccess,
+                            uncheckedThumbColor = Slate400,
+                            uncheckedTrackColor = Slate700
+                        ),
+                        modifier = Modifier.testTag("switch_can_view_profiles_${device.id.ifBlank { device.displayDeviceId }}")
+                    )
+                }
+            }
+
             // If device is Banned, show Ban Reason Banner
             if (isBanned && !device.banReason.isNullOrBlank()) {
                 Surface(
@@ -1055,17 +946,6 @@ private fun RealDeviceCard(
                     }
                 }
             }
-
-            // Granular Syllabus & Course Access Control Section & Button
-            CourseAccessSummarySection(
-                isRestricted = device.isAccessRestricted,
-                allowedClasses = device.allowedClasses,
-                allowedGroups = device.allowedGroups,
-                allowedBatches = device.allowedBatches,
-                allowedPrograms = device.allowedPrograms,
-                onConfigureClick = onCourseAccessClick,
-                testTagPrefix = device.displayDeviceId.ifBlank { device.id }
-            )
 
             // Action Buttons: Ban / Unban & Delete
             Row(

@@ -15,12 +15,8 @@ data class AccessCode(
     @Json(name = "max_devices") val maxDevices: Int = 1,
     @Json(name = "is_active") val isActive: Boolean = true,
     @Json(name = "created_at") val createdAt: String = "",
-    @Json(name = "note") val note: String? = null,
-    @Json(name = "is_access_restricted") val isAccessRestricted: Boolean = false,
-    @Json(name = "allowed_classes") val allowedClasses: List<String>? = emptyList(),
-    @Json(name = "allowed_groups") val allowedGroups: List<String>? = emptyList(),
-    @Json(name = "allowed_batches") val allowedBatches: List<String>? = emptyList(),
-    @Json(name = "allowed_programs") val allowedPrograms: List<String>? = emptyList()
+    @Json(name = "expires_at") val expiresAt: String? = null,
+    @Json(name = "note") val note: String? = null
 )
 
 /**
@@ -47,12 +43,7 @@ data class CreateAccessCodePayload(
     @Json(name = "student_name") val studentName: String,
     @Json(name = "max_devices") val maxDevices: Int = 1,
     @Json(name = "is_active") val isActive: Boolean = true,
-    @Json(name = "note") val note: String? = null,
-    @Json(name = "is_access_restricted") val isAccessRestricted: Boolean = false,
-    @Json(name = "allowed_classes") val allowedClasses: List<String> = emptyList(),
-    @Json(name = "allowed_groups") val allowedGroups: List<String> = emptyList(),
-    @Json(name = "allowed_batches") val allowedBatches: List<String> = emptyList(),
-    @Json(name = "allowed_programs") val allowedPrograms: List<String> = emptyList()
+    @Json(name = "note") val note: String? = null
 )
 
 /**
@@ -185,7 +176,7 @@ data class ActivationSupportLink(
     @Json(name = "id") val id: String = "",
     @Json(name = "title") val title: String = "",
     @Json(name = "subtitle") val subtitle: String? = null,
-    @Json(name = "icon_type") val iconType: String = "telegram", // 'telegram', 'whatsapp', 'facebook', 'website', 'phone'
+    @Json(name = "icon_type") val iconType: String = "telegram",
     @Json(name = "url") val url: String = "",
     @Json(name = "color_hex") val colorHex: String? = null,
     @Json(name = "is_active") val isActive: Boolean = true,
@@ -233,11 +224,7 @@ data class UserDevice(
     @Json(name = "ban_reason") val banReason: String? = null,
     @Json(name = "status") val status: String = "active",
     @Json(name = "last_seen") val lastSeen: String? = null,
-    @Json(name = "is_access_restricted") val isAccessRestricted: Boolean = false,
-    @Json(name = "allowed_classes") val allowedClasses: List<String>? = emptyList(),
-    @Json(name = "allowed_groups") val allowedGroups: List<String>? = emptyList(),
-    @Json(name = "allowed_batches") val allowedBatches: List<String>? = emptyList(),
-    @Json(name = "allowed_programs") val allowedPrograms: List<String>? = emptyList()
+    @Json(name = "can_view_profiles") val canViewProfiles: Boolean = false
 )
 
 /**
@@ -249,75 +236,3 @@ data class UpdateDeviceBanPayload(
     @Json(name = "status") val status: String,
     @Json(name = "ban_reason") val banReason: String?
 )
-
-/**
- * Course catalog item representing a course in `public.available_courses_catalog`.
- * Matches live SQL schema (`program_id`, `title`, `class_code`, `class_name`, `group_code`, `group_name`, `batch_id`, `batch_name`, `academic_year`, `banner_url`, `subject_count`).
- */
-@JsonClass(generateAdapter = true)
-data class CourseCatalogItem(
-    @Json(name = "program_id") val programId: String = "",
-    @Json(name = "title") val title: String? = null,
-    @Json(name = "title_bn") val rawTitleBn: String? = null,
-    @Json(name = "class_code") val classCode: String? = null,
-    @Json(name = "class_name") val className: String? = null,
-    @Json(name = "group_code") val groupCode: String? = null,
-    @Json(name = "group_name") val groupName: String? = null,
-    @Json(name = "batch_id") val batchId: String? = null,
-    @Json(name = "batch_name") val batchName: String? = null,
-    @Json(name = "academic_year") val academicYear: String? = null,
-    @Json(name = "banner_url") val bannerUrl: String? = null,
-    @Json(name = "subject_count") val subjectCount: Int? = 0,
-    @Json(name = "is_free") val isFree: Boolean? = false
-) {
-    constructor(
-        programId: String,
-        titleBn: String,
-        classCode: String?,
-        groupCode: String?,
-        batchId: String?,
-        bannerUrl: String?,
-        isFree: Boolean?
-    ) : this(
-        programId = programId,
-        title = titleBn,
-        rawTitleBn = titleBn,
-        classCode = classCode,
-        groupCode = groupCode,
-        batchId = batchId,
-        bannerUrl = bannerUrl,
-        isFree = isFree
-    )
-
-    val titleBn: String
-        get() = rawTitleBn?.takeIf { it.isNotBlank() }
-            ?: title?.takeIf { it.isNotBlank() }
-            ?: programId
-}
-
-/**
- * RPC payload for `admin_set_device_course_permissions`.
- */
-@JsonClass(generateAdapter = true)
-data class SetDeviceCoursePermissionsRpcPayload(
-    @Json(name = "p_device_hash") val deviceHash: String,
-    @Json(name = "p_is_restricted") val isRestricted: Boolean,
-    @Json(name = "p_allowed_classes") val allowedClasses: List<String>,
-    @Json(name = "p_allowed_groups") val allowedGroups: List<String>,
-    @Json(name = "p_allowed_batches") val allowedBatches: List<String>,
-    @Json(name = "p_allowed_programs") val allowedPrograms: List<String>
-)
-
-/**
- * Direct table PATCH payload for updating course & syllabus permissions on `public.devices` or `public.access_codes`.
- */
-@JsonClass(generateAdapter = true)
-data class UpdateCoursePermissionsPayload(
-    @Json(name = "is_access_restricted") val isAccessRestricted: Boolean,
-    @Json(name = "allowed_classes") val allowedClasses: List<String>,
-    @Json(name = "allowed_groups") val allowedGroups: List<String>,
-    @Json(name = "allowed_batches") val allowedBatches: List<String>,
-    @Json(name = "allowed_programs") val allowedPrograms: List<String>
-)
-
-

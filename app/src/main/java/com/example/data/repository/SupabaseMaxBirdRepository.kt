@@ -7,7 +7,6 @@ import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
 import com.example.data.model.ApproveCourseAccessRequestRpcPayload
 import com.example.data.model.CourseAccessEnrollment
-import com.example.data.model.CourseCatalogItem
 import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.CreateAccessCodePayload
@@ -15,13 +14,9 @@ import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
-import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.DeviceWithStudent
 import com.example.data.model.ReviewCoursePaymentRpcPayload
-import com.example.data.model.SetAccountCoursePermissionsRpcPayload
-import com.example.data.model.SetDeviceCoursePermissionsRpcPayload
 import com.example.data.model.UpdateCodeStatusPayload
-import com.example.data.model.UpdateCoursePermissionsPayload
 import com.example.data.model.UpdateDeviceBlockedPayload
 import com.example.data.model.UpdateAppUpdateStatusPayload
 import com.example.data.model.UpdateAppNoticeStatusPayload
@@ -34,6 +29,7 @@ import com.example.data.preferences.AdminPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
@@ -50,9 +46,7 @@ class SupabaseMaxBirdRepository(
     private val cachedNotices = mutableListOf<AppNotice>()
     private val cachedSupportLinks = mutableListOf<ActivationSupportLink>()
     private val cachedUserDevices = mutableListOf<UserDevice>()
-    private val cachedCourseCatalog = mutableListOf<CourseCatalogItem>()
     private var isInitializedWithSampleData = false
-
 
     init {
         initSampleDataIfNeeded()
@@ -287,7 +281,8 @@ class SupabaseMaxBirdRepository(
                         isBanned = false,
                         banReason = null,
                         status = "active",
-                        lastSeen = now
+                        lastSeen = now,
+                        canViewProfiles = false
                     ),
                     UserDevice(
                         id = UUID.randomUUID().toString(),
@@ -301,7 +296,8 @@ class SupabaseMaxBirdRepository(
                         isBanned = false,
                         banReason = null,
                         status = "active",
-                        lastSeen = now
+                        lastSeen = now,
+                        canViewProfiles = true
                     ),
                     UserDevice(
                         id = UUID.randomUUID().toString(),
@@ -315,175 +311,8 @@ class SupabaseMaxBirdRepository(
                         isBanned = true,
                         banReason = "একাধিক ডিভাইসে শেয়ার করার অভিযোগে ব্যান করা হয়েছে",
                         status = "banned",
-                        lastSeen = now
-                    ),
-                    UserDevice(
-                        id = UUID.randomUUID().toString(),
-                        deviceHash = "sha256_hw_vivo_aa2938",
-                        displayDeviceId = "MX-D104-55FA-82EE",
-                        deviceModel = "Vivo V29 5G",
-                        deviceBrand = "Vivo",
-                        androidVersion = "Android 14 (API 34)",
-                        appVersion = "1.0.0",
-                        appliedCode = "VIP-BATCH-2026",
-                        isBanned = false,
-                        banReason = null,
-                        status = "active",
                         lastSeen = now,
-                        isAccessRestricted = true,
-                        allowedClasses = listOf("C9", "C10"),
-                        allowedGroups = listOf("Science"),
-                        allowedBatches = listOf("2026", "2027"),
-                        allowedPrograms = listOf("prog_c9_sci_2026", "এসএসসি ২০২৬ ফুল একাডেমিক প্রোগ্রাম (বিজ্ঞান)")
-                    )
-                )
-            )
-
-            cachedCourseCatalog.addAll(
-                listOf(
-                    CourseCatalogItem(
-                        programId = "prog_c5_all_2026",
-                        titleBn = "৫ম শ্রেণি - বার্ষিক প্রস্তুতি ও বৃত্তি প্রোগ্রাম ২০২৬",
-                        classCode = "C5",
-                        groupCode = null,
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c6_all_2026",
-                        titleBn = "৬ষ্ঠ শ্রেণি - একাডেমিক পূর্ণাঙ্গ কোর্স ২০২৬",
-                        classCode = "C6",
-                        groupCode = null,
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c7_all_2026",
-                        titleBn = "৭ম শ্রেণি - একাডেমিক পূর্ণাঙ্গ কোর্স ২০২৬",
-                        classCode = "C7",
-                        groupCode = null,
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c8_all_2026",
-                        titleBn = "৮ম শ্রেণি - জুনিয়র বৃত্তি ও একাডেমিক কোর্স ২০২৬",
-                        classCode = "C8",
-                        groupCode = null,
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c9_sci_2026",
-                        titleBn = "নবম শ্রেণি - একাডেমিক প্রোগ্রাম (বিজ্ঞান)",
-                        classCode = "C9",
-                        groupCode = "Science",
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c9_hum_2026",
-                        titleBn = "নবম শ্রেণি - একাডেমিক প্রোগ্রাম (মানবিক)",
-                        classCode = "C9",
-                        groupCode = "Humanities",
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c9_bus_2026",
-                        titleBn = "নবম শ্রেণি - একাডেমিক প্রোগ্রাম (ব্যবসায় শিক্ষা)",
-                        classCode = "C9",
-                        groupCode = "BusinessStudies",
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c10_sci_2026",
-                        titleBn = "দশম শ্রেণি ও এসএসসি ফাইনাল প্রস্তুতি (বিজ্ঞান)",
-                        classCode = "C10",
-                        groupCode = "Science",
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c10_hum_2026",
-                        titleBn = "দশম শ্রেণি ও এসএসসি ফাইনাল প্রস্তুতি (মানবিক)",
-                        classCode = "C10",
-                        groupCode = "Humanities",
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c10_bus_2026",
-                        titleBn = "দশম শ্রেণি ও এসএসসি ফাইনাল প্রস্তুতি (ব্যবসায় শিক্ষা)",
-                        classCode = "C10",
-                        groupCode = "BusinessStudies",
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c11_sci_2027",
-                        titleBn = "একাদশ শ্রেণি - এইচএসসি একাডেমিক প্রোগ্রাম (বিজ্ঞান)",
-                        classCode = "C11",
-                        groupCode = "Science",
-                        batchId = "2027",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c11_hum_2027",
-                        titleBn = "একাদশ শ্রেণি - এইচএসসি একাডেমিক প্রোগ্রাম (মানবিক)",
-                        classCode = "C11",
-                        groupCode = "Humanities",
-                        batchId = "2027",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c11_bus_2027",
-                        titleBn = "একাদশ শ্রেণি - এইচএসসি একাডেমিক প্রোগ্রাম (ব্যবসায় শিক্ষা)",
-                        classCode = "C11",
-                        groupCode = "BusinessStudies",
-                        batchId = "2027",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c12_sci_2026",
-                        titleBn = "দ্বাদশ শ্রেণি ও এইচএসসি টেস্ট পেপার সলভ (বিজ্ঞান)",
-                        classCode = "C12",
-                        groupCode = "Science",
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c12_hum_2026",
-                        titleBn = "দ্বাদশ শ্রেণি ও এইচএসসি টেস্ট পেপার সলভ (মানবিক)",
-                        classCode = "C12",
-                        groupCode = "Humanities",
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
-                    ),
-                    CourseCatalogItem(
-                        programId = "prog_c12_bus_2026",
-                        titleBn = "দ্বাদশ শ্রেণি ও এইচএসসি টেস্ট পেপার সলভ (ব্যবসায় শিক্ষা)",
-                        classCode = "C12",
-                        groupCode = "BusinessStudies",
-                        batchId = "2026",
-                        bannerUrl = null,
-                        isFree = false
+                        canViewProfiles = false
                     )
                 )
             )
@@ -491,7 +320,6 @@ class SupabaseMaxBirdRepository(
             isInitializedWithSampleData = true
         }
     }
-
 
     override suspend fun getAccessCodes(forceRefresh: Boolean): Result<List<AccessCode>> = withContext(Dispatchers.IO) {
         try {
@@ -515,12 +343,7 @@ class SupabaseMaxBirdRepository(
             maxDevices = payload.maxDevices,
             isActive = payload.isActive,
             createdAt = now,
-            note = payload.note,
-            isAccessRestricted = payload.isAccessRestricted,
-            allowedClasses = payload.allowedClasses,
-            allowedGroups = payload.allowedGroups,
-            allowedBatches = payload.allowedBatches,
-            allowedPrograms = payload.allowedPrograms
+            note = payload.note
         )
 
         try {
@@ -548,6 +371,73 @@ class SupabaseMaxBirdRepository(
                 idQuery = "eq.$codeId",
                 payload = UpdateCodeStatusPayload(isActive = isActive)
             )
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun extendAccessCodeValidity(codeId: String, extraDays: Int): Result<Unit> = withContext(Dispatchers.IO) {
+        val cal = Calendar.getInstance()
+        cal.add(Calendar.DAY_OF_YEAR, extraDays)
+        val newExpiryIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
+        val newExpiryDisplay = SimpleDateFormat("dd MMM yyyy", Locale.US).format(cal.time)
+
+        val index = cachedCodes.indexOfFirst { it.id == codeId }
+        val updatedNote = if (index != -1) {
+            val existing = cachedCodes[index]
+            val cleanNote = existing.note.orEmpty().replace(Regex("\\s*\\|\\s*মেয়াদ:.*$"), "").trim()
+            val noteWithExpiry = if (cleanNote.isBlank()) "মেয়াদ: $newExpiryDisplay" else "$cleanNote | মেয়াদ: $newExpiryDisplay"
+            cachedCodes[index] = existing.copy(isActive = true, expiresAt = newExpiryIso, note = noteWithExpiry)
+            noteWithExpiry
+        } else {
+            "মেয়াদ: $newExpiryDisplay"
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            val res = api.patchAccessCode(
+                idQuery = "eq.$codeId",
+                payload = mapOf(
+                    "is_active" to true,
+                    "expires_at" to newExpiryIso,
+                    "note" to updatedNote
+                )
+            )
+            if (!res.isSuccessful) {
+                api.patchAccessCode(
+                    idQuery = "eq.$codeId",
+                    payload = mapOf(
+                        "is_active" to true,
+                        "note" to updatedNote
+                    )
+                )
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun resetDevicesForCode(codeId: String, codeString: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val linkedDevices = cachedDevices.filter { it.codeId == codeId }
+        cachedDevices.removeAll { it.codeId == codeId }
+
+        try {
+            val api = supabaseClient.getApi()
+            val remoteLinked = try {
+                api.getDevicesForCode(codeIdQuery = "eq.$codeId")
+            } catch (_: Exception) {
+                linkedDevices
+            }
+            remoteLinked.forEach { dev ->
+                if (dev.id.isNotBlank()) {
+                    try {
+                        api.deleteDevice("eq.${dev.id}")
+                    } catch (_: Exception) {
+                    }
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.success(Unit)
@@ -1064,6 +954,24 @@ class SupabaseMaxBirdRepository(
         }
     }
 
+    override suspend fun toggleDeviceCanViewProfiles(deviceId: String, canViewProfiles: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+        val idx = cachedUserDevices.indexOfFirst { it.id == deviceId || it.deviceHash == deviceId }
+        if (idx != -1) {
+            cachedUserDevices[idx] = cachedUserDevices[idx].copy(canViewProfiles = canViewProfiles)
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            api.patchDevice(
+                idQuery = "eq.$deviceId",
+                payload = mapOf("can_view_profiles" to canViewProfiles)
+            )
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
     override suspend fun deleteUserDevice(deviceId: String): Result<Unit> = withContext(Dispatchers.IO) {
         cachedUserDevices.removeAll { it.id == deviceId || it.deviceHash == deviceId }
 
@@ -1073,225 +981,6 @@ class SupabaseMaxBirdRepository(
             Result.success(Unit)
         } catch (e: Exception) {
             Result.success(Unit)
-        }
-    }
-
-    override suspend fun getAvailableCoursesCatalog(forceRefresh: Boolean): Result<List<CourseCatalogItem>> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val remoteCatalog = api.getAvailableCoursesCatalog()
-            if (remoteCatalog.isNotEmpty()) {
-                cachedCourseCatalog.clear()
-                cachedCourseCatalog.addAll(remoteCatalog)
-                Result.success(remoteCatalog)
-            } else {
-                initSampleDataIfNeeded()
-                Result.success(cachedCourseCatalog.toList())
-            }
-        } catch (e: Exception) {
-            initSampleDataIfNeeded()
-            Result.success(cachedCourseCatalog.toList())
-        }
-    }
-
-    override suspend fun setDeviceCoursePermissions(
-        device: UserDevice,
-        isRestricted: Boolean,
-        allowedClasses: List<String>,
-        allowedGroups: List<String>,
-        allowedBatches: List<String>,
-        allowedPrograms: List<String>
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        // Update local cache immediately
-        val idx = cachedUserDevices.indexOfFirst {
-            (device.id.isNotBlank() && it.id == device.id) ||
-            (device.deviceHash.isNotBlank() && it.deviceHash == device.deviceHash)
-        }
-        if (idx != -1) {
-            val existing = cachedUserDevices[idx]
-            cachedUserDevices[idx] = existing.copy(
-                isAccessRestricted = isRestricted,
-                allowedClasses = allowedClasses,
-                allowedGroups = allowedGroups,
-                allowedBatches = allowedBatches,
-                allowedPrograms = allowedPrograms
-            )
-        }
-
-        try {
-            val api = supabaseClient.getApi()
-            var rpcSucceeded = false
-
-            // 1. Primary: Call Supabase RPC `admin_set_device_course_permissions`
-            if (device.deviceHash.isNotBlank()) {
-                try {
-                    val rpcPayload = SetDeviceCoursePermissionsRpcPayload(
-                        deviceHash = device.deviceHash,
-                        isRestricted = isRestricted,
-                        allowedClasses = allowedClasses,
-                        allowedGroups = allowedGroups,
-                        allowedBatches = allowedBatches,
-                        allowedPrograms = allowedPrograms
-                    )
-                    val rpcResponse = api.setDeviceCoursePermissionsRpc(rpcPayload)
-                    rpcSucceeded = rpcResponse.isSuccessful
-                } catch (_: Exception) {
-                    rpcSucceeded = false
-                }
-            }
-
-            // 2. Also ensure `public.devices` row is updated via PATCH if RPC didn't succeed or device_hash was empty
-            if (!rpcSucceeded) {
-                val patchPayload = UpdateCoursePermissionsPayload(
-                    isAccessRestricted = isRestricted,
-                    allowedClasses = allowedClasses,
-                    allowedGroups = allowedGroups,
-                    allowedBatches = allowedBatches,
-                    allowedPrograms = allowedPrograms
-                )
-                if (device.deviceHash.isNotBlank()) {
-                    api.updateDeviceCoursePermissionsByHash("eq.${device.deviceHash}", patchPayload)
-                } else if (device.id.isNotBlank()) {
-                    api.updateDeviceCoursePermissionsById("eq.${device.id}", patchPayload)
-                }
-            }
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.success(Unit)
-        }
-    }
-
-    override suspend fun setAccessCodeCoursePermissions(
-        codeId: String,
-        isRestricted: Boolean,
-        allowedClasses: List<String>,
-        allowedGroups: List<String>,
-        allowedBatches: List<String>,
-        allowedPrograms: List<String>
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        val idx = cachedCodes.indexOfFirst { it.id == codeId }
-        if (idx != -1) {
-            val existing = cachedCodes[idx]
-            cachedCodes[idx] = existing.copy(
-                isAccessRestricted = isRestricted,
-                allowedClasses = allowedClasses,
-                allowedGroups = allowedGroups,
-                allowedBatches = allowedBatches,
-                allowedPrograms = allowedPrograms
-            )
-        }
-
-        try {
-            val api = supabaseClient.getApi()
-            val patchPayload = UpdateCoursePermissionsPayload(
-                isAccessRestricted = isRestricted,
-                allowedClasses = allowedClasses,
-                allowedGroups = allowedGroups,
-                allowedBatches = allowedBatches,
-                allowedPrograms = allowedPrograms
-            )
-            api.updateAccessCodeCoursePermissions("eq.$codeId", patchPayload)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.success(Unit)
-        }
-    }
-
-    override suspend fun getDeviceShikhoAccounts(
-        deviceHash: String,
-        displayDeviceId: String
-    ): Result<List<DeviceShikhoAccount>> = withContext(Dispatchers.IO) {
-        try {
-            val candidateIds = listOf(deviceHash.trim(), displayDeviceId.trim())
-                .filter { it.isNotBlank() }
-                .distinct()
-            if (candidateIds.isEmpty()) {
-                return@withContext Result.success(emptyList())
-            }
-
-            val api = supabaseClient.getApi()
-
-            // 1. Primary: Query live schema column `device_id` (`in.(...)`)
-            try {
-                val inQuery = "in.(${candidateIds.joinToString(",")})"
-                val liveAccounts = api.getDeviceShikhoAccountsByDeviceId(deviceIdQuery = inQuery)
-                if (liveAccounts.isNotEmpty()) {
-                    return@withContext Result.success(liveAccounts.map { it.normalized() })
-                }
-            } catch (_: Exception) {
-                // Fallback below if column or ordering differs
-            }
-
-            // 2. Secondary: Try `or=(device_hash.eq...,display_device_id.eq...)`
-            try {
-                val clauses = mutableListOf<String>()
-                if (deviceHash.isNotBlank()) clauses.add("device_hash.eq.${deviceHash.trim()}")
-                if (displayDeviceId.isNotBlank()) clauses.add("display_device_id.eq.${displayDeviceId.trim()}")
-                val orFilter = "(${clauses.joinToString(",")})"
-                val accounts = api.getDeviceShikhoAccounts(orFilter = orFilter)
-                if (accounts.isNotEmpty()) {
-                    return@withContext Result.success(accounts.map { it.normalized() })
-                }
-            } catch (_: Exception) {
-                // Fallback to select=* filter
-            }
-
-            // 3. Universal Fallback: Fetch all and match against `device_id`, `device_hash`, or `display_device_id`
-            val allAccounts = api.getAllDeviceShikhoAccounts()
-            val matched = allAccounts
-                .map { it.normalized() }
-                .filter { acc ->
-                    candidateIds.any { id ->
-                        acc.deviceId.equals(id, ignoreCase = true) ||
-                            acc.deviceHash.equals(id, ignoreCase = true) ||
-                            acc.displayDeviceId.equals(id, ignoreCase = true)
-                    }
-                }
-            Result.success(matched)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun setAccountCoursePermissions(
-        payload: SetAccountCoursePermissionsRpcPayload
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            var rpcSucceeded = false
-            try {
-                val response = api.setAccountCoursePermissionsRpc(payload)
-                rpcSucceeded = response.isSuccessful
-            } catch (_: Exception) {
-                rpcSucceeded = false
-            }
-
-            // Also ensure direct table update on `public.device_shikho_accounts` (`device_id` + `shikho_user_id`)
-            try {
-                val patchBody = mapOf<String, Any?>(
-                    "access_enabled" to payload.isAccessGranted,
-                    "allowed_classes" to payload.allowedClasses,
-                    "allowed_groups" to payload.allowedGroups,
-                    "allowed_batches" to payload.allowedBatches,
-                    "allowed_programs" to payload.allowedPrograms
-                )
-                api.patchDeviceShikhoAccount(
-                    deviceIdQuery = "eq.${payload.deviceHash}",
-                    shikhoUserIdQuery = "eq.${payload.shikhoUserId}",
-                    payload = patchBody
-                )
-            } catch (_: Exception) {
-                // Ignore if RPC already handled it
-            }
-
-            if (rpcSucceeded) {
-                Result.success(Unit)
-            } else {
-                Result.success(Unit)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 
@@ -1353,7 +1042,6 @@ class SupabaseMaxBirdRepository(
                 try {
                     api.patchCoursePaymentSettings(idQuery = "eq.1", payload = syncedPayload)
                 } catch (_: Exception) {
-                    // Fallback 1: exact live schema columns without extra alias columns
                     val liveSchemaMap = mapOf<String, Any?>(
                         "id" to 1,
                         "payment_methods_json" to syncedPayload.paymentMethodsJson,
@@ -1374,7 +1062,6 @@ class SupabaseMaxBirdRepository(
                         try {
                             api.patchCoursePaymentSettingsRaw(idQuery = "eq.1", payload = liveSchemaMap)
                         } catch (_: Exception) {
-                            // Fallback 2: minimal legacy columns if ALTER TABLE hasn't been run yet
                             val baseMap = mapOf<String, Any?>(
                                 "id" to 1,
                                 "bkash_number" to syncedPayload.bkashNumber,
@@ -1434,7 +1121,6 @@ class SupabaseMaxBirdRepository(
             val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
 
             if (payload.instantFreeUnlock) {
-                // Instant Free Unlock -> directly set status = 'ACTIVE', total_price = 0, due_amount = 0
                 val freeUnlockPatch = mapOf<String, Any?>(
                     "status" to "ACTIVE",
                     "total_price" to 0,
@@ -1456,7 +1142,6 @@ class SupabaseMaxBirdRepository(
                 }
             }
 
-            // 1. Call RPC `admin_approve_course_access_request(p_enrollment_id, p_total_price, p_installment_enabled, p_installment_plans_json, p_admin_note)`
             var rpcSucceeded = false
             try {
                 val rpcRes = api.approveCourseAccessRequestRpc(payload)
@@ -1465,10 +1150,6 @@ class SupabaseMaxBirdRepository(
                 rpcSucceeded = false
             }
 
-            // 2. Also PATCH `public.course_access_enrollments` directly so all live columns
-            // (`status = 'APPROVED_TO_BUY'`, `total_price`, `due_amount`, `installment_enabled`,
-            // `allow_installments`, `installment_plans_json`, `admin_note`, `approved_at`, `updated_at`)
-            // are guaranteed to be synced 100% with the Student App!
             val firstPlan = payload.installmentPlansJson.firstOrNull()
             val patchMap = mapOf<String, Any?>(
                 "status" to if (payload.instantFreeUnlock) "ACTIVE" else "APPROVED_TO_BUY",
@@ -1525,7 +1206,7 @@ class SupabaseMaxBirdRepository(
             val api = supabaseClient.getApi()
             val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
 
-            // 1. Primary: Call live RPC `admin_review_course_payment` with `p_transaction_row_id`
+            // 1. Primary: Call RPC `admin_review_course_payment`
             var rpcSucceeded = false
             try {
                 val primaryResponse = api.reviewCoursePaymentRpc(payload)
@@ -1534,7 +1215,25 @@ class SupabaseMaxBirdRepository(
                 rpcSucceeded = false
             }
 
-            // 2. Secondary fallback: If RPC parameter is named `p_transaction_id`
+            // 2. Secondary fallback: Try `admin_verify_course_payment` or `p_transaction_id`
+            if (!rpcSucceeded) {
+                try {
+                    val verifyMap = mutableMapOf<String, Any?>(
+                        "p_transaction_row_id" to payload.transactionId,
+                        "p_transaction_id" to payload.transactionId,
+                        "p_approve" to payload.approve,
+                        "p_rejection_reason" to payload.rejectionReason
+                    )
+                    if (payload.customNextDueDays != null) {
+                        verifyMap["p_custom_next_due_days"] = payload.customNextDueDays
+                    }
+                    val verifyResponse = api.verifyCoursePaymentRpcRaw(verifyMap)
+                    rpcSucceeded = verifyResponse.isSuccessful
+                } catch (_: Exception) {
+                    rpcSucceeded = false
+                }
+            }
+
             if (!rpcSucceeded) {
                 try {
                     val altMap = mutableMapOf<String, Any?>(
@@ -1552,7 +1251,7 @@ class SupabaseMaxBirdRepository(
                 }
             }
 
-            // 3. If customNextDueDays was specified on approval, or if RPC didn't run, ensure direct table sync
+            // 3. Direct table sync if needed
             if (!rpcSucceeded || (payload.approve && payload.customNextDueDays != null)) {
                 val allTxs = try {
                     api.getCoursePaymentTransactions()
@@ -1592,8 +1291,8 @@ class SupabaseMaxBirdRepository(
                                 ?: 7
 
                             val nextDueIso = if (newDue > 0) {
-                                val cal = java.util.Calendar.getInstance()
-                                cal.add(java.util.Calendar.DAY_OF_YEAR, intervalDays)
+                                val cal = Calendar.getInstance()
+                                cal.add(Calendar.DAY_OF_YEAR, intervalDays)
                                 SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
                             } else {
                                 null
@@ -1702,7 +1401,3 @@ class SupabaseMaxBirdRepository(
         }
     }
 }
-
-
-
-
