@@ -12,13 +12,19 @@ import com.example.data.model.UpdateDeviceBlockedPayload
 import com.example.data.model.UpdateAppUpdateStatusPayload
 import com.example.data.model.UpdateAppNoticeStatusPayload
 import com.example.data.model.ActivationSupportLink
+import com.example.data.model.ApproveCourseAccessRequestRpcPayload
+import com.example.data.model.CourseAccessEnrollment
 import com.example.data.model.CourseCatalogItem
+import com.example.data.model.CoursePaymentSettings
+import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DeviceShikhoAccount
+import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.SetAccountCoursePermissionsRpcPayload
 import com.example.data.model.SetDeviceCoursePermissionsRpcPayload
 import com.example.data.model.UpdateCoursePermissionsPayload
 import com.example.data.model.UpdateSupportLinkStatusPayload
+import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import com.example.data.model.UpdateDeviceBanPayload
 import retrofit2.Response
@@ -235,6 +241,63 @@ interface SupabaseApi {
     suspend fun setAccountCoursePermissionsRpc(
         @Body payload: SetAccountCoursePermissionsRpcPayload
     ): Response<Unit>
+
+    // =========================================================================
+    // Course Sales, Installment Plans & Payment Verification Endpoints
+    // =========================================================================
+
+    @GET("rest/v1/course_payment_settings")
+    suspend fun getCoursePaymentSettings(
+        @Query("id") idQuery: String = "eq.1",
+        @Query("select") select: String = "*"
+    ): List<CoursePaymentSettings>
+
+    @POST("rest/v1/course_payment_settings")
+    suspend fun upsertCoursePaymentSettings(
+        @Body payload: UpsertCoursePaymentSettingsPayload,
+        @Header("Prefer") prefer: String = "resolution=merge-duplicates,return=representation"
+    ): List<CoursePaymentSettings>
+
+    @PATCH("rest/v1/course_payment_settings")
+    suspend fun patchCoursePaymentSettings(
+        @Query("id") idQuery: String = "eq.1",
+        @Body payload: UpsertCoursePaymentSettingsPayload,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): List<CoursePaymentSettings>
+
+    @GET("rest/v1/course_access_enrollments")
+    suspend fun getCourseAccessEnrollments(
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "updated_at.desc.nullslast,created_at.desc"
+    ): List<CourseAccessEnrollment>
+
+    @PATCH("rest/v1/course_access_enrollments")
+    suspend fun patchCourseAccessEnrollment(
+        @Query("id") idQuery: String, // e.g. "eq.12"
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @GET("rest/v1/course_payment_transactions")
+    suspend fun getCoursePaymentTransactions(
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "submitted_at.desc"
+    ): List<CoursePaymentTransaction>
+
+    @POST("rest/v1/rpc/admin_approve_course_access_request")
+    suspend fun approveCourseAccessRequestRpc(
+        @Body payload: ApproveCourseAccessRequestRpcPayload
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/admin_review_course_payment")
+    suspend fun reviewCoursePaymentRpc(
+        @Body payload: ReviewCoursePaymentRpcPayload
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/enforce_overdue_course_installments")
+    suspend fun enforceOverdueCourseInstallmentsRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?> = emptyMap()
+    ): Response<Unit>
 }
+
 
 

@@ -5,7 +5,11 @@ import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
+import com.example.data.model.ApproveCourseAccessRequestRpcPayload
+import com.example.data.model.CourseAccessEnrollment
 import com.example.data.model.CourseCatalogItem
+import com.example.data.model.CoursePaymentSettings
+import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
@@ -13,7 +17,9 @@ import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.SetAccountCoursePermissionsRpcPayload
+import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import kotlinx.coroutines.flow.Flow
 
@@ -109,6 +115,35 @@ interface MaxBirdRepository {
     suspend fun setAccountCoursePermissions(
         payload: SetAccountCoursePermissionsRpcPayload
     ): Result<Unit>
+
+    // Course Sales, Installment Plans & Payment Verification
+    suspend fun getCoursePaymentSettings(): Result<CoursePaymentSettings>
+
+    suspend fun saveCoursePaymentSettings(
+        payload: UpsertCoursePaymentSettingsPayload
+    ): Result<CoursePaymentSettings>
+
+    suspend fun getCourseAccessEnrollments(): Result<List<CourseAccessEnrollment>>
+
+    suspend fun approveCourseAccessRequest(
+        payload: ApproveCourseAccessRequestRpcPayload
+    ): Result<Unit>
+
+    suspend fun getCoursePaymentTransactions(): Result<List<CoursePaymentTransaction>>
+
+    suspend fun reviewCoursePayment(
+        payload: ReviewCoursePaymentRpcPayload
+    ): Result<Unit>
+
+    suspend fun enforceOverdueCourseInstallments(): Result<Unit>
+
+    suspend fun updateEnrollmentStatusOrDueDate(
+        enrollmentId: Long,
+        newStatus: String? = null,
+        newNextDueDateIso: String? = null,
+        adminNote: String? = null
+    ): Result<Unit>
 }
+
 
 

@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.HeadsetMic
+import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.AddModerator
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.HeadsetMic
+import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -34,6 +36,14 @@ sealed class Screen(
         titleBn = "হোম",
         selectedIcon = Icons.Filled.Dashboard,
         unselectedIcon = Icons.Outlined.Dashboard
+    )
+
+    data object CourseSales : Screen(
+        route = "course_sales",
+        titleEn = "Course Sales & Installments",
+        titleBn = "কোর্স বিক্রি ও কিস্তি ম্যানেজমেন্ট",
+        selectedIcon = Icons.Filled.Payments,
+        unselectedIcon = Icons.Outlined.Payments
     )
 
     data object Generator : Screen(
@@ -103,6 +113,7 @@ sealed class Screen(
     val navBarLabel: String
         get() = when (this) {
             Dashboard -> "হোম"
+            CourseSales -> "কিস্তি ও বিক্রি"
             Codes -> "কোডসমূহ"
             CloudinaryMedia -> "মিডিয়া"
             Devices -> "ডিভাইস"
@@ -116,7 +127,8 @@ sealed class Screen(
     companion object {
         // Core 5 primary destinations for clean, spacious Material 3 NavigationBar
         val bottomNavItems: List<Screen>
-            get() = listOf(Dashboard, Codes, CloudinaryMedia, Devices, Settings)
+            get() = listOf(Dashboard, CourseSales, Codes, Devices, Settings)
     }
 }
+
 

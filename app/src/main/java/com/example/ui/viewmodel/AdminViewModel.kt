@@ -9,7 +9,11 @@ import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
+import com.example.data.model.ApproveCourseAccessRequestRpcPayload
+import com.example.data.model.CourseAccessEnrollment
 import com.example.data.model.CourseCatalogItem
+import com.example.data.model.CoursePaymentSettings
+import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
@@ -20,10 +24,12 @@ import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.SetAccountCoursePermissionsRpcPayload
 import com.example.data.model.ShikhoAcademicProgram
 import com.example.data.model.ShikhoBatchExamYear
 import com.example.data.model.ShikhoClassItem
+import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import com.example.data.preferences.AdminPreferences
 import com.example.data.repository.MaxBirdRepository
@@ -362,12 +368,31 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _toastMessage = MutableStateFlow<String?>(null)
     val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
 
+    // Course Sales, Installment Plans & Payment Verification State
+    private val _courseAccessEnrollments = MutableStateFlow<List<CourseAccessEnrollment>>(emptyList())
+    val courseAccessEnrollments: StateFlow<List<CourseAccessEnrollment>> = _courseAccessEnrollments.asStateFlow()
+
+    private val _coursePaymentTransactions = MutableStateFlow<List<CoursePaymentTransaction>>(emptyList())
+    val coursePaymentTransactions: StateFlow<List<CoursePaymentTransaction>> = _coursePaymentTransactions.asStateFlow()
+
+    private val _coursePaymentSettings = MutableStateFlow(CoursePaymentSettings())
+    val coursePaymentSettings: StateFlow<CoursePaymentSettings> = _coursePaymentSettings.asStateFlow()
+
+    private val _isLoadingCourseSales = MutableStateFlow(false)
+    val isLoadingCourseSales: StateFlow<Boolean> = _isLoadingCourseSales.asStateFlow()
+
+    private val _isProcessingCourseSalesAction = MutableStateFlow(false)
+    val isProcessingCourseSalesAction: StateFlow<Boolean> = _isProcessingCourseSalesAction.asStateFlow()
+
     init {
         loadAllData()
     }
 
     fun navigateTo(screen: Screen) {
         _currentScreen.value = screen
+        if (screen == Screen.CourseSales) {
+            loadCourseSalesData()
+        }
     }
 
     fun loadAllData() {
@@ -379,6 +404,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         loadAppUpdates()
         loadAppNotices()
         loadActivationSupportLinks()
+        loadCourseSalesData()
     }
 
 
@@ -1579,6 +1605,207 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // =========================================================================
+    // Course Sales, Installment Plans & Payment Verification Operations
+    // =========================================================================
+
+    fun loadCourseSalesData() {
+        viewModelScope.launch {
+            try {
+                _isLoadingCourseSales.value = true
+                // Run overdue check silently first so list reflects accurate overdue states
+                try {
+                    repository.enforceOverdueCourseInstallments()
+                } catch (_: Throwable) {}
+
+                val enrollmentsRes = repository.getCourseAccessEnrollments()
+                if (enrollmentsRes.isSuccess) {
+                    _courseAccessEnrollments.value = enrollmentsRes.getOrNull().orEmpty()
+                }
+
+                val transactionsRes = repository.getCoursePaymentTransactions()
+                if (transactionsRes.isSuccess) {
+                    _coursePaymentTransactions.value = transactionsRes.getOrNull().orEmpty()
+                }
+
+                val settingsRes = repository.getCoursePaymentSettings()
+                if (settingsRes.isSuccess) {
+                    settingsRes.getOrNull()?.let { _coursePaymentSettings.value = it }
+                }
+            } catch (_: Throwable) {
+                // Keep existing state on transient error
+            } finally {
+                _isLoadingCourseSales.value = false
+            }
+        }
+    }
+
+    fun approveCourseAccessRequest(
+        payload: ApproveCourseAccessRequestRpcPayload,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                _isProcessingCourseSalesAction.value = true
+                val result = repository.approveCourseAccessRequest(payload)
+                if (result.isSuccess) {
+                    loadCourseSalesData()
+                    val msg = if (payload.instantFreeUnlock) {
+                        "✅ কোর্সটি সফলভাবে ফ্রি আনলক (ACTIVE) করে দেওয়া হয়েছে!"
+                    } else {
+                        "✅ কোর্সের দাম (৳${payload.totalPrice}) ও কিস্তি প্ল্যান সেট করে অনুমোদন দেওয়া হয়েছে!"
+                    }
+                    showToast(msg)
+                    onSuccess()
+                } else {
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "অনুমোদন ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isProcessingCourseSalesAction.value = false
+            }
+        }
+    }
+
+    fun reviewCoursePayment(
+        payload: ReviewCoursePaymentRpcPayload,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                _isProcessingCourseSalesAction.value = true
+                val result = repository.reviewCoursePayment(payload)
+                if (result.isSuccess) {
+                    loadCourseSalesData()
+                    val msg = if (payload.approve) {
+                        "✅ পেমেন্ট অনুমোদিত হয়েছে এবং শিক্ষার্থীর কোর্স আনলক (ACTIVE) করা হয়েছে!"
+                    } else {
+                        "🚫 পেমেন্ট বাতিল (Rejected) করা হয়েছে এবং কারণটি শিক্ষার্থীকে পাঠানো হয়েছে।"
+                    }
+                    showToast(msg)
+                    onSuccess()
+                } else {
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "পেমেন্ট রিভিউ ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isProcessingCourseSalesAction.value = false
+            }
+        }
+    }
+
+    fun enforceOverdueCourseInstallments() {
+        viewModelScope.launch {
+            try {
+                _isProcessingCourseSalesAction.value = true
+                val result = repository.enforceOverdueCourseInstallments()
+                if (result.isSuccess) {
+                    loadCourseSalesData()
+                    showToast("✅ ওভারডিউ কিস্তি চেক ও অটো-লক সফলভাবে সম্পন্ন হয়েছে!")
+                } else {
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "ওভারডিউ চেক ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isProcessingCourseSalesAction.value = false
+            }
+        }
+    }
+
+    fun extendEnrollmentDueDate(enrollment: CourseAccessEnrollment, extraDays: Int) {
+        viewModelScope.launch {
+            try {
+                _isProcessingCourseSalesAction.value = true
+                val calendar = java.util.Calendar.getInstance()
+                val isoFormat = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+                // If current nextDueDate is in the future, add extraDays to it; otherwise add from now
+                val baseDate = try {
+                    val raw = enrollment.nextDueDate
+                    if (!raw.isNullOrBlank()) {
+                        val clean = raw.take(19)
+                        val parsed = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(clean)
+                        if (parsed != null && parsed.after(java.util.Date())) parsed else java.util.Date()
+                    } else {
+                        java.util.Date()
+                    }
+                } catch (_: Exception) {
+                    java.util.Date()
+                }
+                calendar.time = baseDate
+                calendar.add(java.util.Calendar.DAY_OF_YEAR, extraDays.coerceAtLeast(1))
+                val newDueIso = isoFormat.format(calendar.time)
+
+                // If it was OVERDUE, restore status to ACTIVE as well
+                val nextStatus = if (enrollment.status.equals("OVERDUE", ignoreCase = true)) "ACTIVE" else null
+
+                val result = repository.updateEnrollmentStatusOrDueDate(
+                    enrollmentId = enrollment.id,
+                    newStatus = nextStatus,
+                    newNextDueDateIso = newDueIso
+                )
+                if (result.isSuccess) {
+                    loadCourseSalesData()
+                    showToast("✅ কিস্তির মেয়াদ +$extraDays দিন বাড়ানো হয়েছে!")
+                } else {
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "মেয়াদ বাড়াতে ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isProcessingCourseSalesAction.value = false
+            }
+        }
+    }
+
+    fun updateEnrollmentStatus(enrollment: CourseAccessEnrollment, newStatus: String) {
+        viewModelScope.launch {
+            try {
+                _isProcessingCourseSalesAction.value = true
+                val result = repository.updateEnrollmentStatusOrDueDate(
+                    enrollmentId = enrollment.id,
+                    newStatus = newStatus
+                )
+                if (result.isSuccess) {
+                    loadCourseSalesData()
+                    val msg = if (newStatus.equals("ACTIVE", ignoreCase = true)) {
+                        "✅ কোর্সটি আনলক (ACTIVE) করা হয়েছে!"
+                    } else {
+                        "🔒 কোর্সটি লক ($newStatus) করা হয়েছে!"
+                    }
+                    showToast(msg)
+                } else {
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "স্ট্যাটাস আপডেট ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isProcessingCourseSalesAction.value = false
+            }
+        }
+    }
+
+    fun saveCoursePaymentSettings(payload: UpsertCoursePaymentSettingsPayload) {
+        viewModelScope.launch {
+            try {
+                _isProcessingCourseSalesAction.value = true
+                val result = repository.saveCoursePaymentSettings(payload)
+                if (result.isSuccess) {
+                    result.getOrNull()?.let { _coursePaymentSettings.value = it }
+                    showToast("✅ বিকাশ / নগদ / রকেট পেমেন্ট সেটিংস সফলভাবে সেভ হয়েছে!")
+                } else {
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "সেটিংস সেভ ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isProcessingCourseSalesAction.value = false
+            }
+        }
+    }
+
     fun showToast(message: String) {
         _toastMessage.value = message
     }
@@ -1587,3 +1814,4 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         _toastMessage.value = null
     }
 }
+

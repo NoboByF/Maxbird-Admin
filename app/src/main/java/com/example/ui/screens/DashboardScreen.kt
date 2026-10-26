@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.HeadsetMic
+import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
@@ -412,7 +413,7 @@ fun DashboardScreen(
                     border = androidx.compose.foundation.BorderStroke(1.dp, Slate700)
                 ) {
                     Text(
-                        text = "৮টি মডিউল",
+                        text = "৯টি মডিউল",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = Slate400,
@@ -427,6 +428,19 @@ fun DashboardScreen(
         // 4. Admin Modules 2-Column Balanced Grid
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Featured Row 0: Course Sales, Custom Pricing, Installments & Payment Verification
+                FeaturedModuleCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "কোর্স বিক্রি ও কিস্তি ম্যানেজমেন্ট",
+                    subtitle = "কোর্স এক্সেস রিকোয়েস্ট, কাস্টম দাম, কিস্তি প্ল্যান ও বিকাশ/নগদ/রকেট পেমেন্ট ভেরিফিকেশন",
+                    icon = Icons.Default.Payments,
+                    badge = "কিস্তি ও পেমেন্ট",
+                    accentColor = EmeraldSuccess,
+                    gradientStart = EmeraldSuccess.copy(alpha = 0.22f),
+                    onClick = { onNavigate(Screen.CourseSales) },
+                    testTag = "mod_card_course_sales"
+                )
+
                 // Row 1: Cloudinary & New Code
                 Row(
                     modifier = Modifier.fillMaxWidth(),

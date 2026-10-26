@@ -5,7 +5,11 @@ import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
+import com.example.data.model.ApproveCourseAccessRequestRpcPayload
+import com.example.data.model.CourseAccessEnrollment
 import com.example.data.model.CourseCatalogItem
+import com.example.data.model.CoursePaymentSettings
+import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
@@ -13,6 +17,7 @@ import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.SetAccountCoursePermissionsRpcPayload
 import com.example.data.model.SetDeviceCoursePermissionsRpcPayload
 import com.example.data.model.UpdateCodeStatusPayload
@@ -21,6 +26,7 @@ import com.example.data.model.UpdateDeviceBlockedPayload
 import com.example.data.model.UpdateAppUpdateStatusPayload
 import com.example.data.model.UpdateAppNoticeStatusPayload
 import com.example.data.model.UpdateSupportLinkStatusPayload
+import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import com.example.data.model.UpdateDeviceBanPayload
 import com.example.data.api.SupabaseClient
@@ -1244,6 +1250,191 @@ class SupabaseMaxBirdRepository(
             Result.failure(e)
         }
     }
+
+    // =========================================================================
+    // Course Sales, Installment Plans & Payment Verification
+    // =========================================================================
+
+    override suspend fun getCoursePaymentSettings(): Result<CoursePaymentSettings> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val list = api.getCoursePaymentSettings(idQuery = "eq.1")
+            val settings = list.firstOrNull() ?: CoursePaymentSettings(
+                id = 1,
+                bkashNumber = "",
+                nagadNumber = "",
+                rocketNumber = "",
+                paymentInstructionsBn = "উপরের যেকোনো নম্বরে Send Money করে নিচের ফর্মে আপনার প্রেরক নম্বর ও Transaction ID জমা দিন।",
+                defaultCoursePrice = 1000
+            )
+            Result.success(settings)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun saveCoursePaymentSettings(
+        payload: UpsertCoursePaymentSettingsPayload
+    ): Result<CoursePaymentSettings> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val updatedList = try {
+                api.upsertCoursePaymentSettings(payload)
+            } catch (_: Exception) {
+                api.patchCoursePaymentSettings(idQuery = "eq.1", payload = payload)
+            }
+            val saved = updatedList.firstOrNull() ?: CoursePaymentSettings(
+                id = 1,
+                bkashNumber = payload.bkashNumber,
+                nagadNumber = payload.nagadNumber,
+                rocketNumber = payload.rocketNumber,
+                paymentInstructionsBn = payload.paymentInstructionsBn,
+                defaultCoursePrice = payload.defaultCoursePrice
+            )
+            Result.success(saved)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun getCourseAccessEnrollments(): Result<List<CourseAccessEnrollment>> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val enrollments = api.getCourseAccessEnrollments()
+            Result.success(enrollments)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun approveCourseAccessRequest(
+        payload: ApproveCourseAccessRequestRpcPayload
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val response = api.approveCourseAccessRequestRpc(payload)
+            if (response.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                val errBody = try {
+                    response.errorBody()?.string().orEmpty()
+                } catch (_: Exception) {
+                    ""
+                }
+                Result.failure(
+                    Exception(
+                        "রিকোয়েস্ট অনুমোদন ব্যর্থ (HTTP ${response.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun getCoursePaymentTransactions(): Result<List<CoursePaymentTransaction>> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val transactions = api.getCoursePaymentTransactions()
+            Result.success(transactions)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun reviewCoursePayment(
+        payload: ReviewCoursePaymentRpcPayload
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val response = api.reviewCoursePaymentRpc(payload)
+            if (response.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                val errBody = try {
+                    response.errorBody()?.string().orEmpty()
+                } catch (_: Exception) {
+                    ""
+                }
+                Result.failure(
+                    Exception(
+                        "পেমেন্ট রিভিউ ব্যর্থ (HTTP ${response.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun enforceOverdueCourseInstallments(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val response = api.enforceOverdueCourseInstallmentsRpc()
+            if (response.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                val errBody = try {
+                    response.errorBody()?.string().orEmpty()
+                } catch (_: Exception) {
+                    ""
+                }
+                Result.failure(
+                    Exception(
+                        "ওভারডিউ কিস্তি চেক ব্যর্থ (HTTP ${response.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun updateEnrollmentStatusOrDueDate(
+        enrollmentId: Long,
+        newStatus: String?,
+        newNextDueDateIso: String?,
+        adminNote: String?
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+            val patchMap = mutableMapOf<String, Any?>(
+                "updated_at" to nowIso
+            )
+            if (!newStatus.isNullOrBlank()) {
+                patchMap["status"] = newStatus
+            }
+            if (!newNextDueDateIso.isNullOrBlank()) {
+                patchMap["next_due_date"] = newNextDueDateIso
+            }
+            if (adminNote != null) {
+                patchMap["admin_note"] = adminNote
+            }
+
+            val response = api.patchCourseAccessEnrollment(
+                idQuery = "eq.$enrollmentId",
+                payload = patchMap
+            )
+            if (response.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                val errBody = try {
+                    response.errorBody()?.string().orEmpty()
+                } catch (_: Exception) {
+                    ""
+                }
+                Result.failure(
+                    Exception(
+                        "এনরোলমেন্ট আপডেট ব্যর্থ (HTTP ${response.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
+
 
 

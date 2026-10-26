@@ -69,6 +69,7 @@ import com.example.ui.screens.ActivationSupportLinksScreen
 import com.example.ui.screens.CloudinaryMediaScreen
 import com.example.ui.screens.CodeGeneratorScreen
 import com.example.ui.screens.CodeManagementScreen
+import com.example.ui.screens.CourseSalesManagementScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.DeviceManagementScreen
 import com.example.ui.screens.NoticeManagementScreen
@@ -188,6 +189,42 @@ class MainActivity : ComponentActivity() {
                                     onRefresh = { viewModel.refreshStats() },
                                     onNavigate = { screen -> viewModel.navigateTo(screen) },
                                     onOpenSettings = { viewModel.navigateTo(Screen.Settings) },
+                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                )
+                            }
+
+                            Screen.CourseSales -> {
+                                val enrollments by viewModel.courseAccessEnrollments.collectAsStateWithLifecycle()
+                                val transactions by viewModel.coursePaymentTransactions.collectAsStateWithLifecycle()
+                                val paymentSettings by viewModel.coursePaymentSettings.collectAsStateWithLifecycle()
+                                val isLoadingCourseSales by viewModel.isLoadingCourseSales.collectAsStateWithLifecycle()
+                                val isProcessingCourseSales by viewModel.isProcessingCourseSalesAction.collectAsStateWithLifecycle()
+
+                                CourseSalesManagementScreen(
+                                    enrollments = enrollments,
+                                    transactions = transactions,
+                                    paymentSettings = paymentSettings,
+                                    isLoading = isLoadingCourseSales,
+                                    isProcessingAction = isProcessingCourseSales,
+                                    onRefreshAll = { viewModel.loadCourseSalesData() },
+                                    onApproveAccessRequest = { payload, onSuccess ->
+                                        viewModel.approveCourseAccessRequest(payload, onSuccess)
+                                    },
+                                    onReviewPayment = { payload, onSuccess ->
+                                        viewModel.reviewCoursePayment(payload, onSuccess)
+                                    },
+                                    onEnforceOverdueInstallments = {
+                                        viewModel.enforceOverdueCourseInstallments()
+                                    },
+                                    onExtendDueDate = { enrollment, days ->
+                                        viewModel.extendEnrollmentDueDate(enrollment, days)
+                                    },
+                                    onUpdateEnrollmentStatus = { enrollment, newStatus ->
+                                        viewModel.updateEnrollmentStatus(enrollment, newStatus)
+                                    },
+                                    onSavePaymentSettings = { payload ->
+                                        viewModel.saveCoursePaymentSettings(payload)
+                                    },
                                     onShowToast = { msg -> viewModel.showToast(msg) }
                                 )
                             }
