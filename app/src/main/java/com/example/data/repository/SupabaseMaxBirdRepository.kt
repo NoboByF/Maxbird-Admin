@@ -1303,15 +1303,31 @@ class SupabaseMaxBirdRepository(
         try {
             val api = supabaseClient.getApi()
             val list = api.getCoursePaymentSettings(idQuery = "eq.1")
-            val settings = list.firstOrNull() ?: CoursePaymentSettings(
-                id = 1,
-                bkashNumber = "01700000000",
-                nagadNumber = "01800000000",
-                rocketNumber = "",
-                paymentInstructionsBn = "উপরের বিকাশ বা নগদ নাম্বারে Send Money করে নিচের বক্সে আপনার মোবাইল নাম্বার এবং Transaction ID দিয়ে সাবমিট করুন।",
-                paymentInstructionBn = "উপরের বিকাশ বা নগদ নাম্বারে Send Money করে নিচের বক্সে আপনার মোবাইল নাম্বার এবং Transaction ID দিয়ে সাবমিট করুন।",
-                defaultCoursePrice = 1000
-            )
+            val raw = list.firstOrNull()
+            val settings = if (raw != null) {
+                raw.copy(
+                    bkashNumber = raw.bkashNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
+                    nagadNumber = raw.nagadNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
+                    rocketNumber = raw.rocketNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
+                    upayNumber = raw.upayNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: ""
+                )
+            } else {
+                CoursePaymentSettings(
+                    id = 1,
+                    paymentMethodsJson = emptyList(),
+                    bkashNumber = "",
+                    bkashEnabled = false,
+                    nagadNumber = "",
+                    nagadEnabled = false,
+                    rocketNumber = "",
+                    rocketEnabled = false,
+                    upayNumber = "",
+                    upayEnabled = false,
+                    paymentInstructionsBn = "প্রদত্ত পেমেন্ট নম্বরে টাকা পাঠিয়ে নিচের বক্সে আপনার প্রেরক মোবাইল নম্বর এবং Transaction ID দিয়ে সাবমিট করুন।",
+                    paymentInstructionBn = "প্রদত্ত পেমেন্ট নম্বরে টাকা পাঠিয়ে নিচের বক্সে আপনার প্রেরক মোবাইল নম্বর এবং Transaction ID দিয়ে সাবমিট করুন।",
+                    defaultCoursePrice = 1000
+                )
+            }
             Result.success(settings)
         } catch (e: Exception) {
             Result.failure(e)
@@ -1323,6 +1339,10 @@ class SupabaseMaxBirdRepository(
     ): Result<CoursePaymentSettings> = withContext(Dispatchers.IO) {
         try {
             val syncedPayload = payload.copy(
+                bkashNumber = payload.bkashNumber.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
+                nagadNumber = payload.nagadNumber.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
+                rocketNumber = payload.rocketNumber.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
+                upayNumber = payload.upayNumber.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
                 paymentInstructionBn = payload.paymentInstructionsBn
             )
             val api = supabaseClient.getApi()
@@ -1331,11 +1351,23 @@ class SupabaseMaxBirdRepository(
             } catch (_: Exception) {
                 api.patchCoursePaymentSettings(idQuery = "eq.1", payload = syncedPayload)
             }
-            val saved = updatedList.firstOrNull() ?: CoursePaymentSettings(
+            val rawSaved = updatedList.firstOrNull()
+            val saved = rawSaved?.copy(
+                bkashNumber = rawSaved.bkashNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
+                nagadNumber = rawSaved.nagadNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
+                rocketNumber = rawSaved.rocketNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
+                upayNumber = rawSaved.upayNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: ""
+            ) ?: CoursePaymentSettings(
                 id = 1,
+                paymentMethodsJson = syncedPayload.paymentMethodsJson,
                 bkashNumber = syncedPayload.bkashNumber,
+                bkashEnabled = syncedPayload.bkashEnabled,
                 nagadNumber = syncedPayload.nagadNumber,
+                nagadEnabled = syncedPayload.nagadEnabled,
                 rocketNumber = syncedPayload.rocketNumber,
+                rocketEnabled = syncedPayload.rocketEnabled,
+                upayNumber = syncedPayload.upayNumber,
+                upayEnabled = syncedPayload.upayEnabled,
                 paymentInstructionsBn = syncedPayload.paymentInstructionsBn,
                 paymentInstructionBn = syncedPayload.paymentInstructionBn,
                 defaultCoursePrice = syncedPayload.defaultCoursePrice

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditCalendar
 import androidx.compose.material.icons.filled.EventRepeat
 import androidx.compose.material.icons.filled.GppBad
@@ -100,6 +101,7 @@ import com.example.data.model.ApproveCourseAccessRequestRpcPayload
 import com.example.data.model.CourseAccessEnrollment
 import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
+import com.example.data.model.DynamicPaymentMethodItem
 import com.example.data.model.InstallmentPlanItem
 import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
@@ -481,7 +483,12 @@ fun CourseSalesManagementScreen(
                 PaymentGatewaySettingsSubTab(
                     settings = paymentSettings,
                     isSaving = isProcessingAction,
-                    onSave = onSavePaymentSettings
+                    onSave = onSavePaymentSettings,
+                    onCopyText = { label, text ->
+                        clipboardManager.setText(AnnotatedString(text))
+                        onShowToast("$label কপি করা হয়েছে!")
+                    },
+                    onShowToast = onShowToast
                 )
             }
         }
@@ -1684,32 +1691,124 @@ private fun InstallmentLedgerCard(
 }
 
 // =============================================================================
-// Sub-Tab 4: পেমেন্ট নম্বর সেটিংস (Payment Gateway Settings `course_payment_settings`)
+// Sub-Tab 4: পেমেন্ট নম্বর সেটিংস — Dynamic Payment Methods Manager (`course_payment_settings`)
 // =============================================================================
 @Composable
 private fun PaymentGatewaySettingsSubTab(
     settings: CoursePaymentSettings,
     isSaving: Boolean,
-    onSave: (UpsertCoursePaymentSettingsPayload) -> Unit
+    onSave: (UpsertCoursePaymentSettingsPayload) -> Unit,
+    onCopyText: (String, String) -> Unit,
+    onShowToast: (String) -> Unit
 ) {
-    var bkash by remember(settings) { mutableStateOf(settings.bkashNumber.orEmpty()) }
-    var nagad by remember(settings) { mutableStateOf(settings.nagadNumber.orEmpty()) }
-    var rocket by remember(settings) { mutableStateOf(settings.rocketNumber.orEmpty()) }
+    val initialMethods = remember(settings) { settings.effectivePaymentMethods() }
+    val methodsList = remember(settings) {
+        mutableStateListOf<DynamicPaymentMethodItem>().apply {
+            addAll(initialMethods)
+        }
+    }
+
     var defaultPriceText by remember(settings) {
         mutableStateOf((settings.defaultCoursePrice ?: 1000).toString())
     }
     var instructionsBn by remember(settings) {
         mutableStateOf(
             settings.effectiveInstructionsBn.takeIf { it.isNotBlank() }
-                ?: "উপরের যেকোনো নম্বরে Send Money করে নিচের ফর্মে আপনার প্রেরক নম্বর ও Transaction ID জমা দিন।"
+                ?: "প্রদত্ত পেমেন্ট নম্বরে টাকা পাঠিয়ে নিচের ফর্মে আপনার প্রেরক নম্বর ও Transaction ID জমা দিন।"
         )
     }
+
+    var isAddOrEditDialogOpen by remember { mutableStateOf(false) }
+    var editingMethodIndex by remember { mutableStateOf<Int?>(null) }
+    var methodIndexToDelete by remember { mutableStateOf<Int?>(null) }
+
+    fun pushSyncedSave(updatedMethods: List<DynamicPaymentMethodItem>) {
+        val defaultPrice = defaultPriceText.toIntOrNull()?.coerceAtLeast(0) ?: 1000
+        val payload = UpsertCoursePaymentSettingsPayload.fromMethods(
+            methods = updatedMethods,
+            instructionsBn = instructionsBn.trim(),
+            defaultPrice = defaultPrice
+        )
+        onSave(payload)
+    }
+
+    if (isAddOrEditDialogOpen) {
+        val existingItem = editingMethodIndex?.let { idx -> methodsList.getOrNull(idx) }
+        AddOrEditPaymentMethodDialog(
+            initialItem = existingItem,
+            existingIds = methodsList.mapIndexedNotNull { idx, item ->
+                if (idx == editingMethodIndex) null else item.id.lowercase()
+            }.toSet(),
+            onDismiss = {
+                isAddOrEditDialogOpen = false
+                editingMethodIndex = null
+            },
+            onConfirm = { savedItem ->
+                val targetIdx = editingMethodIndex
+                if (targetIdx != null && targetIdx in methodsList.indices) {
+                    methodsList[targetIdx] = savedItem
+                } else {
+                    methodsList.add(savedItem)
+                }
+                isAddOrEditDialogOpen = false
+                editingMethodIndex = null
+                pushSyncedSave(methodsList.toList())
+            },
+            onShowToast = onShowToast
+        )
+    }
+
+    methodIndexToDelete?.let { deleteIdx ->
+        val targetMethod = methodsList.getOrNull(deleteIdx)
+        if (targetMethod != null) {
+            AlertDialog(
+                onDismissRequest = { methodIndexToDelete = null },
+                containerColor = Slate900,
+                title = {
+                    Text(
+                        text = "পেমেন্ট মেথড মুছে ফেলবেন?",
+                        color = CoralDanger,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 16.sp
+                    )
+                },
+                text = {
+                    Text(
+                        text = "আপনি কি নিশ্চিত যে '${targetMethod.nameBn} (${targetMethod.accountNumber})' পেমেন্ট মেথডটি তালিকা থেকে ডিলিট করতে চান? ডিলিট করলে স্টুডেন্ট অ্যাপে এটি আর দেখাবে না।",
+                        style = MaterialTheme.typography.bodySmall.copy(color = Slate200)
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (deleteIdx in methodsList.indices) {
+                                methodsList.removeAt(deleteIdx)
+                                pushSyncedSave(methodsList.toList())
+                            }
+                            methodIndexToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = CoralDanger)
+                    ) {
+                        Text("হ্যাঁ, ডিলিট করুন", color = Color.White, fontWeight = FontWeight.ExtraBold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { methodIndexToDelete = null }) {
+                        Text("বাতিল", color = Slate400)
+                    }
+                }
+            )
+        }
+    }
+
+    val enabledCount = methodsList.count { it.isEnabled }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Header + Add Payment Method Button Card
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Slate800),
@@ -1722,86 +1821,146 @@ private fun PaymentGatewaySettingsSubTab(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(NeonCyan.copy(alpha = 0.18f)),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.AccountBalanceWallet,
-                                contentDescription = null,
-                                tint = NeonCyan,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "বিকাশ / নগদ / রকেট পেমেন্ট সেটিংস",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    color = Color.White,
-                                    fontWeight = FontWeight.ExtraBold
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(NeonCyan.copy(alpha = 0.18f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AccountBalanceWallet,
+                                    contentDescription = null,
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(24.dp)
                                 )
-                            )
-                            Text(
-                                text = "স্টুডেন্ট অ্যাপের পেমেন্ট স্ক্রিনে এই নম্বরগুলো ও নির্দেশনা সরাসরি দেখাবে",
-                                style = MaterialTheme.typography.labelSmall.copy(color = Slate400)
-                            )
+                            }
+                            Column {
+                                Text(
+                                    text = "ডায়নামিক পেমেন্ট মেথড ম্যানেজার",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        color = Color.White,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                )
+                                Text(
+                                    text = "মোট ${methodsList.size}টি মেথড • সক্রিয় (ON) আছে $enabledCount টি",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = if (enabledCount > 0) EmeraldSuccess else AmberWarning,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
                         }
                     }
 
-                    HorizontalDivider(color = Slate700)
-
-                    // bKash Number
-                    OutlinedTextField(
-                        value = bkash,
-                        onValueChange = { bkash = it },
-                        label = { Text("বিকাশ নম্বর (bKash Personal / Send Money)") },
-                        placeholder = { Text("যেমন: 017XXXXXXXX") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        colors = adminTextFieldColors(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("input_bkash_number")
+                    Text(
+                        text = "যে পেমেন্ট মেথডগুলো এখানে যোগ করে ON রাখবেন, স্টুডেন্ট অ্যাপে শুধুমাত্র সেগুলোই রিয়েল-টাইমে দেখাবে। কোনো ডামি নম্বর কখনোই দেখানো হবে না।",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = Slate400,
+                            fontSize = 11.sp
+                        )
                     )
 
-                    // Nagad Number
-                    OutlinedTextField(
-                        value = nagad,
-                        onValueChange = { nagad = it },
-                        label = { Text("নগদ নম্বর (Nagad Personal / Send Money)") },
-                        placeholder = { Text("যেমন: 018XXXXXXXX") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        colors = adminTextFieldColors(),
+                    Button(
+                        onClick = {
+                            editingMethodIndex = null
+                            isAddOrEditDialogOpen = true
+                        },
+                        enabled = !isSaving,
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("input_nagad_number")
+                            .height(48.dp)
+                            .testTag("btn_add_payment_method")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            tint = Slate950,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "নতুন পেমেন্ট মেথড যোগ করুন (+ Add Payment Method)",
+                            color = Slate950,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // Dynamic Payment Methods List
+        if (methodsList.isEmpty()) {
+            item {
+                EmptyStateBox(
+                    icon = Icons.Default.AccountBalanceWallet,
+                    title = "কোনো পেমেন্ট মেথড যোগ করা হয়নি",
+                    subtitle = "উপরের '+ নতুন পেমেন্ট মেথড যোগ করুন' বাটনে ক্লিক করে বিকাশ, নগদ, রকেট, উপায় বা ব্যাংক নম্বর যোগ করুন।"
+                )
+            }
+        } else {
+            items(methodsList.size, key = { idx -> "${methodsList[idx].id}_$idx" }) { idx ->
+                val method = methodsList[idx]
+                DynamicPaymentMethodCard(
+                    method = method,
+                    isSaving = isSaving,
+                    onToggleEnabled = { newEnabled ->
+                        methodsList[idx] = method.copy(isEnabled = newEnabled)
+                        pushSyncedSave(methodsList.toList())
+                    },
+                    onEditClick = {
+                        editingMethodIndex = idx
+                        isAddOrEditDialogOpen = true
+                    },
+                    onDeleteClick = {
+                        methodIndexToDelete = idx
+                    },
+                    onCopyNumber = {
+                        onCopyText("${method.nameBn} নম্বর", method.accountNumber)
+                    }
+                )
+            }
+        }
+
+        // General Instructions & Default Course Fee Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Slate800),
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Slate700, RoundedCornerShape(18.dp))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "সাধারণ পেমেন্ট নির্দেশনা ও ডিফল্ট কোর্স ফি",
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            color = NeonCyan,
+                            fontWeight = FontWeight.ExtraBold
+                        )
                     )
 
-                    // Rocket Number
-                    OutlinedTextField(
-                        value = rocket,
-                        onValueChange = { rocket = it },
-                        label = { Text("রকেট নম্বর (Rocket Personal / Send Money)") },
-                        placeholder = { Text("যেমন: 019XXXXXXXX") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        colors = adminTextFieldColors(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("input_rocket_number")
-                    )
-
-                    // Default Course Price
                     OutlinedTextField(
                         value = defaultPriceText,
                         onValueChange = { defaultPriceText = it.filter { ch -> ch.isDigit() } },
@@ -1815,11 +1974,10 @@ private fun PaymentGatewaySettingsSubTab(
                             .testTag("input_default_course_price")
                     )
 
-                    // Payment Instructions (Bengali)
                     OutlinedTextField(
                         value = instructionsBn,
                         onValueChange = { instructionsBn = it },
-                        label = { Text("পেমেন্টের নিয়মাবলী ও নির্দেশনা (বাংলায়)") },
+                        label = { Text("সাধারণ পেমেন্টের নিয়মাবলী ও নির্দেশনা (বাংলায়)") },
                         minLines = 3,
                         maxLines = 6,
                         colors = adminTextFieldColors(),
@@ -1830,17 +1988,7 @@ private fun PaymentGatewaySettingsSubTab(
 
                     Button(
                         onClick = {
-                            val defaultPrice = defaultPriceText.toIntOrNull()?.coerceAtLeast(0) ?: 1000
-                            onSave(
-                                UpsertCoursePaymentSettingsPayload(
-                                    id = 1,
-                                    bkashNumber = bkash.trim(),
-                                    nagadNumber = nagad.trim(),
-                                    rocketNumber = rocket.trim(),
-                                    paymentInstructionsBn = instructionsBn.trim(),
-                                    defaultCoursePrice = defaultPrice
-                                )
-                            )
+                            pushSyncedSave(methodsList.toList())
                         },
                         enabled = !isSaving,
                         colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
@@ -1869,6 +2017,775 @@ private fun PaymentGatewaySettingsSubTab(
                             text = "পেমেন্ট সেটিংস সেভ করুন",
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+private fun DynamicPaymentMethodCard(
+    method: DynamicPaymentMethodItem,
+    isSaving: Boolean,
+    onToggleEnabled: (Boolean) -> Unit,
+    onEditClick: () -> Unit,
+    onDeleteClick: () -> Unit,
+    onCopyNumber: () -> Unit
+) {
+    val brandColor = parseHexColorSafe(method.colorHex, paymentMethodColor(method.code))
+    val borderColor = if (method.isEnabled) brandColor.copy(alpha = 0.65f) else Slate700
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (method.isEnabled) Slate800 else Slate900
+        ),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = if (method.isEnabled) 1.5.dp else 1.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(16.dp)
+            )
+            .testTag("payment_method_card_${method.id}")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Top Row: Color Badge + Name/Code + ON/OFF Switch
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(brandColor.copy(alpha = 0.22f))
+                            .border(1.dp, brandColor.copy(alpha = 0.6f), RoundedCornerShape(11.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = method.code.take(2).uppercase(),
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                color = brandColor,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        )
+                    }
+
+                    Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = method.nameBn,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    color = Color.White,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            )
+                            Surface(
+                                color = brandColor.copy(alpha = 0.18f),
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, brandColor.copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    text = method.code,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = brandColor,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 10.sp
+                                    )
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = method.accountType.ifBlank { "Send Money করুন" },
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = NeonCyan,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                    }
+                }
+
+                // Direct 1-click ON/OFF Switch
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = if (method.isEnabled) "ON" else "OFF",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = if (method.isEnabled) EmeraldSuccess else Slate400,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    )
+                    Switch(
+                        checked = method.isEnabled,
+                        onCheckedChange = { onToggleEnabled(it) },
+                        enabled = !isSaving,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = EmeraldSuccess,
+                            uncheckedThumbColor = Slate400,
+                            uncheckedTrackColor = Slate950
+                        ),
+                        modifier = Modifier.testTag("switch_payment_method_${method.id}")
+                    )
+                }
+            }
+
+            // Account Number Display Box (Copyable)
+            Surface(
+                color = Slate950,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, brandColor.copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onCopyNumber() }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "একাউন্ট / মোবাইল নম্বর",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Slate400,
+                                fontSize = 10.sp
+                            )
+                        )
+                        Text(
+                            text = method.accountNumber,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                color = if (method.isEnabled) Color.White else Slate400,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Copy",
+                            tint = brandColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "কপি",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = brandColor,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
+                }
+            }
+
+            // Method-specific instruction if present
+            if (method.instructionBn.isNotBlank()) {
+                Text(
+                    text = "নির্দেশনা: ${method.instructionBn}",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = Slate200,
+                        fontSize = 11.sp
+                    )
+                )
+            }
+
+            // Bottom Row: Status Indicator + Edit & Delete Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StatusPill(
+                    label = if (method.isEnabled) "স্টুডেন্ট অ্যাপে চালু আছে" else "স্টুডেন্ট অ্যাপে বন্ধ আছে",
+                    color = if (method.isEnabled) EmeraldSuccess else Slate400
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = onEditClick,
+                        enabled = !isSaving,
+                        border = BorderStroke(1.dp, ElectricBlueLight.copy(alpha = 0.6f)),
+                        shape = RoundedCornerShape(9.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("btn_edit_payment_method_${method.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit",
+                            tint = ElectricBlueLight,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "Edit",
+                            color = ElectricBlueLight,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = onDeleteClick,
+                        enabled = !isSaving,
+                        border = BorderStroke(1.dp, CoralDanger.copy(alpha = 0.6f)),
+                        shape = RoundedCornerShape(9.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("btn_delete_payment_method_${method.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Delete",
+                            tint = CoralDanger,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "Delete",
+                            color = CoralDanger,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class PaymentMethodPreset(
+    val id: String,
+    val code: String,
+    val nameBn: String,
+    val accountType: String,
+    val defaultInstructionBn: String,
+    val colorHex: String
+)
+
+@Composable
+private fun AddOrEditPaymentMethodDialog(
+    initialItem: DynamicPaymentMethodItem?,
+    existingIds: Set<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (DynamicPaymentMethodItem) -> Unit,
+    onShowToast: (String) -> Unit
+) {
+    val isEdit = initialItem != null
+
+    var nameBn by remember(initialItem) { mutableStateOf(initialItem?.nameBn ?: "বিকাশ") }
+    var code by remember(initialItem) { mutableStateOf(initialItem?.code ?: "bKash") }
+    var methodId by remember(initialItem) { mutableStateOf(initialItem?.id ?: "bkash") }
+    var accountNumber by remember(initialItem) { mutableStateOf(initialItem?.accountNumber ?: "") }
+    var accountType by remember(initialItem) { mutableStateOf(initialItem?.accountType ?: "Send Money করুন") }
+    var instructionBn by remember(initialItem) {
+        mutableStateOf(initialItem?.instructionBn ?: "বিকাশ পার্সোনাল নম্বরে Send Money করে TrxID দিন।")
+    }
+    var colorHex by remember(initialItem) { mutableStateOf(initialItem?.colorHex ?: "#E2136E") }
+    var isEnabled by remember(initialItem) { mutableStateOf(initialItem?.isEnabled ?: true) }
+    var validationError by remember { mutableStateOf<String?>(null) }
+
+    val presets = remember {
+        listOf(
+            PaymentMethodPreset(
+                id = "bkash",
+                code = "bKash",
+                nameBn = "বিকাশ",
+                accountType = "Send Money করুন",
+                defaultInstructionBn = "বিকাশ পার্সোনাল নম্বরে Send Money করে TrxID দিন।",
+                colorHex = "#E2136E"
+            ),
+            PaymentMethodPreset(
+                id = "nagad",
+                code = "Nagad",
+                nameBn = "নগদ",
+                accountType = "Send Money করুন",
+                defaultInstructionBn = "নগদ পার্সোনাল নম্বরে Send Money করে TrxID দিন।",
+                colorHex = "#F7941D"
+            ),
+            PaymentMethodPreset(
+                id = "rocket",
+                code = "Rocket",
+                nameBn = "রকেট",
+                accountType = "Send Money করুন",
+                defaultInstructionBn = "রকেট পার্সোনাল নম্বরে Send Money করে TrxID দিন।",
+                colorHex = "#8C3494"
+            ),
+            PaymentMethodPreset(
+                id = "upay",
+                code = "Upay",
+                nameBn = "উপায়",
+                accountType = "Send Money করুন",
+                defaultInstructionBn = "উপায় নম্বরে Send Money করে TrxID দিন।",
+                colorHex = "#0066B3"
+            ),
+            PaymentMethodPreset(
+                id = "cellfin",
+                code = "CellFin",
+                nameBn = "সেলফিন",
+                accountType = "Send Money করুন",
+                defaultInstructionBn = "সেলফিন নম্বরে ফান্ড ট্রান্সফার করে TrxID দিন।",
+                colorHex = "#009444"
+            ),
+            PaymentMethodPreset(
+                id = "bkash_merchant",
+                code = "bKash",
+                nameBn = "বিকাশ মার্চেন্ট",
+                accountType = "Make Payment (Merchant)",
+                defaultInstructionBn = "বিকাশ অ্যাপ থেকে Make Payment অপশনে গিয়ে পেমেন্ট করে TrxID দিন।",
+                colorHex = "#E2136E"
+            ),
+            PaymentMethodPreset(
+                id = "bank",
+                code = "Bank",
+                nameBn = "ব্যাংক একাউন্ট",
+                accountType = "Bank Transfer",
+                defaultInstructionBn = "ব্যাংক একাউন্টে টাকা পাঠিয়ে রেফারেন্স বা TrxID দিন।",
+                colorHex = "#2563EB"
+            )
+        )
+    }
+
+    val accountTypePresets = remember {
+        listOf(
+            "Send Money করুন",
+            "Make Payment (Merchant)",
+            "Cash Out",
+            "Bank Transfer"
+        )
+    }
+
+    val colorPresets = remember {
+        listOf(
+            "bKash" to "#E2136E",
+            "Nagad" to "#F7941D",
+            "Rocket" to "#8C3494",
+            "Upay" to "#0066B3",
+            "CellFin" to "#009444",
+            "Bank" to "#2563EB"
+        )
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Slate900),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .border(1.dp, NeonCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Dialog Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isEdit) "পেমেন্ট মেথড এডিট করুন" else "নতুন পেমেন্ট মেথড যোগ করুন",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        )
+                        Text(
+                            text = "যেকোনো মোবাইল ব্যাংকিং বা ব্যাংক একাউন্ট যুক্ত করুন",
+                            style = MaterialTheme.typography.labelSmall.copy(color = NeonCyan)
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Slate400)
+                    }
+                }
+
+                HorizontalDivider(color = Slate700)
+
+                // Quick Presets Row
+                Text(
+                    text = "দ্রুত প্রিসেট সিলেক্ট করুন (অথবা নিচে কাস্টম লিখুন):",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = Slate200,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    presets.forEach { preset ->
+                        val pColor = parseHexColorSafe(preset.colorHex, NeonCyan)
+                        val isSelected = nameBn == preset.nameBn && code.equals(preset.code, ignoreCase = true)
+                        Surface(
+                            color = if (isSelected) pColor.copy(alpha = 0.25f) else Slate800,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) pColor else Slate700
+                            ),
+                            modifier = Modifier.clickable {
+                                methodId = preset.id
+                                code = preset.code
+                                nameBn = preset.nameBn
+                                accountType = preset.accountType
+                                instructionBn = preset.defaultInstructionBn
+                                colorHex = preset.colorHex
+                                validationError = null
+                            }
+                        ) {
+                            Text(
+                                text = "${preset.nameBn} (${preset.code})",
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = if (isSelected) Color.White else pColor,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // Name (Bengali) & Code
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = nameBn,
+                        onValueChange = {
+                            nameBn = it
+                            validationError = null
+                        },
+                        label = { Text("মেথডের নাম (বাংলায়)") },
+                        placeholder = { Text("যেমন: বিকাশ") },
+                        singleLine = true,
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("dialog_input_method_name_bn")
+                    )
+
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = {
+                            code = it
+                            if (!isEdit) {
+                                methodId = it.trim().lowercase().replace(" ", "_")
+                            }
+                            validationError = null
+                        },
+                        label = { Text("মেথডের কোড (Code)") },
+                        placeholder = { Text("যেমন: bKash") },
+                        singleLine = true,
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("dialog_input_method_code")
+                    )
+                }
+
+                // Account / Mobile Number (Mandatory & No Dummy Allowed)
+                OutlinedTextField(
+                    value = accountNumber,
+                    onValueChange = {
+                        accountNumber = it
+                        validationError = null
+                    },
+                    label = { Text("একাউন্ট / মোবাইল নম্বর (খালি রাখা যাবে না)") },
+                    placeholder = { Text("যেমন: 017XXXXXXXX") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    colors = adminTextFieldColors(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dialog_input_method_account_number")
+                )
+
+                // Account Type Selector + Input
+                Text(
+                    text = "একাউন্টের ধরন:",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = Slate200,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    accountTypePresets.forEach { typePreset ->
+                        SmallActionChip(
+                            label = typePreset,
+                            color = if (accountType == typePreset) NeonCyan else Slate400,
+                            onClick = { accountType = typePreset }
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = accountType,
+                    onValueChange = { accountType = it },
+                    label = { Text("একাউন্টের ধরন (Account Type)") },
+                    placeholder = { Text("যেমন: Send Money করুন / Make Payment") },
+                    singleLine = true,
+                    colors = adminTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Method Specific Instruction (Bengali)
+                OutlinedTextField(
+                    value = instructionBn,
+                    onValueChange = { instructionBn = it },
+                    label = { Text("মেথডের নির্দেশনা (Instruction - ঐচ্ছিক)") },
+                    placeholder = { Text("যেমন: বিকাশ পার্সোনাল নম্বরে Send Money করে TrxID দিন।") },
+                    minLines = 2,
+                    maxLines = 3,
+                    colors = adminTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Color Picker Presets + Hex Input
+                Text(
+                    text = "কার্ডের রঙ (Brand Color):",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = Slate200,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    colorPresets.forEach { (label, hex) ->
+                        val c = parseHexColorSafe(hex, ElectricBlue)
+                        val selected = colorHex.equals(hex, ignoreCase = true)
+                        Surface(
+                            color = c.copy(alpha = if (selected) 0.3f else 0.15f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(if (selected) 2.dp else 1.dp, c),
+                            modifier = Modifier.clickable { colorHex = hex }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clip(CircleShape)
+                                        .background(c)
+                                )
+                                Text(
+                                    text = "$label ($hex)",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = colorHex,
+                    onValueChange = { colorHex = it },
+                    label = { Text("রঙের Hex কোড (Color Hex)") },
+                    placeholder = { Text("#E2136E") },
+                    singleLine = true,
+                    colors = adminTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Active / Inactive Switch (is_enabled)
+                Surface(
+                    color = Slate800,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Slate700),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "পেমেন্ট মেথড সক্রিয় রাখুন (is_enabled)",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                            Text(
+                                text = if (isEnabled) "চালু — স্টুডেন্ট অ্যাপে এই পেমেন্ট মেথডটি দেখাবে" else "বন্ধ — স্টুডেন্ট অ্যাপে এটি লুকানো থাকবে",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = if (isEnabled) EmeraldSuccess else Slate400
+                                )
+                            )
+                        }
+                        Switch(
+                            checked = isEnabled,
+                            onCheckedChange = { isEnabled = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = EmeraldSuccess
+                            )
+                        )
+                    }
+                }
+
+                // Validation Error Banner
+                validationError?.let { errMsg ->
+                    Surface(
+                        color = CoralDanger.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, CoralDanger),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = errMsg,
+                            modifier = Modifier.padding(10.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = CoralDanger,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        )
+                    }
+                }
+
+                // Save & Cancel Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        border = BorderStroke(1.dp, Slate600),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                    ) {
+                        Text("বাতিল", color = Slate200, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            val cleanName = nameBn.trim()
+                            val cleanCode = code.trim()
+                            val cleanNum = accountNumber.trim()
+
+                            if (cleanName.isBlank()) {
+                                validationError = "পেমেন্ট মেথডের নাম লিখুন (যেমন: বিকাশ, নগদ)।"
+                                return@Button
+                            }
+                            if (cleanCode.isBlank()) {
+                                validationError = "পেমেন্ট মেথডের কোড লিখুন (যেমন: bKash, Nagad)।"
+                                return@Button
+                            }
+                            if (cleanNum.isBlank()) {
+                                validationError = "একাউন্ট বা মোবাইল নম্বর খালি রাখা যাবে না!"
+                                return@Button
+                            }
+                            if (CoursePaymentSettings.isDummyPhoneNumber(cleanNum)) {
+                                validationError = "ডামি নম্বর ($cleanNum) ব্যবহার করা যাবে না! আপনার আসল পেমেন্ট নম্বর দিন।"
+                                onShowToast("আসল পেমেন্ট নম্বর দিন!")
+                                return@Button
+                            }
+
+                            val baseId = methodId.trim()
+                                .ifBlank { cleanCode.lowercase().replace(" ", "_") }
+                                .lowercase()
+                            val finalId = if (!isEdit && existingIds.contains(baseId)) {
+                                "${baseId}_${System.currentTimeMillis() % 1000}"
+                            } else {
+                                baseId
+                            }
+
+                            val cleanColor = colorHex.trim().let {
+                                if (it.startsWith("#")) it else "#$it"
+                            }
+
+                            onConfirm(
+                                DynamicPaymentMethodItem(
+                                    id = finalId,
+                                    code = cleanCode,
+                                    nameBn = cleanName,
+                                    accountNumber = cleanNum,
+                                    accountType = accountType.trim().ifBlank { "Send Money করুন" },
+                                    instructionBn = instructionBn.trim(),
+                                    colorHex = cleanColor,
+                                    isEnabled = isEnabled
+                                )
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1.4f)
+                            .height(48.dp)
+                            .testTag("btn_confirm_payment_method")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Save,
+                            contentDescription = null,
+                            tint = Slate950,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isEdit) "আপডেট ও সেভ করুন" else "মেথড যোগ ও সেভ করুন",
+                            color = Slate950,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp
                         )
                     }
                 }
@@ -2885,21 +3802,39 @@ private fun statusBadgeLabelBn(status: String?): String {
     }
 }
 
+private fun parseHexColorSafe(hex: String?, fallback: Color): Color {
+    if (hex.isNullOrBlank()) return fallback
+    return try {
+        val clean = if (hex.trim().startsWith("#")) hex.trim() else "#${hex.trim()}"
+        Color(android.graphics.Color.parseColor(clean))
+    } catch (_: Exception) {
+        fallback
+    }
+}
+
 private fun paymentMethodColor(method: String?): Color {
-    return when (method?.lowercase()?.trim()) {
-        "bkash" -> Color(0xFFE2136E)
-        "nagad" -> Color(0xFFF7941D)
-        "rocket" -> Color(0xFF8C3494)
+    val m = method?.lowercase()?.trim().orEmpty()
+    return when {
+        m.contains("bkash") -> Color(0xFFE2136E)
+        m.contains("nagad") -> Color(0xFFF7941D)
+        m.contains("rocket") -> Color(0xFF8C3494)
+        m.contains("upay") -> Color(0xFF0066B3)
+        m.contains("cellfin") -> Color(0xFF009444)
+        m.contains("bank") -> Color(0xFF2563EB)
         else -> NeonCyan
     }
 }
 
 private fun formatPaymentMethodLabel(method: String?): String {
-    return when (method?.lowercase()?.trim()) {
-        "bkash" -> "বিকাশ (bKash)"
-        "nagad" -> "নগদ (Nagad)"
-        "rocket" -> "রকেট (Rocket)"
-        else -> method?.uppercase() ?: "পেমেন্ট"
+    val m = method?.lowercase()?.trim().orEmpty()
+    return when {
+        m == "bkash" -> "বিকাশ (bKash)"
+        m == "nagad" -> "নগদ (Nagad)"
+        m == "rocket" -> "রকেট (Rocket)"
+        m == "upay" -> "উপায় (Upay)"
+        m == "cellfin" -> "সেলফিন (CellFin)"
+        m == "bank" -> "ব্যাংক (Bank)"
+        else -> method?.takeIf { it.isNotBlank() } ?: "পেমেন্ট"
     }
 }
 

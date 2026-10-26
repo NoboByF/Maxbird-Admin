@@ -5,22 +5,72 @@ import com.squareup.moshi.JsonClass
 import kotlin.math.ceil
 
 /**
+ * Individual payment method item stored inside `public.course_payment_settings.payment_methods_json` (JSONB array).
+ */
+@JsonClass(generateAdapter = true)
+data class DynamicPaymentMethodItem(
+    @Json(name = "id")
+    val id: String,
+
+    @Json(name = "code")
+    val code: String,
+
+    @Json(name = "name_bn")
+    val nameBn: String,
+
+    @Json(name = "account_number")
+    val accountNumber: String,
+
+    @Json(name = "account_type")
+    val accountType: String = "Send Money করুন",
+
+    @Json(name = "instruction_bn")
+    val instructionBn: String = "",
+
+    @Json(name = "color_hex")
+    val colorHex: String = "#E2136E",
+
+    @Json(name = "is_enabled")
+    val isEnabled: Boolean = true
+)
+
+/**
  * Row model for `public.course_payment_settings` (id = 1).
- * Matches live Supabase SQL schema 100%, including both `payment_instructions_bn` and `payment_instruction_bn`.
+ * Matches live Supabase SQL schema 100%, including `payment_methods_json`, legacy number/enabled columns,
+ * and both `payment_instructions_bn` and `payment_instruction_bn`.
+ * Never uses dummy numbers like 01700000000 or 01800000000.
  */
 @JsonClass(generateAdapter = true)
 data class CoursePaymentSettings(
     @Json(name = "id")
     val id: Int = 1,
 
+    @Json(name = "payment_methods_json")
+    val paymentMethodsJson: List<DynamicPaymentMethodItem>? = null,
+
     @Json(name = "bkash_number")
-    val bkashNumber: String? = "01700000000",
+    val bkashNumber: String? = "",
+
+    @Json(name = "bkash_enabled")
+    val bkashEnabled: Boolean? = false,
 
     @Json(name = "nagad_number")
-    val nagadNumber: String? = "01800000000",
+    val nagadNumber: String? = "",
+
+    @Json(name = "nagad_enabled")
+    val nagadEnabled: Boolean? = false,
 
     @Json(name = "rocket_number")
     val rocketNumber: String? = "",
+
+    @Json(name = "rocket_enabled")
+    val rocketEnabled: Boolean? = false,
+
+    @Json(name = "upay_number")
+    val upayNumber: String? = "",
+
+    @Json(name = "upay_enabled")
+    val upayEnabled: Boolean? = false,
 
     @Json(name = "payment_instructions_bn")
     val paymentInstructionsBn: String? = null,
@@ -37,36 +87,239 @@ data class CoursePaymentSettings(
     val effectiveInstructionsBn: String
         get() = paymentInstructionsBn?.takeIf { it.isNotBlank() }
             ?: paymentInstructionBn?.takeIf { it.isNotBlank() }
-            ?: "উপরের বিকাশ বা নগদ নাম্বারে Send Money করে নিচের বক্সে আপনার মোবাইল নাম্বার এবং Transaction ID দিয়ে সাবমিট করুন।"
+            ?: "প্রদত্ত পেমেন্ট নম্বরে টাকা পাঠিয়ে নিচের বক্সে আপনার প্রেরক মোবাইল নম্বর এবং Transaction ID দিয়ে সাবমিট করুন।"
+
+    /**
+     * Returns the dynamic payment methods list, filtering out any dummy placeholder numbers
+     * (`01700000000`, `01800000000`, etc.). If `payment_methods_json` was not yet populated
+     * in the database, migrates any real (non-dummy) legacy numbers automatically.
+     */
+    fun effectivePaymentMethods(): List<DynamicPaymentMethodItem> {
+        val fromJson = paymentMethodsJson.orEmpty().filter { item ->
+            val num = item.accountNumber.trim()
+            num.isNotBlank() && !isDummyPhoneNumber(num)
+        }
+        if (fromJson.isNotEmpty() || paymentMethodsJson != null) {
+            return fromJson
+        }
+
+        val migrated = mutableListOf<DynamicPaymentMethodItem>()
+        val cleanBkash = bkashNumber?.trim().orEmpty()
+        if (cleanBkash.isNotBlank() && !isDummyPhoneNumber(cleanBkash)) {
+            migrated.add(
+                DynamicPaymentMethodItem(
+                    id = "bkash",
+                    code = "bKash",
+                    nameBn = "বিকাশ",
+                    accountNumber = cleanBkash,
+                    accountType = "Send Money করুন",
+                    instructionBn = "বিকাশ পার্সোনাল নম্বরে Send Money করে TrxID দিন।",
+                    colorHex = "#E2136E",
+                    isEnabled = bkashEnabled ?: true
+                )
+            )
+        }
+
+        val cleanNagad = nagadNumber?.trim().orEmpty()
+        if (cleanNagad.isNotBlank() && !isDummyPhoneNumber(cleanNagad)) {
+            migrated.add(
+                DynamicPaymentMethodItem(
+                    id = "nagad",
+                    code = "Nagad",
+                    nameBn = "নগদ",
+                    accountNumber = cleanNagad,
+                    accountType = "Send Money করুন",
+                    instructionBn = "নগদ পার্সোনাল নম্বরে Send Money করে TrxID দিন।",
+                    colorHex = "#F7941D",
+                    isEnabled = nagadEnabled ?: true
+                )
+            )
+        }
+
+        val cleanRocket = rocketNumber?.trim().orEmpty()
+        if (cleanRocket.isNotBlank() && !isDummyPhoneNumber(cleanRocket)) {
+            migrated.add(
+                DynamicPaymentMethodItem(
+                    id = "rocket",
+                    code = "Rocket",
+                    nameBn = "রকেট",
+                    accountNumber = cleanRocket,
+                    accountType = "Send Money করুন",
+                    instructionBn = "রকেট নম্বরে Send Money করে TrxID দিন।",
+                    colorHex = "#8C3494",
+                    isEnabled = rocketEnabled ?: true
+                )
+            )
+        }
+
+        val cleanUpay = upayNumber?.trim().orEmpty()
+        if (cleanUpay.isNotBlank() && !isDummyPhoneNumber(cleanUpay)) {
+            migrated.add(
+                DynamicPaymentMethodItem(
+                    id = "upay",
+                    code = "Upay",
+                    nameBn = "উপায়",
+                    accountNumber = cleanUpay,
+                    accountType = "Send Money করুন",
+                    instructionBn = "উপায় নম্বরে Send Money করে TrxID দিন।",
+                    colorHex = "#0066B3",
+                    isEnabled = upayEnabled ?: true
+                )
+            )
+        }
+
+        return migrated
+    }
+
+    companion object {
+        private val DUMMY_NUMBERS = setOf(
+            "01700000000",
+            "01800000000",
+            "01900000000",
+            "01600000000",
+            "01500000000",
+            "01300000000",
+            "01400000000",
+            "017XXXXXXXX",
+            "018XXXXXXXX",
+            "019XXXXXXXX"
+        )
+
+        fun isDummyPhoneNumber(number: String?): Boolean {
+            val clean = number?.trim().orEmpty()
+            if (clean.isEmpty()) return false
+            if (DUMMY_NUMBERS.any { it.equals(clean, ignoreCase = true) }) return true
+            if (clean.endsWith("00000000") || clean.contains("XXXX", ignoreCase = true)) return true
+            return false
+        }
+    }
 }
 
 /**
  * Payload for upserting/updating `public.course_payment_settings` (id = 1).
- * Writes both `payment_instructions_bn` and `payment_instruction_bn` so the Student App reads it seamlessly.
+ * Saves `payment_methods_json` AND automatically syncs `bkash_number`, `bkash_enabled`,
+ * `nagad_number`, `nagad_enabled`, `rocket_number`, `rocket_enabled`, `upay_number`, `upay_enabled`,
+ * `payment_instructions_bn`, and `payment_instruction_bn`.
  */
 @JsonClass(generateAdapter = true)
 data class UpsertCoursePaymentSettingsPayload(
     @Json(name = "id")
     val id: Int = 1,
 
+    @Json(name = "payment_methods_json")
+    val paymentMethodsJson: List<DynamicPaymentMethodItem> = emptyList(),
+
     @Json(name = "bkash_number")
-    val bkashNumber: String,
+    val bkashNumber: String = "",
+
+    @Json(name = "bkash_enabled")
+    val bkashEnabled: Boolean = false,
 
     @Json(name = "nagad_number")
-    val nagadNumber: String,
+    val nagadNumber: String = "",
+
+    @Json(name = "nagad_enabled")
+    val nagadEnabled: Boolean = false,
 
     @Json(name = "rocket_number")
-    val rocketNumber: String,
+    val rocketNumber: String = "",
+
+    @Json(name = "rocket_enabled")
+    val rocketEnabled: Boolean = false,
+
+    @Json(name = "upay_number")
+    val upayNumber: String = "",
+
+    @Json(name = "upay_enabled")
+    val upayEnabled: Boolean = false,
 
     @Json(name = "payment_instructions_bn")
-    val paymentInstructionsBn: String,
+    val paymentInstructionsBn: String = "",
 
     @Json(name = "payment_instruction_bn")
     val paymentInstructionBn: String = paymentInstructionsBn,
 
     @Json(name = "default_course_price")
-    val defaultCoursePrice: Int
-)
+    val defaultCoursePrice: Int = 1000
+) {
+    companion object {
+        /**
+         * Builds a 100% synced payload from the list of dynamic payment methods, general instructions, and default price.
+         * Never populates dummy numbers.
+         */
+        fun fromMethods(
+            methods: List<DynamicPaymentMethodItem>,
+            instructionsBn: String,
+            defaultPrice: Int
+        ): UpsertCoursePaymentSettingsPayload {
+            val sanitizedMethods = methods.mapNotNull { item ->
+                val cleanNum = item.accountNumber.trim()
+                if (cleanNum.isBlank() || CoursePaymentSettings.isDummyPhoneNumber(cleanNum)) {
+                    null
+                } else {
+                    item.copy(
+                        id = item.id.trim().ifBlank { item.code.trim().lowercase() },
+                        code = item.code.trim(),
+                        nameBn = item.nameBn.trim(),
+                        accountNumber = cleanNum,
+                        accountType = item.accountType.trim().ifBlank { "Send Money করুন" },
+                        instructionBn = item.instructionBn.trim(),
+                        colorHex = item.colorHex.trim().ifBlank { "#E2136E" }
+                    )
+                }
+            }
+
+            fun findMethod(key: String): DynamicPaymentMethodItem? {
+                return sanitizedMethods.firstOrNull {
+                    it.id.equals(key, ignoreCase = true) ||
+                        it.code.equals(key, ignoreCase = true) ||
+                        it.id.startsWith("${key}_", ignoreCase = true)
+                }
+            }
+
+            // Prefer an enabled method if multiple exist for the same provider, otherwise first matching
+            fun findBestMethod(key: String): DynamicPaymentMethodItem? {
+                val matches = sanitizedMethods.filter {
+                    it.id.equals(key, ignoreCase = true) ||
+                        it.code.equals(key, ignoreCase = true) ||
+                        it.id.startsWith("${key}_", ignoreCase = true)
+                }
+                return matches.firstOrNull { it.isEnabled } ?: matches.firstOrNull()
+            }
+
+            val bkash = findBestMethod("bkash")
+            val nagad = findBestMethod("nagad")
+            val rocket = findBestMethod("rocket")
+            val upay = findBestMethod("upay")
+
+            // Note: Only write legacy number if enabled OR if the method exists;
+            // to ensure legacy Student Apps only see enabled numbers if they read bkash_number directly without checking bkash_enabled,
+            // we set bkash_number = bkash.accountNumber when bkash != null, and bkash_enabled = bkash.isEnabled.
+            val bkashNum = if (bkash != null && bkash.isEnabled) bkash.accountNumber else (bkash?.accountNumber ?: "")
+            val nagadNum = if (nagad != null && nagad.isEnabled) nagad.accountNumber else (nagad?.accountNumber ?: "")
+            val rocketNum = if (rocket != null && rocket.isEnabled) rocket.accountNumber else (rocket?.accountNumber ?: "")
+            val upayNum = if (upay != null && upay.isEnabled) upay.accountNumber else (upay?.accountNumber ?: "")
+
+            val cleanInstructions = instructionsBn.trim()
+
+            return UpsertCoursePaymentSettingsPayload(
+                id = 1,
+                paymentMethodsJson = sanitizedMethods,
+                bkashNumber = bkashNum,
+                bkashEnabled = bkash?.isEnabled == true && bkash.accountNumber.isNotBlank(),
+                nagadNumber = nagadNum,
+                nagadEnabled = nagad?.isEnabled == true && nagad.accountNumber.isNotBlank(),
+                rocketNumber = rocketNum,
+                rocketEnabled = rocket?.isEnabled == true && rocket.accountNumber.isNotBlank(),
+                upayNumber = upayNum,
+                upayEnabled = upay?.isEnabled == true && upay.accountNumber.isNotBlank(),
+                paymentInstructionsBn = cleanInstructions,
+                paymentInstructionBn = cleanInstructions,
+                defaultCoursePrice = defaultPrice.coerceAtLeast(0)
+            )
+        }
+    }
+}
 
 /**
  * Individual installment plan option stored inside `installment_plans_json` (JSONB).
