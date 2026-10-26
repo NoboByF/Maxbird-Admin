@@ -173,6 +173,9 @@ class MainActivity : ComponentActivity() {
                                     onApproveAccessRequest = { payload, onSuccess ->
                                         viewModel.approveCourseAccessRequest(payload, onSuccess)
                                     },
+                                    onGrantManualCourseAccess = { payload, onSuccess ->
+                                        viewModel.grantManualCourseAccess(payload, onSuccess)
+                                    },
                                     onReviewPayment = { payload, onSuccess ->
                                         viewModel.reviewCoursePayment(payload, onSuccess)
                                     },

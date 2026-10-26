@@ -250,9 +250,29 @@ interface SupabaseApi {
         @Query("order") order: String = "updated_at.desc.nullslast,requested_at.desc.nullslast"
     ): List<CourseAccessEnrollment>
 
+    @POST("rest/v1/course_access_enrollments")
+    suspend fun createCourseAccessEnrollmentRaw(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "resolution=merge-duplicates,return=representation"
+    ): Response<List<CourseAccessEnrollment>>
+
     @PATCH("rest/v1/course_access_enrollments")
     suspend fun patchCourseAccessEnrollment(
         @Query("id") idQuery: String, // e.g. "eq.12"
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @PATCH("rest/v1/course_access_enrollments")
+    suspend fun patchCourseAccessEnrollmentByAccountAndProgram(
+        @Query("shikho_account_key") accountKeyQuery: String, // e.g. "eq.017XXXXXXXX"
+        @Query("program_id") programIdQuery: String, // e.g. "eq.prog_123"
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @PATCH("rest/v1/course_access_enrollments")
+    suspend fun patchCourseAccessEnrollmentByPhoneAndProgram(
+        @Query("student_phone") studentPhoneQuery: String, // e.g. "eq.017XXXXXXXX"
+        @Query("program_id") programIdQuery: String, // e.g. "eq.prog_123"
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
 
@@ -271,6 +291,16 @@ interface SupabaseApi {
     @POST("rest/v1/rpc/admin_approve_course_access_request")
     suspend fun approveCourseAccessRequestRpc(
         @Body payload: ApproveCourseAccessRequestRpcPayload
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/admin_approve_course_access_request")
+    suspend fun approveCourseAccessRequestRpcRaw(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/admin_set_course_access_offer")
+    suspend fun setCourseAccessOfferRpcRaw(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
 
     @POST("rest/v1/rpc/admin_review_course_payment")
@@ -293,3 +323,4 @@ interface SupabaseApi {
         @Body payload: Map<String, @JvmSuppressWildcards Any?> = emptyMap()
     ): Response<Unit>
 }
+

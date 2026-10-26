@@ -103,6 +103,7 @@ import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.DynamicPaymentMethodItem
 import com.example.data.model.InstallmentPlanItem
+import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.ui.theme.AmberWarning
@@ -135,6 +136,7 @@ fun CourseSalesManagementScreen(
     isProcessingAction: Boolean,
     onRefreshAll: () -> Unit,
     onApproveAccessRequest: (ApproveCourseAccessRequestRpcPayload, onSuccess: () -> Unit) -> Unit,
+    onGrantManualCourseAccess: (ManualCourseAccessPayload, onSuccess: () -> Unit) -> Unit = { _, _ -> },
     onReviewPayment: (ReviewCoursePaymentRpcPayload, onSuccess: () -> Unit) -> Unit,
     onEnforceOverdueInstallments: () -> Unit,
     onExtendDueDate: (CourseAccessEnrollment, Int) -> Unit,
@@ -167,6 +169,7 @@ fun CourseSalesManagementScreen(
 
     // Dialog states
     var enrollmentForPricingDialog by remember { mutableStateOf<CourseAccessEnrollment?>(null) }
+    var isManualCourseAccessDialogOpen by remember { mutableStateOf(false) }
     var transactionForApproveDialog by remember { mutableStateOf<CoursePaymentTransaction?>(null) }
     var transactionForRejectDialog by remember { mutableStateOf<CoursePaymentTransaction?>(null) }
     var enrollmentForCustomDaysDialog by remember { mutableStateOf<CourseAccessEnrollment?>(null) }
@@ -192,6 +195,21 @@ fun CourseSalesManagementScreen(
     }
     val enabledPaymentMethodsCount = remember(effectivePaymentMethods) {
         effectivePaymentMethods.count { it.isEnabled }
+    }
+
+    // Manual Course Access / Installment Assignment Dialog (by 11-digit Student Phone)
+    if (isManualCourseAccessDialogOpen) {
+        ManualCourseAccessDialog(
+            existingEnrollments = enrollments,
+            defaultCoursePrice = paymentSettings.defaultCoursePrice ?: 1000,
+            isProcessing = isProcessingAction,
+            onDismiss = { isManualCourseAccessDialogOpen = false },
+            onSubmit = { payload ->
+                onGrantManualCourseAccess(payload) {
+                    isManualCourseAccessDialogOpen = false
+                }
+            }
+        )
     }
 
     // Pricing & Installment Plan Builder Dialog
@@ -221,7 +239,11 @@ fun CourseSalesManagementScreen(
                         transactionId = targetTx.id,
                         approve = true,
                         rejectionReason = "",
-                        customNextDueDays = customDays
+                        customNextDueDays = customDays,
+                        enrollmentId = targetTx.enrollmentId,
+                        studentPhone = targetTx.effectiveStudentPhone,
+                        shikhoAccountKey = targetTx.effectiveAccountKey,
+                        programId = targetTx.programId
                     )
                 ) {
                     transactionForApproveDialog = null
@@ -242,7 +264,11 @@ fun CourseSalesManagementScreen(
                         transactionId = targetTx.id,
                         approve = false,
                         rejectionReason = reason,
-                        customNextDueDays = null
+                        customNextDueDays = null,
+                        enrollmentId = targetTx.enrollmentId,
+                        studentPhone = targetTx.effectiveStudentPhone,
+                        shikhoAccountKey = targetTx.effectiveAccountKey,
+                        programId = targetTx.programId
                     )
                 ) {
                     transactionForRejectDialog = null
@@ -446,7 +472,7 @@ fun CourseSalesManagementScreen(
                     )
                 }
 
-                // Search bar for Tabs 0, 1, 2
+                // Search bar + Manual Course Access button for Tabs 0, 1, 2
                 if (selectedTab in 0..2) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -459,9 +485,9 @@ fun CourseSalesManagementScreen(
                             placeholder = {
                                 Text(
                                     text = when (selectedTab) {
-                                        0 -> "শিক্ষার্থীর নাম, ফোন, ডিভাইস বা কোর্সের নাম খুঁজুন..."
-                                        1 -> "Transaction ID, প্রেরক নম্বর বা শিক্ষার্থীর নাম খুঁজুন..."
-                                        else -> "শিক্ষার্থীর নাম, ফোন বা কোর্স খুঁজুন..."
+                                        0 -> "মোবাইল নম্বর (student_phone), নাম বা কোর্স খুঁজুন..."
+                                        1 -> "মোবাইল নম্বর, TrxID, প্রেরক নম্বর বা নাম খুঁজুন..."
+                                        else -> "মোবাইল নম্বর (017XXXXXXXX), নাম বা কোর্স খুঁজুন..."
                                     },
                                     color = Slate400,
                                     fontSize = 12.sp
@@ -502,6 +528,29 @@ fun CourseSalesManagementScreen(
                                 .testTag("course_sales_search_input")
                         )
 
+                        Button(
+                            onClick = { isManualCourseAccessDialogOpen = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
+                            modifier = Modifier.testTag("btn_open_manual_course_access")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "ম্যানুয়াল কোর্স এক্সেস",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "নম্বর দিয়ে\nকোর্স দিন",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                lineHeight = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+
                         IconButton(
                             onClick = onRefreshAll,
                             modifier = Modifier
@@ -539,6 +588,7 @@ fun CourseSalesManagementScreen(
                     selectedFilter = requestTabFilter,
                     onFilterChange = { requestTabFilter = it },
                     onOpenApproveDialog = { enrollmentForPricingDialog = it },
+                    onOpenManualAccessDialog = { isManualCourseAccessDialogOpen = true },
                     onCopyText = { label, text ->
                         clipboardManager.setText(AnnotatedString(text))
                         onShowToast("$label কপি করা হয়েছে!")
@@ -575,6 +625,7 @@ fun CourseSalesManagementScreen(
                         onUpdateEnrollmentStatus(enrollment, targetStatus)
                     },
                     onOpenEditPlans = { enrollmentForPricingDialog = it },
+                    onOpenManualAccessDialog = { isManualCourseAccessDialogOpen = true },
                     onCopyText = { label, text ->
                         clipboardManager.setText(AnnotatedString(text))
                         onShowToast("$label কপি করা হয়েছে!")
@@ -608,6 +659,7 @@ private fun AccessRequestsSubTab(
     selectedFilter: String,
     onFilterChange: (String) -> Unit,
     onOpenApproveDialog: (CourseAccessEnrollment) -> Unit,
+    onOpenManualAccessDialog: () -> Unit,
     onCopyText: (String, String) -> Unit
 ) {
     val filteredList = remember(enrollments, searchQuery, selectedFilter) {
@@ -620,12 +672,14 @@ private fun AccessRequestsSubTab(
             }
             val query = searchQuery.trim().lowercase()
             val queryMatch = query.isEmpty() ||
+                (item.studentPhone?.lowercase()?.contains(query) == true) ||
+                (item.effectivePhone.lowercase().contains(query)) ||
+                (item.shikhoAccountKey?.lowercase()?.contains(query) == true) ||
+                (item.effectiveAccountKey.lowercase().contains(query)) ||
                 (item.studentName?.lowercase()?.contains(query) == true) ||
-                (item.effectivePhone?.lowercase()?.contains(query) == true) ||
-                (item.effectiveDeviceId?.lowercase()?.contains(query) == true) ||
-                (item.effectiveAccountKey?.lowercase()?.contains(query) == true) ||
                 (item.programTitle?.lowercase()?.contains(query) == true) ||
-                (item.effectiveClass?.lowercase()?.contains(query) == true)
+                (item.programId?.lowercase()?.contains(query) == true) ||
+                (item.effectiveClass.lowercase().contains(query))
             statusMatch && queryMatch
         }
     }
@@ -635,6 +689,64 @@ private fun AccessRequestsSubTab(
         contentPadding = PaddingValues(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Manual Course Access Banner Card (11-digit student_phone based)
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Slate800),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, ElectricBlue.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "মোবাইল নম্বর দিয়ে সরাসরি কোর্স বা কিস্তি দিন",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        )
+                        Text(
+                            text = "স্টুডেন্টের ১১ ডিজিটের নম্বর (01XXXXXXXXX) দিয়ে কোর্স অ্যাসাইন করলে যেকোনো ফোনে লগইন করলেই কোর্স পাবে।",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Slate400,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = onOpenManualAccessDialog,
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.testTag("btn_manual_assign_from_requests")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            tint = Slate950,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "ম্যানুয়ালি দিন",
+                            color = Slate950,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+        }
+
         item {
             Row(
                 modifier = Modifier
@@ -727,6 +839,9 @@ private fun EnrollmentRequestCard(
     val statusColor = statusBadgeColor(enrollment.status)
     val statusLabel = statusBadgeLabelBn(enrollment.status)
     val plans = remember(enrollment.installmentPlansJson) { enrollment.parsedInstallmentPlans() }
+    val primaryPhone = enrollment.effectivePhone.takeIf { it.isNotBlank() }
+        ?: enrollment.effectiveAccountKey.takeIf { it.isNotBlank() }
+        ?: "মোবাইল নম্বর নেই"
 
     Card(
         colors = CardDefaults.cardColors(containerColor = Slate800),
@@ -742,7 +857,7 @@ private fun EnrollmentRequestCard(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Header: Student Name + Status Badge
+            // Header: Student Phone + Student Name + Status Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -761,7 +876,7 @@ private fun EnrollmentRequestCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Person,
+                            imageVector = Icons.Default.PhoneAndroid,
                             contentDescription = null,
                             tint = NeonCyan,
                             modifier = Modifier.size(22.dp)
@@ -770,25 +885,26 @@ private fun EnrollmentRequestCard(
 
                     Column {
                         Text(
-                            text = enrollment.studentName?.takeIf { it.isNotBlank() } ?: "অজ্ঞাত শিক্ষার্থী",
+                            text = primaryPhone,
                             style = MaterialTheme.typography.titleSmall.copy(
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
+                                color = NeonCyan,
+                                fontFamily = FontFamily.Monospace
                             )
                         )
                         Text(
                             text = buildString {
-                                append(enrollment.effectivePhone?.takeIf { it.isNotBlank() } ?: "ফোন নম্বর নেই")
-                                if (!enrollment.effectiveClass.isNullOrBlank()) {
+                                append(enrollment.studentName?.takeIf { it.isNotBlank() } ?: "শিক্ষার্থী")
+                                if (enrollment.effectiveClass.isNotBlank()) {
                                     append(" • ${formatClassBn(enrollment.effectiveClass)}")
                                 }
-                                if (!enrollment.effectiveGroup.isNullOrBlank()) {
+                                if (enrollment.effectiveGroup.isNotBlank()) {
                                     append(" (${formatGroupBn(enrollment.effectiveGroup)})")
                                 }
                             },
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = Slate400,
-                                fontSize = 11.sp
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
                             )
                         )
                     }
@@ -837,29 +953,27 @@ private fun EnrollmentRequestCard(
                 }
             }
 
-            // Device ID & Account Key chips
+            // Student Mobile (`student_phone`) & Shikho Account Key (`shikho_account_key`) chips
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                val devId = enrollment.effectiveDeviceId
-                val accKey = enrollment.effectiveAccountKey
-                if (!devId.isNullOrBlank()) {
-                    CopyableMetaChip(
-                        modifier = Modifier.weight(1f),
-                        label = "ডিভাইস",
-                        value = devId,
-                        onCopy = { onCopyText("ডিভাইস আইডি", devId) }
-                    )
-                }
-                if (!accKey.isNullOrBlank()) {
-                    CopyableMetaChip(
-                        modifier = Modifier.weight(1f),
-                        label = "অ্যাকাউন্ট কী",
-                        value = accKey,
-                        onCopy = { onCopyText("অ্যাকাউন্ট কী", accKey) }
-                    )
-                }
+                val studentPhoneVal = enrollment.effectivePhone.ifBlank { primaryPhone }
+                val accKey = enrollment.effectiveAccountKey.ifBlank { studentPhoneVal }
+                CopyableMetaChip(
+                    modifier = Modifier.weight(1f),
+                    label = "স্টুডেন্ট মোবাইল (student_phone)",
+                    value = studentPhoneVal,
+                    accentColor = NeonCyan,
+                    onCopy = { onCopyText("স্টুডেন্ট মোবাইল নম্বর", studentPhoneVal) }
+                )
+                CopyableMetaChip(
+                    modifier = Modifier.weight(1f),
+                    label = "অ্যাকাউন্ট কী (shikho_account_key)",
+                    value = accKey,
+                    accentColor = EmeraldSuccess,
+                    onCopy = { onCopyText("অ্যাকাউন্ট কী", accKey) }
+                )
             }
 
             // Show already configured price & plans if approved to buy
@@ -970,10 +1084,14 @@ private fun PaymentVerificationSubTab(
             }
             val query = searchQuery.trim().lowercase()
             val queryMatch = query.isEmpty() ||
+                (tx.studentPhone?.lowercase()?.contains(query) == true) ||
+                (tx.effectiveStudentPhone.lowercase().contains(query)) ||
+                (tx.shikhoAccountKey?.lowercase()?.contains(query) == true) ||
                 (tx.transactionId?.lowercase()?.contains(query) == true) ||
                 (tx.senderMobile?.lowercase()?.contains(query) == true) ||
                 (tx.studentName?.lowercase()?.contains(query) == true) ||
                 (tx.programTitle?.lowercase()?.contains(query) == true) ||
+                (tx.programId?.lowercase()?.contains(query) == true) ||
                 (tx.paymentMethod?.lowercase()?.contains(query) == true)
             statusMatch && queryMatch
         }
@@ -1121,20 +1239,31 @@ private fun PaymentTransactionCard(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Header: Student Name + Payment Method + Status
+            // Header: Student Phone & Name + Payment Method + Status
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = transaction.studentName?.takeIf { it.isNotBlank() } ?: "অজ্ঞাত শিক্ষার্থী",
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
+                    val txStudentPhone = transaction.effectiveStudentPhone.takeIf { it.isNotBlank() }
+                    if (txStudentPhone != null) {
+                        Text(
+                            text = "📱 $txStudentPhone • ${transaction.studentName?.takeIf { it.isNotBlank() } ?: "শিক্ষার্থী"}",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
                         )
-                    )
+                    } else {
+                        Text(
+                            text = transaction.studentName?.takeIf { it.isNotBlank() } ?: "অজ্ঞাত শিক্ষার্থী",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                        )
+                    }
                     Text(
                         text = transaction.programTitle?.takeIf { it.isNotBlank() }
                             ?: transaction.programId
@@ -1343,6 +1472,7 @@ private fun ActiveInstallmentsSubTab(
     onOpenCustomDaysDialog: (CourseAccessEnrollment) -> Unit,
     onSetStatus: (CourseAccessEnrollment, String) -> Unit,
     onOpenEditPlans: (CourseAccessEnrollment) -> Unit,
+    onOpenManualAccessDialog: () -> Unit,
     onCopyText: (String, String) -> Unit
 ) {
     val filteredList = remember(enrollments, searchQuery, selectedFilter) {
@@ -1360,10 +1490,13 @@ private fun ActiveInstallmentsSubTab(
             }
             val query = searchQuery.trim().lowercase()
             val queryMatch = query.isEmpty() ||
+                (item.studentPhone?.lowercase()?.contains(query) == true) ||
+                (item.effectivePhone.lowercase().contains(query)) ||
+                (item.shikhoAccountKey?.lowercase()?.contains(query) == true) ||
+                (item.effectiveAccountKey.lowercase().contains(query)) ||
                 (item.studentName?.lowercase()?.contains(query) == true) ||
-                (item.effectivePhone?.lowercase()?.contains(query) == true) ||
-                (item.effectiveDeviceId?.lowercase()?.contains(query) == true) ||
-                (item.programTitle?.lowercase()?.contains(query) == true)
+                (item.programTitle?.lowercase()?.contains(query) == true) ||
+                (item.programId?.lowercase()?.contains(query) == true)
             statusMatch && queryMatch
         }
     }
@@ -1373,7 +1506,7 @@ private fun ActiveInstallmentsSubTab(
         contentPadding = PaddingValues(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Overdue Enforcement Banner Card
+        // Overdue Enforcement + Manual Course Assignment Banner Card
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Slate800),
@@ -1382,45 +1515,89 @@ private fun ActiveInstallmentsSubTab(
                     .fillMaxWidth()
                     .border(1.dp, CoralDanger.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "কিস্তির মেয়াদ ও অটো-লক চেক",
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                        Text(
-                            text = "যাদের কিস্তির শেষ তারিখ পার হয়ে গেছে তাদের কোর্স অটোমেটিক OVERDUE (লক) করতে ক্লিক করুন।",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = Slate400,
-                                fontSize = 11.sp
-                            )
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = onEnforceOverdue,
-                        enabled = !isProcessing,
-                        colors = ButtonDefaults.buttonColors(containerColor = CoralDanger),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        modifier = Modifier.testTag("btn_enforce_overdue")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.EventRepeat,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "কিস্তির মেয়াদ ও অটো-লক চেক",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                            Text(
+                                text = "যাদের কিস্তির শেষ তারিখ পার হয়ে গেছে তাদের কোর্স অটোমেটিক OVERDUE (লক) করতে ক্লিক করুন।",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = Slate400,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = onEnforceOverdue,
+                            enabled = !isProcessing,
+                            colors = ButtonDefaults.buttonColors(containerColor = CoralDanger),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier.testTag("btn_enforce_overdue")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.EventRepeat,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("ওভারডিউ চেক", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    HorizontalDivider(color = Slate700)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "১১ ডিজিট মোবাইল নম্বর দিয়ে সরাসরি কোর্স বা কিস্তি যোগ করুন:",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = NeonCyan,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.weight(1f)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("ওভারডিউ চেক", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = onOpenManualAccessDialog,
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("btn_manual_assign_from_installments")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                tint = Slate950,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "+ কোর্স / কিস্তি দিন",
+                                color = Slate950,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
                     }
                 }
             }
@@ -1539,6 +1716,9 @@ private fun InstallmentLedgerCard(
     val isActive = enrollment.status.equals("ACTIVE", ignoreCase = true)
     val statusColor = statusBadgeColor(enrollment.status)
     val statusLabel = statusBadgeLabelBn(enrollment.status)
+    val primaryPhone = enrollment.effectivePhone.takeIf { it.isNotBlank() }
+        ?: enrollment.effectiveAccountKey.takeIf { it.isNotBlank() }
+        ?: "মোবাইল নম্বর নেই"
 
     Card(
         colors = CardDefaults.cardColors(
@@ -1560,7 +1740,7 @@ private fun InstallmentLedgerCard(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Top Row: Student Info + Status
+            // Top Row: Student Phone + Student Name + Status
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1568,20 +1748,24 @@ private fun InstallmentLedgerCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = enrollment.studentName?.takeIf { it.isNotBlank() } ?: "অজ্ঞাত শিক্ষার্থী",
+                        text = "📱 $primaryPhone",
                         style = MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
+                            color = NeonCyan,
+                            fontFamily = FontFamily.Monospace
                         )
                     )
                     Text(
                         text = buildString {
-                            append(enrollment.effectivePhone?.takeIf { it.isNotBlank() } ?: "ফোন নেই")
-                            if (!enrollment.effectiveClass.isNullOrBlank()) {
+                            append(enrollment.studentName?.takeIf { it.isNotBlank() } ?: "শিক্ষার্থী")
+                            if (enrollment.effectiveClass.isNotBlank()) {
                                 append(" • ${formatClassBn(enrollment.effectiveClass)}")
                             }
                         },
-                        style = MaterialTheme.typography.labelSmall.copy(color = Slate400)
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
@@ -1589,13 +1773,36 @@ private fun InstallmentLedgerCard(
                             ?: enrollment.programId
                             ?: "কোর্স",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = NeonCyan,
+                            color = EmeraldSuccess,
                             fontWeight = FontWeight.Bold
                         )
                     )
                 }
 
                 StatusPill(label = statusLabel, color = statusColor)
+            }
+
+            // Copyable Student Phone & Account Key Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val studentPhoneVal = enrollment.effectivePhone.ifBlank { primaryPhone }
+                val accKey = enrollment.effectiveAccountKey.ifBlank { studentPhoneVal }
+                CopyableMetaChip(
+                    modifier = Modifier.weight(1f),
+                    label = "স্টুডেন্ট মোবাইল (student_phone)",
+                    value = studentPhoneVal,
+                    accentColor = NeonCyan,
+                    onCopy = { onCopyText("স্টুডেন্ট মোবাইল নম্বর", studentPhoneVal) }
+                )
+                CopyableMetaChip(
+                    modifier = Modifier.weight(1f),
+                    label = "অ্যাকাউন্ট কী (shikho_account_key)",
+                    value = accKey,
+                    accentColor = EmeraldSuccess,
+                    onCopy = { onCopyText("অ্যাকাউন্ট কী", accKey) }
+                )
             }
 
             // Financial Summary Grid: Total | Paid | Due
@@ -3334,7 +3541,10 @@ private fun ApproveCourseAccessPricingDialog(
                                 installmentEnabled = installmentEnabled,
                                 installmentPlansJson = finalPlans,
                                 adminNote = adminNote.trim(),
-                                instantFreeUnlock = false
+                                instantFreeUnlock = false,
+                                studentPhone = enrollment.effectivePhone,
+                                shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { enrollment.effectivePhone },
+                                programId = enrollment.programId
                             )
                         )
                     },
@@ -3374,7 +3584,10 @@ private fun ApproveCourseAccessPricingDialog(
                                 installmentEnabled = false,
                                 installmentPlansJson = emptyList(),
                                 adminNote = adminNote.trim().ifBlank { "অ্যাডমিন কর্তৃক ফ্রি আনলক করা হয়েছে" },
-                                instantFreeUnlock = true
+                                instantFreeUnlock = true,
+                                studentPhone = enrollment.effectivePhone,
+                                shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { enrollment.effectivePhone },
+                                programId = enrollment.programId
                             )
                         )
                     },
@@ -3399,6 +3612,485 @@ private fun ApproveCourseAccessPricingDialog(
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 13.sp
                     )
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Dialog 1B: Manual Course Access / Installment Grant Dialog (By 11-digit Student Phone)
+// =============================================================================
+@Composable
+private fun ManualCourseAccessDialog(
+    existingEnrollments: List<CourseAccessEnrollment>,
+    defaultCoursePrice: Int,
+    isProcessing: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (ManualCourseAccessPayload) -> Unit
+) {
+    var studentPhoneText by remember { mutableStateOf("") }
+    var studentNameText by remember { mutableStateOf("") }
+    var programIdText by remember { mutableStateOf("") }
+    var programTitleText by remember { mutableStateOf("") }
+    var classCodeText by remember { mutableStateOf("") }
+    var groupCodeText by remember { mutableStateOf("") }
+
+    // "ACTIVE" (সরাসরি কোর্স আনলক / সক্রিয় কিস্তি) or "APPROVED_TO_BUY" (দাম ও কিস্তি প্ল্যান সেট করে অনুমোদন)
+    var selectedStatus by remember { mutableStateOf("ACTIVE") }
+    var totalPriceText by remember { mutableStateOf("0") }
+    var paidAmountText by remember { mutableStateOf("0") }
+    var nextDueDaysText by remember { mutableStateOf("30") }
+    var installmentEnabled by remember { mutableStateOf(true) }
+    var adminNoteText by remember { mutableStateOf("অ্যাডমিন কর্তৃক মোবাইল নম্বরে কোর্স অ্যাক্সেস প্রদান করা হয়েছে।") }
+    var validationError by remember { mutableStateOf<String?>(null) }
+
+    val knownCourses = remember(existingEnrollments) {
+        existingEnrollments
+            .filter { !it.programId.isNullOrBlank() }
+            .distinctBy { it.programId }
+            .take(15)
+    }
+
+    Dialog(
+        onDismissRequest = { if (!isProcessing) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Slate900),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .border(1.dp, NeonCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "মোবাইল নম্বর দিয়ে কোর্স / কিস্তি দিন",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        )
+                        Text(
+                            text = "স্টুডেন্ট যেকোনো ফোনে এই নম্বরে লগইন করলেই কোর্স ও কিস্তি পাবে",
+                            style = MaterialTheme.typography.labelSmall.copy(color = NeonCyan)
+                        )
+                    }
+                    IconButton(onClick = { if (!isProcessing) onDismiss() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Slate400)
+                    }
+                }
+
+                HorizontalDivider(color = Slate700)
+
+                // Info Banner explaining student_phone, shikho_account_key, and device_id sync
+                Surface(
+                    color = ElectricBlue.copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "ℹ️ স্টুডেন্টের ১১ ডিজিটের মোবাইল নম্বরটি (01XXXXXXXXX) ডাটাবেজের student_phone, shikho_account_key এবং device_id কলামে অটোমেটিক সেভ হবে।",
+                        modifier = Modifier.padding(10.dp),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = Slate200,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                }
+
+                // 1. 11-Digit Student Mobile Number
+                OutlinedTextField(
+                    value = studentPhoneText,
+                    onValueChange = {
+                        studentPhoneText = it.filter { ch -> ch.isDigit() || ch == '+' }
+                        validationError = null
+                    },
+                    label = { Text("স্টুডেন্টের ১১ ডিজিটের মোবাইল নম্বর (01XXXXXXXXX) *") },
+                    placeholder = { Text("যেমন: 017XXXXXXXX") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    colors = adminTextFieldColors(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_manual_student_phone")
+                )
+
+                // 2. Student Name
+                OutlinedTextField(
+                    value = studentNameText,
+                    onValueChange = { studentNameText = it },
+                    label = { Text("শিক্ষার্থীর নাম (student_name)") },
+                    placeholder = { Text("যেমন: তানভীর আহমেদ") },
+                    singleLine = true,
+                    colors = adminTextFieldColors(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_manual_student_name")
+                )
+
+                // 3. Quick Course Picker from existing enrollments (if any)
+                if (knownCourses.isNotEmpty()) {
+                    Text(
+                        text = "বিদ্যমান কোর্স থেকে দ্রুত সিলেক্ট করুন (অথবা নিচে লিখুন):",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = NeonCyan,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        knownCourses.forEach { courseItem ->
+                            val isSelected = programIdText == courseItem.programId
+                            Surface(
+                                color = if (isSelected) ElectricBlue.copy(alpha = 0.28f) else Slate800,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) NeonCyan else Slate700
+                                ),
+                                modifier = Modifier.clickable {
+                                    programIdText = courseItem.programId.orEmpty()
+                                    programTitleText = courseItem.programTitle.orEmpty()
+                                    classCodeText = courseItem.effectiveClass
+                                    groupCodeText = courseItem.effectiveGroup
+                                    validationError = null
+                                }
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = courseItem.programTitle?.takeIf { it.isNotBlank() }
+                                            ?: courseItem.programId.orEmpty(),
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "ID: ${courseItem.programId}",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = Slate400,
+                                            fontSize = 10.sp
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Program ID & Program Title
+                OutlinedTextField(
+                    value = programTitleText,
+                    onValueChange = {
+                        programTitleText = it
+                        validationError = null
+                    },
+                    label = { Text("কোর্সের নাম (program_title) *") },
+                    placeholder = { Text("যেমন: HSC '26 একাডেমিক প্রোগ্রাম বিজ্ঞান") },
+                    singleLine = true,
+                    colors = adminTextFieldColors(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_manual_program_title")
+                )
+
+                OutlinedTextField(
+                    value = programIdText,
+                    onValueChange = {
+                        programIdText = it
+                        validationError = null
+                    },
+                    label = { Text("কোর্স / প্রোগ্রাম আইডি (program_id) *") },
+                    placeholder = { Text("যেমন: 65a1b2c3d4e5f6...") },
+                    singleLine = true,
+                    colors = adminTextFieldColors(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_manual_program_id")
+                )
+
+                // Class & Group (Optional)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = classCodeText,
+                        onValueChange = { classCodeText = it },
+                        label = { Text("শ্রেণি কোড (যেমন: C10)") },
+                        singleLine = true,
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = groupCodeText,
+                        onValueChange = { groupCodeText = it },
+                        label = { Text("বিভাগ (যেমন: science)") },
+                        singleLine = true,
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // 4. Grant Mode Selection: ACTIVE vs APPROVED_TO_BUY
+                Text(
+                    text = "অ্যাক্সেসের ধরন নির্বাচন করুন:",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = Slate200,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        color = if (selectedStatus == "ACTIVE") EmeraldSuccess.copy(alpha = 0.22f) else Slate800,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(
+                            width = if (selectedStatus == "ACTIVE") 1.5.dp else 1.dp,
+                            color = if (selectedStatus == "ACTIVE") EmeraldSuccess else Slate700
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                selectedStatus = "ACTIVE"
+                            }
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "সরাসরি আনলক (ACTIVE)",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = if (selectedStatus == "ACTIVE") EmeraldSuccess else Color.White,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            )
+                            Text(
+                                text = "ফ্রি আনলক অথবা ১ম কিস্তি পরিশোধিত হিসেবে সক্রিয়",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = Slate400,
+                                    fontSize = 10.sp
+                                )
+                            )
+                        }
+                    }
+
+                    Surface(
+                        color = if (selectedStatus == "APPROVED_TO_BUY") AmberWarning.copy(alpha = 0.22f) else Slate800,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(
+                            width = if (selectedStatus == "APPROVED_TO_BUY") 1.5.dp else 1.dp,
+                            color = if (selectedStatus == "APPROVED_TO_BUY") AmberWarning else Slate700
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                selectedStatus = "APPROVED_TO_BUY"
+                                if ((totalPriceText.toIntOrNull() ?: 0) == 0) {
+                                    totalPriceText = defaultCoursePrice.toString()
+                                }
+                            }
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "কেনার অনুমতি (APPROVED)",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = if (selectedStatus == "APPROVED_TO_BUY") AmberWarning else Color.White,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            )
+                            Text(
+                                text = "দাম ও কিস্তি প্ল্যান সেট হবে, স্টুডেন্ট পেমেন্ট করবে",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = Slate400,
+                                    fontSize = 10.sp
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // 5. Pricing & Installment Inputs
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = totalPriceText,
+                        onValueChange = { totalPriceText = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("মোট কোর্স ফি ৳ (০ = ফ্রি)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    if (selectedStatus == "ACTIVE") {
+                        OutlinedTextField(
+                            value = paidAmountText,
+                            onValueChange = { paidAmountText = it.filter { ch -> ch.isDigit() } },
+                            label = { Text("জমা / পরিশোধিত ৳") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = adminTextFieldColors(),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                val currentTotal = totalPriceText.toIntOrNull() ?: 0
+                val currentPaid = paidAmountText.toIntOrNull() ?: 0
+                if (selectedStatus == "ACTIVE" && currentTotal > currentPaid) {
+                    OutlinedTextField(
+                        value = nextDueDaysText,
+                        onValueChange = { nextDueDaysText = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("বকেয়া ৳${currentTotal - currentPaid}-এর পরবর্তী কিস্তির মেয়াদ (দিন)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                OutlinedTextField(
+                    value = adminNoteText,
+                    onValueChange = { adminNoteText = it },
+                    label = { Text("অ্যাডমিন নোট (ঐচ্ছিক)") },
+                    singleLine = true,
+                    colors = adminTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                validationError?.let { err ->
+                    Surface(
+                        color = CoralDanger.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, CoralDanger),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = err,
+                            modifier = Modifier.padding(10.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = CoralDanger,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        )
+                    }
+                }
+
+                // Submit & Cancel Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { if (!isProcessing) onDismiss() },
+                        border = BorderStroke(1.dp, Slate600),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                    ) {
+                        Text("বাতিল", color = Slate200, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(studentPhoneText)
+                            if (!CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
+                                validationError = "সঠিক ১১ ডিজিটের মোবাইল নম্বর দিন (যেমন: 017XXXXXXXX)"
+                                return@Button
+                            }
+                            val cleanProgTitle = programTitleText.trim()
+                            val cleanProgId = programIdText.trim().ifBlank {
+                                cleanProgTitle.lowercase().replace(" ", "_")
+                            }
+                            if (cleanProgId.isBlank()) {
+                                validationError = "কোর্সের নাম ও প্রোগ্রাম আইডি (program_id) দিন।"
+                                return@Button
+                            }
+
+                            val totalPrice = totalPriceText.toIntOrNull()?.coerceAtLeast(0) ?: 0
+                            val paidAmount = if (selectedStatus == "ACTIVE") {
+                                (paidAmountText.toIntOrNull()?.coerceAtLeast(0) ?: 0).coerceAtMost(totalPrice)
+                            } else {
+                                0
+                            }
+                            val dueDays = nextDueDaysText.toIntOrNull()?.coerceAtLeast(1) ?: 30
+                            val plans = InstallmentPlanItem.buildDefaultPlansForPrice(totalPrice)
+
+                            onSubmit(
+                                ManualCourseAccessPayload(
+                                    studentPhone = cleanPhone,
+                                    studentName = studentNameText.trim(),
+                                    programId = cleanProgId,
+                                    programTitle = cleanProgTitle.ifBlank { cleanProgId },
+                                    classCode = classCodeText.trim(),
+                                    groupCode = groupCodeText.trim(),
+                                    status = selectedStatus,
+                                    totalPrice = totalPrice,
+                                    paidAmount = paidAmount,
+                                    installmentEnabled = installmentEnabled && totalPrice > 0,
+                                    installmentPlansJson = plans,
+                                    nextDueDays = dueDays,
+                                    adminNote = adminNoteText.trim()
+                                )
+                            )
+                        },
+                        enabled = !isProcessing,
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1.5f)
+                            .height(48.dp)
+                            .testTag("btn_confirm_manual_course_access")
+                    ) {
+                        if (isProcessing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Slate950
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Save,
+                                contentDescription = null,
+                                tint = Slate950,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
+                        Text(
+                            text = "সেভ ও অ্যাসাইন করুন",
+                            color = Slate950,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp
+                        )
+                    }
                 }
             }
         }

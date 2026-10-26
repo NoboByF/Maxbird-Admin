@@ -15,6 +15,7 @@ import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
@@ -101,6 +102,10 @@ interface MaxBirdRepository {
         payload: ApproveCourseAccessRequestRpcPayload
     ): Result<Unit>
 
+    suspend fun grantManualCourseAccess(
+        payload: ManualCourseAccessPayload
+    ): Result<Unit>
+
     suspend fun getCoursePaymentTransactions(): Result<List<CoursePaymentTransaction>>
 
     suspend fun reviewCoursePayment(
@@ -111,8 +116,12 @@ interface MaxBirdRepository {
 
     suspend fun updateEnrollmentStatusOrDueDate(
         enrollmentId: Long,
+        studentPhone: String? = null,
+        shikhoAccountKey: String? = null,
+        programId: String? = null,
         newStatus: String? = null,
         newNextDueDateIso: String? = null,
         adminNote: String? = null
     ): Result<Unit>
 }
+

@@ -15,6 +15,7 @@ import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpdateCodeStatusPayload
 import com.example.data.model.UpdateDeviceBlockedPayload
@@ -1113,15 +1114,74 @@ class SupabaseMaxBirdRepository(
         }
     }
 
+    private suspend fun patchEnrollmentByIdOrAccount(
+        enrollmentId: Long,
+        studentPhone: String?,
+        shikhoAccountKey: String?,
+        programId: String?,
+        patchMap: Map<String, Any?>
+    ): retrofit2.Response<Unit>? {
+        val api = supabaseClient.getApi()
+        var primaryResponse: retrofit2.Response<Unit>? = null
+
+        if (enrollmentId > 0L) {
+            try {
+                primaryResponse = api.patchCourseAccessEnrollment(
+                    idQuery = "eq.$enrollmentId",
+                    payload = patchMap
+                )
+            } catch (_: Exception) {
+                primaryResponse = null
+            }
+        }
+
+        val cleanProgId = programId?.trim().orEmpty()
+        val cleanAccKey = CourseAccessEnrollment.normalizeBdPhone(shikhoAccountKey)
+            .ifBlank { CourseAccessEnrollment.normalizeBdPhone(studentPhone) }
+        val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(studentPhone)
+            .ifBlank { cleanAccKey }
+
+        if (cleanProgId.isNotBlank() && (enrollmentId <= 0L || primaryResponse?.isSuccessful != true)) {
+            if (cleanAccKey.isNotBlank()) {
+                try {
+                    val res = api.patchCourseAccessEnrollmentByAccountAndProgram(
+                        accountKeyQuery = "eq.$cleanAccKey",
+                        programIdQuery = "eq.$cleanProgId",
+                        payload = patchMap
+                    )
+                    if (res.isSuccessful) primaryResponse = res
+                } catch (_: Exception) {
+                }
+            }
+            if (cleanPhone.isNotBlank()) {
+                try {
+                    val res = api.patchCourseAccessEnrollmentByPhoneAndProgram(
+                        studentPhoneQuery = "eq.$cleanPhone",
+                        programIdQuery = "eq.$cleanProgId",
+                        payload = patchMap
+                    )
+                    if (res.isSuccessful) primaryResponse = res
+                } catch (_: Exception) {
+                }
+            }
+        }
+
+        return primaryResponse
+    }
+
     override suspend fun approveCourseAccessRequest(
         payload: ApproveCourseAccessRequestRpcPayload
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
             val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+            val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(payload.studentPhone)
+            val cleanAccountKey = CourseAccessEnrollment.normalizeBdPhone(payload.shikhoAccountKey)
+                .ifBlank { cleanPhone }
+            val cleanProgramId = payload.programId?.trim().orEmpty()
 
             if (payload.instantFreeUnlock) {
-                val freeUnlockPatch = mapOf<String, Any?>(
+                val freeUnlockPatch = mutableMapOf<String, Any?>(
                     "status" to "ACTIVE",
                     "total_price" to 0,
                     "due_amount" to 0,
@@ -1133,25 +1193,53 @@ class SupabaseMaxBirdRepository(
                     "unlocked_at" to nowIso,
                     "updated_at" to nowIso
                 )
-                val patchRes = api.patchCourseAccessEnrollment(
-                    idQuery = "eq.${payload.enrollmentId}",
-                    payload = freeUnlockPatch
+                if (CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
+                    freeUnlockPatch["student_phone"] = cleanPhone
+                    freeUnlockPatch["shikho_account_key"] = cleanAccountKey.ifBlank { cleanPhone }
+                }
+                val patchRes = patchEnrollmentByIdOrAccount(
+                    enrollmentId = payload.enrollmentId,
+                    studentPhone = cleanPhone,
+                    shikhoAccountKey = cleanAccountKey,
+                    programId = cleanProgramId,
+                    patchMap = freeUnlockPatch
                 )
-                if (patchRes.isSuccessful) {
+                if (patchRes?.isSuccessful == true) {
                     return@withContext Result.success(Unit)
                 }
             }
 
             var rpcSucceeded = false
-            try {
-                val rpcRes = api.approveCourseAccessRequestRpc(payload)
-                rpcSucceeded = rpcRes.isSuccessful
-            } catch (_: Exception) {
-                rpcSucceeded = false
+            if (payload.enrollmentId > 0L) {
+                try {
+                    val rpcRes = api.approveCourseAccessRequestRpc(payload)
+                    rpcSucceeded = rpcRes.isSuccessful
+                } catch (_: Exception) {
+                    rpcSucceeded = false
+                }
+            }
+
+            if (!rpcSucceeded) {
+                try {
+                    val offerRpcMap = mutableMapOf<String, Any?>(
+                        "p_enrollment_id" to payload.enrollmentId,
+                        "p_student_phone" to cleanPhone,
+                        "p_shikho_account_key" to cleanAccountKey,
+                        "p_program_id" to cleanProgramId,
+                        "p_total_price" to payload.totalPrice,
+                        "p_installment_enabled" to payload.installmentEnabled,
+                        "p_installment_plans_json" to payload.installmentPlansJson,
+                        "p_admin_note" to payload.adminNote
+                    )
+                    val offerRes = api.setCourseAccessOfferRpcRaw(offerRpcMap)
+                    rpcSucceeded = offerRes.isSuccessful
+                } catch (_: Exception) {
+                    rpcSucceeded = false
+                }
             }
 
             val firstPlan = payload.installmentPlansJson.firstOrNull()
-            val patchMap = mapOf<String, Any?>(
+            val patchMap = mutableMapOf<String, Any?>(
                 "status" to if (payload.instantFreeUnlock) "ACTIVE" else "APPROVED_TO_BUY",
                 "total_price" to payload.totalPrice,
                 "due_amount" to payload.totalPrice,
@@ -1165,25 +1253,183 @@ class SupabaseMaxBirdRepository(
                 "approved_at" to nowIso,
                 "updated_at" to nowIso
             )
-            val patchResponse = api.patchCourseAccessEnrollment(
-                idQuery = "eq.${payload.enrollmentId}",
-                payload = patchMap
+            if (CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
+                patchMap["student_phone"] = cleanPhone
+                patchMap["shikho_account_key"] = cleanAccountKey.ifBlank { cleanPhone }
+            }
+
+            val patchResponse = patchEnrollmentByIdOrAccount(
+                enrollmentId = payload.enrollmentId,
+                studentPhone = cleanPhone,
+                shikhoAccountKey = cleanAccountKey,
+                programId = cleanProgramId,
+                patchMap = patchMap
             )
 
-            if (rpcSucceeded || patchResponse.isSuccessful) {
+            if (rpcSucceeded || patchResponse?.isSuccessful == true) {
                 Result.success(Unit)
             } else {
                 val errBody = try {
-                    patchResponse.errorBody()?.string().orEmpty()
+                    patchResponse?.errorBody()?.string().orEmpty()
                 } catch (_: Exception) {
                     ""
                 }
                 Result.failure(
                     Exception(
-                        "রিকোয়েস্ট অনুমোদন ব্যর্থ (HTTP ${patchResponse.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
+                        "রিকোয়েস্ট অনুমোদন ব্যর্থ (HTTP ${patchResponse?.code() ?: 400})${if (errBody.isNotBlank()) ": $errBody" else ""}"
                     )
                 )
             }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun grantManualCourseAccess(
+        payload: ManualCourseAccessPayload
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(payload.studentPhone)
+            if (!CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
+                return@withContext Result.failure(
+                    Exception("সঠিক ১১ ডিজিটের মোবাইল নম্বর দিন (যেমন: 017XXXXXXXX)")
+                )
+            }
+
+            val cleanProgramId = payload.programId.trim()
+            if (cleanProgramId.isBlank()) {
+                return@withContext Result.failure(
+                    Exception("কোর্স বা প্রোগ্রামের আইডি (program_id) আবশ্যক")
+                )
+            }
+
+            val api = supabaseClient.getApi()
+            val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+
+            val safeTotalPrice = payload.totalPrice.coerceAtLeast(0)
+            val safePaidAmount = payload.paidAmount.coerceIn(0, safeTotalPrice)
+            val safeDueAmount = (safeTotalPrice - safePaidAmount).coerceAtLeast(0)
+            val isUnlockedActive = payload.status.equals("ACTIVE", ignoreCase = true)
+
+            val firstPlan = payload.installmentPlansJson.firstOrNull()
+            val totalInstallments = firstPlan?.effectiveInstallmentsCount ?: 1
+            val completedInstallments = when {
+                isUnlockedActive && safeDueAmount == 0 -> totalInstallments
+                isUnlockedActive && safePaidAmount > 0 -> 1
+                else -> 0
+            }
+            val intervalDays = payload.nextDueDays?.takeIf { it > 0 }
+                ?: firstPlan?.intervalDays?.takeIf { it > 0 }
+                ?: 30
+
+            val nextDueDateIso = if (isUnlockedActive && safeDueAmount > 0) {
+                val cal = Calendar.getInstance()
+                cal.add(Calendar.DAY_OF_YEAR, intervalDays)
+                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
+            } else {
+                null
+            }
+
+            val nextInstallmentAmount = if (safeDueAmount > 0) {
+                firstPlan?.effectiveAmountPerInstallment?.takeIf { it > 0 }?.coerceAtMost(safeDueAmount)
+                    ?: safeDueAmount
+            } else {
+                0
+            }
+
+            // CRITICAL REQUIREMENT:
+            // Set `student_phone`, `shikho_account_key`, and `device_id` all to the 11-digit mobile number (`cleanPhone`)
+            val recordMap = mutableMapOf<String, Any?>(
+                "student_phone" to cleanPhone,
+                "shikho_account_key" to cleanPhone,
+                "device_id" to cleanPhone,
+                "student_name" to payload.studentName.trim().ifBlank { "শিক্ষার্থী ($cleanPhone)" },
+                "program_id" to cleanProgramId,
+                "program_title" to payload.programTitle.trim().ifBlank { cleanProgramId },
+                "status" to if (isUnlockedActive) "ACTIVE" else "APPROVED_TO_BUY",
+                "total_price" to safeTotalPrice,
+                "paid_amount" to safePaidAmount,
+                "due_amount" to safeDueAmount,
+                "installment_enabled" to payload.installmentEnabled,
+                "allow_installments" to payload.installmentEnabled,
+                "installment_plans_json" to payload.installmentPlansJson,
+                "total_installments" to totalInstallments,
+                "completed_installments" to completedInstallments,
+                "next_installment_amount" to nextInstallmentAmount,
+                "installment_interval_days" to intervalDays,
+                "next_due_date" to nextDueDateIso,
+                "admin_note" to payload.adminNote.trim(),
+                "rejection_reason" to "",
+                "approved_at" to nowIso,
+                "updated_at" to nowIso
+            )
+
+            if (isUnlockedActive) {
+                recordMap["unlocked_at"] = nowIso
+            }
+
+            if (payload.classCode.isNotBlank()) {
+                recordMap["class_code"] = payload.classCode.trim()
+                recordMap["student_class"] = payload.classCode.trim()
+            }
+            if (payload.groupCode.isNotBlank()) {
+                recordMap["group_code"] = payload.groupCode.trim()
+                recordMap["student_group"] = payload.groupCode.trim()
+            }
+
+            // Check if an enrollment row already exists for this student mobile + program_id
+            val existingEnrollments = try {
+                api.getCourseAccessEnrollments()
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            val existingMatch = existingEnrollments.firstOrNull { item ->
+                item.programId.equals(cleanProgramId, ignoreCase = true) && (
+                    CourseAccessEnrollment.normalizeBdPhone(item.effectivePhone) == cleanPhone ||
+                        CourseAccessEnrollment.normalizeBdPhone(item.effectiveAccountKey) == cleanPhone ||
+                        CourseAccessEnrollment.normalizeBdPhone(item.deviceId) == cleanPhone
+                    )
+            }
+
+            if (existingMatch != null && existingMatch.id > 0L) {
+                val patchRes = api.patchCourseAccessEnrollment(
+                    idQuery = "eq.${existingMatch.id}",
+                    payload = recordMap
+                )
+                if (patchRes.isSuccessful) {
+                    return@withContext Result.success(Unit)
+                }
+            }
+
+            recordMap["requested_at"] = nowIso
+            val createRes = api.createCourseAccessEnrollmentRaw(recordMap)
+            if (createRes.isSuccessful) {
+                return@withContext Result.success(Unit)
+            }
+
+            // Fallback: patch by shikho_account_key + program_id or student_phone + program_id
+            val fallbackPatch = patchEnrollmentByIdOrAccount(
+                enrollmentId = existingMatch?.id ?: 0L,
+                studentPhone = cleanPhone,
+                shikhoAccountKey = cleanPhone,
+                programId = cleanProgramId,
+                patchMap = recordMap
+            )
+            if (fallbackPatch?.isSuccessful == true) {
+                return@withContext Result.success(Unit)
+            }
+
+            val errBody = try {
+                createRes.errorBody()?.string().orEmpty()
+            } catch (_: Exception) {
+                ""
+            }
+            Result.failure(
+                Exception(
+                    "কোর্স এক্সেস সেভ ব্যর্থ (HTTP ${createRes.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
+                )
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1251,7 +1497,8 @@ class SupabaseMaxBirdRepository(
                 }
             }
 
-            // 3. Direct table sync if needed
+            // 3. Direct table sync by primary `id` or (`shikho_account_key` / `student_phone` + `program_id`)
+            // Never depends on hardware `device_id`.
             if (!rpcSucceeded || (payload.approve && payload.customNextDueDays != null)) {
                 val allTxs = try {
                     api.getCoursePaymentTransactions()
@@ -1271,63 +1518,97 @@ class SupabaseMaxBirdRepository(
                     )
                 }
 
-                val enrollmentId = targetTx?.enrollmentId ?: 0L
-                if (enrollmentId > 0L) {
-                    val enrollments = try {
-                        api.getCourseAccessEnrollments()
-                    } catch (_: Exception) {
-                        emptyList()
+                val enrollmentId = targetTx?.enrollmentId?.takeIf { it > 0L }
+                    ?: payload.enrollmentId?.takeIf { it > 0L }
+                    ?: 0L
+                val txPhone = CourseAccessEnrollment.normalizeBdPhone(
+                    targetTx?.effectiveStudentPhone?.ifBlank { payload.studentPhone }
+                )
+                val txAccountKey = CourseAccessEnrollment.normalizeBdPhone(
+                    targetTx?.effectiveAccountKey?.ifBlank { payload.shikhoAccountKey }
+                ).ifBlank { txPhone }
+                val txProgramId = targetTx?.programId?.takeIf { it.isNotBlank() }
+                    ?: payload.programId.orEmpty()
+
+                val enrollments = try {
+                    api.getCourseAccessEnrollments()
+                } catch (_: Exception) {
+                    emptyList()
+                }
+
+                // Match by primary `id` first, then by (`student_phone` / `shikho_account_key` + `program_id`)
+                val enrollment = enrollments.firstOrNull { it.id == enrollmentId && enrollmentId > 0L }
+                    ?: enrollments.firstOrNull { item ->
+                        txProgramId.isNotBlank() &&
+                            item.programId.equals(txProgramId, ignoreCase = true) && (
+                            (txPhone.isNotBlank() && CourseAccessEnrollment.normalizeBdPhone(item.effectivePhone) == txPhone) ||
+                                (txAccountKey.isNotBlank() && CourseAccessEnrollment.normalizeBdPhone(item.effectiveAccountKey) == txAccountKey)
+                            )
                     }
-                    val enrollment = enrollments.firstOrNull { it.id == enrollmentId }
-                    if (enrollment != null) {
-                        if (payload.approve) {
-                            val newPaid = if (rpcSucceeded) enrollment.paidAmount else (enrollment.paidAmount + (targetTx?.amount ?: 0))
-                            val newDue = if (rpcSucceeded) enrollment.dueAmount else (enrollment.totalPrice - newPaid).coerceAtLeast(0)
-                            val newCompleted = if (rpcSucceeded) enrollment.completedInstallments else (enrollment.completedInstallments + 1)
-                            val totalInst = targetTx?.totalInstallments?.takeIf { it > 0 } ?: enrollment.totalInstallments.coerceAtLeast(1)
-                            val intervalDays = payload.customNextDueDays
-                                ?: targetTx?.intervalDays?.takeIf { it > 0 }
-                                ?: enrollment.installmentIntervalDays.takeIf { it > 0 }
-                                ?: 7
 
-                            val nextDueIso = if (newDue > 0) {
-                                val cal = Calendar.getInstance()
-                                cal.add(Calendar.DAY_OF_YEAR, intervalDays)
-                                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
-                            } else {
-                                null
-                            }
+                if (enrollment != null) {
+                    if (payload.approve) {
+                        val newPaid = if (rpcSucceeded) enrollment.paidAmount else (enrollment.paidAmount + (targetTx?.amount ?: 0))
+                        val newDue = if (rpcSucceeded) enrollment.dueAmount else (enrollment.totalPrice - newPaid).coerceAtLeast(0)
+                        val newCompleted = if (rpcSucceeded) enrollment.completedInstallments else (enrollment.completedInstallments + 1)
+                        val totalInst = targetTx?.totalInstallments?.takeIf { it > 0 } ?: enrollment.totalInstallments.coerceAtLeast(1)
+                        val intervalDays = payload.customNextDueDays
+                            ?: targetTx?.intervalDays?.takeIf { it > 0 }
+                            ?: enrollment.installmentIntervalDays.takeIf { it > 0 }
+                            ?: 7
 
-                            val enrollPatch = mutableMapOf<String, Any?>(
-                                "status" to "ACTIVE",
-                                "paid_amount" to newPaid,
-                                "due_amount" to newDue,
-                                "completed_installments" to newCompleted,
-                                "total_installments" to totalInst,
-                                "next_due_date" to nextDueIso,
-                                "pending_installment_tx_id" to "",
-                                "pending_installment_amount" to 0,
-                                "rejection_reason" to "",
-                                "unlocked_at" to (enrollment.unlockedAt ?: nowIso),
-                                "updated_at" to nowIso
-                            )
-                            api.patchCourseAccessEnrollment(
-                                idQuery = "eq.$enrollmentId",
-                                payload = enrollPatch
-                            )
-                        } else if (!rpcSucceeded) {
-                            val rejectStatus = if (enrollment.completedInstallments > 0) "ACTIVE" else "PAYMENT_REJECTED"
-                            api.patchCourseAccessEnrollment(
-                                idQuery = "eq.$enrollmentId",
-                                payload = mapOf(
-                                    "status" to rejectStatus,
-                                    "rejection_reason" to payload.rejectionReason,
-                                    "pending_installment_tx_id" to "",
-                                    "pending_installment_amount" to 0,
-                                    "updated_at" to nowIso
-                                )
-                            )
+                        val nextDueIso = if (newDue > 0) {
+                            val cal = Calendar.getInstance()
+                            cal.add(Calendar.DAY_OF_YEAR, intervalDays)
+                            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
+                        } else {
+                            null
                         }
+
+                        val enrollPatch = mutableMapOf<String, Any?>(
+                            "status" to "ACTIVE",
+                            "paid_amount" to newPaid,
+                            "due_amount" to newDue,
+                            "completed_installments" to newCompleted,
+                            "total_installments" to totalInst,
+                            "next_due_date" to nextDueIso,
+                            "pending_installment_tx_id" to "",
+                            "pending_installment_amount" to 0,
+                            "rejection_reason" to "",
+                            "unlocked_at" to (enrollment.unlockedAt ?: nowIso),
+                            "updated_at" to nowIso
+                        )
+                        val validPhone = CourseAccessEnrollment.normalizeBdPhone(enrollment.effectivePhone)
+                            .takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
+                            ?: txPhone.takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
+                        if (!validPhone.isNullOrBlank()) {
+                            enrollPatch["student_phone"] = validPhone
+                            enrollPatch["shikho_account_key"] = validPhone
+                        }
+
+                        patchEnrollmentByIdOrAccount(
+                            enrollmentId = enrollment.id,
+                            studentPhone = enrollment.effectivePhone.ifBlank { txPhone },
+                            shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { txAccountKey },
+                            programId = enrollment.programId ?: txProgramId,
+                            patchMap = enrollPatch
+                        )
+                    } else if (!rpcSucceeded) {
+                        val rejectStatus = if (enrollment.completedInstallments > 0) "ACTIVE" else "PAYMENT_REJECTED"
+                        val rejectPatch = mapOf<String, Any?>(
+                            "status" to rejectStatus,
+                            "rejection_reason" to payload.rejectionReason,
+                            "pending_installment_tx_id" to "",
+                            "pending_installment_amount" to 0,
+                            "updated_at" to nowIso
+                        )
+                        patchEnrollmentByIdOrAccount(
+                            enrollmentId = enrollment.id,
+                            studentPhone = enrollment.effectivePhone.ifBlank { txPhone },
+                            shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { txAccountKey },
+                            programId = enrollment.programId ?: txProgramId,
+                            patchMap = rejectPatch
+                        )
                     }
                 }
                 return@withContext Result.success(Unit)
@@ -1355,12 +1636,14 @@ class SupabaseMaxBirdRepository(
 
     override suspend fun updateEnrollmentStatusOrDueDate(
         enrollmentId: Long,
+        studentPhone: String?,
+        shikhoAccountKey: String?,
+        programId: String?,
         newStatus: String?,
         newNextDueDateIso: String?,
         adminNote: String?
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val api = supabaseClient.getApi()
             val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
             val patchMap = mutableMapOf<String, Any?>(
                 "updated_at" to nowIso
@@ -1378,21 +1661,30 @@ class SupabaseMaxBirdRepository(
                 patchMap["admin_note"] = adminNote
             }
 
-            val response = api.patchCourseAccessEnrollment(
-                idQuery = "eq.$enrollmentId",
-                payload = patchMap
+            val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(studentPhone)
+            if (CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
+                patchMap["student_phone"] = cleanPhone
+                patchMap["shikho_account_key"] = CourseAccessEnrollment.normalizeBdPhone(shikhoAccountKey).ifBlank { cleanPhone }
+            }
+
+            val response = patchEnrollmentByIdOrAccount(
+                enrollmentId = enrollmentId,
+                studentPhone = studentPhone,
+                shikhoAccountKey = shikhoAccountKey,
+                programId = programId,
+                patchMap = patchMap
             )
-            if (response.isSuccessful) {
+            if (response?.isSuccessful == true) {
                 Result.success(Unit)
             } else {
                 val errBody = try {
-                    response.errorBody()?.string().orEmpty()
+                    response?.errorBody()?.string().orEmpty()
                 } catch (_: Exception) {
                     ""
                 }
                 Result.failure(
                     Exception(
-                        "এনরোলমেন্ট আপডেট ব্যর্থ (HTTP ${response.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
+                        "এনরোলমেন্ট আপডেট ব্যর্থ (HTTP ${response?.code() ?: 400})${if (errBody.isNotBlank()) ": $errBody" else ""}"
                     )
                 )
             }

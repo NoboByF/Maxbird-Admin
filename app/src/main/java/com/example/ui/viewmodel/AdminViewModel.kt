@@ -21,6 +21,7 @@ import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
@@ -1286,6 +1287,35 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun grantManualCourseAccess(
+        payload: ManualCourseAccessPayload,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                _isProcessingCourseSalesAction.value = true
+                val result = repository.grantManualCourseAccess(payload)
+                if (result.isSuccess) {
+                    loadCourseSalesData()
+                    val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(payload.studentPhone)
+                    val msg = if (payload.status.equals("ACTIVE", ignoreCase = true)) {
+                        "✅ $cleanPhone নম্বরে কোর্সটি সফলভাবে আনলক (ACTIVE) করা হয়েছে!"
+                    } else {
+                        "✅ $cleanPhone নম্বরে কোর্সের দাম ও কিস্তি প্ল্যান সেট করা হয়েছে!"
+                    }
+                    showToast(msg)
+                    onSuccess()
+                } else {
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "কোর্স অ্যাসাইন ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isProcessingCourseSalesAction.value = false
+            }
+        }
+    }
+
     fun reviewCoursePayment(
         payload: ReviewCoursePaymentRpcPayload,
         onSuccess: () -> Unit = {}
@@ -1361,6 +1391,9 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
                 val result = repository.updateEnrollmentStatusOrDueDate(
                     enrollmentId = enrollment.id,
+                    studentPhone = enrollment.effectivePhone,
+                    shikhoAccountKey = enrollment.effectiveAccountKey,
+                    programId = enrollment.programId,
                     newStatus = nextStatus,
                     newNextDueDateIso = newDueIso
                 )
@@ -1384,6 +1417,9 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 _isProcessingCourseSalesAction.value = true
                 val result = repository.updateEnrollmentStatusOrDueDate(
                     enrollmentId = enrollment.id,
+                    studentPhone = enrollment.effectivePhone,
+                    shikhoAccountKey = enrollment.effectiveAccountKey,
+                    programId = enrollment.programId,
                     newStatus = newStatus
                 )
                 if (result.isSuccess) {

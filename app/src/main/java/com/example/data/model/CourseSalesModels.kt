@@ -642,6 +642,8 @@ data class CourseAccessEnrollment(
     val effectivePhone: String
         get() = studentPhone?.takeIf { it.isNotBlank() }
             ?: userPhone?.takeIf { it.isNotBlank() }
+            ?: shikhoAccountKey?.takeIf { it.isNotBlank() }
+            ?: deviceId?.takeIf { isValidBdPhone(it) }
             ?: ""
 
     val effectiveClass: String
@@ -662,6 +664,8 @@ data class CourseAccessEnrollment(
 
     val effectiveAccountKey: String
         get() = shikhoAccountKey?.takeIf { it.isNotBlank() }
+            ?: studentPhone?.takeIf { it.isNotBlank() }
+            ?: userPhone?.takeIf { it.isNotBlank() }
             ?: shikhoUserId?.takeIf { it.isNotBlank() }
             ?: ""
 
@@ -671,6 +675,22 @@ data class CourseAccessEnrollment(
 
     val effectiveInstallmentsEnabled: Boolean
         get() = installmentEnabled && (allowInstallments ?: true)
+
+    companion object {
+        fun normalizeBdPhone(raw: String?): String {
+            val digits = raw?.filter { it.isDigit() }.orEmpty()
+            return when {
+                digits.length == 13 && digits.startsWith("8801") -> digits.substring(2)
+                digits.length == 11 && digits.startsWith("01") -> digits
+                else -> raw?.trim().orEmpty()
+            }
+        }
+
+        fun isValidBdPhone(raw: String?): Boolean {
+            val normalized = normalizeBdPhone(raw)
+            return normalized.matches(Regex("^01[3-9]\\d{8}$"))
+        }
+    }
 }
 
 /**
@@ -690,6 +710,9 @@ data class CoursePaymentTransaction(
 
     @Json(name = "shikho_account_key")
     val shikhoAccountKey: String? = null,
+
+    @Json(name = "student_phone")
+    val studentPhone: String? = null,
 
     @Json(name = "student_name")
     val studentName: String? = null,
@@ -763,6 +786,20 @@ data class CoursePaymentTransaction(
     @Json(name = "user_phone")
     val userPhone: String? = null
 ) {
+    val effectiveStudentPhone: String
+        get() = studentPhone?.takeIf { it.isNotBlank() }
+            ?: userPhone?.takeIf { it.isNotBlank() }
+            ?: shikhoAccountKey?.takeIf { it.isNotBlank() }
+            ?: senderMobile?.takeIf { it.isNotBlank() }
+            ?: ""
+
+    val effectiveAccountKey: String
+        get() = shikhoAccountKey?.takeIf { it.isNotBlank() }
+            ?: studentPhone?.takeIf { it.isNotBlank() }
+            ?: userPhone?.takeIf { it.isNotBlank() }
+            ?: shikhoUserId?.takeIf { it.isNotBlank() }
+            ?: ""
+
     val effectivePlanTitle: String
         get() = planTitle?.takeIf { it.isNotBlank() }
             ?: selectedPlanTitle?.takeIf { it.isNotBlank() }
@@ -795,7 +832,37 @@ data class ApproveCourseAccessRequestRpcPayload(
     val adminNote: String,
 
     @Transient
-    val instantFreeUnlock: Boolean = false
+    val instantFreeUnlock: Boolean = false,
+
+    @Transient
+    val studentPhone: String? = null,
+
+    @Transient
+    val shikhoAccountKey: String? = null,
+
+    @Transient
+    val programId: String? = null
+)
+
+/**
+ * Payload for manually granting course access or configuring an installment plan
+ * for a student using their 11-digit mobile number (`01XXXXXXXXX`).
+ * Saves the mobile number into `student_phone`, `shikho_account_key`, and `device_id`.
+ */
+data class ManualCourseAccessPayload(
+    val studentPhone: String,
+    val studentName: String,
+    val programId: String,
+    val programTitle: String,
+    val classCode: String = "",
+    val groupCode: String = "",
+    val status: String = "ACTIVE", // "ACTIVE" or "APPROVED_TO_BUY"
+    val totalPrice: Int = 0,
+    val paidAmount: Int = 0,
+    val installmentEnabled: Boolean = true,
+    val installmentPlansJson: List<InstallmentPlanItem> = emptyList(),
+    val nextDueDays: Int? = null,
+    val adminNote: String = ""
 )
 
 /**
@@ -814,5 +881,18 @@ data class ReviewCoursePaymentRpcPayload(
     val rejectionReason: String = "",
 
     @Transient
-    val customNextDueDays: Int? = null
+    val customNextDueDays: Int? = null,
+
+    @Transient
+    val enrollmentId: Long? = null,
+
+    @Transient
+    val studentPhone: String? = null,
+
+    @Transient
+    val shikhoAccountKey: String? = null,
+
+    @Transient
+    val programId: String? = null
 )
+
