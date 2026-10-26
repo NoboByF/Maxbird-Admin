@@ -1338,6 +1338,7 @@ class SupabaseMaxBirdRepository(
         payload: UpsertCoursePaymentSettingsPayload
     ): Result<CoursePaymentSettings> = withContext(Dispatchers.IO) {
         try {
+            val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
             val syncedPayload = payload.copy(
                 bkashNumber = payload.bkashNumber.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
                 nagadNumber = payload.nagadNumber.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
@@ -1349,14 +1350,51 @@ class SupabaseMaxBirdRepository(
             val updatedList = try {
                 api.upsertCoursePaymentSettings(syncedPayload)
             } catch (_: Exception) {
-                api.patchCoursePaymentSettings(idQuery = "eq.1", payload = syncedPayload)
+                try {
+                    api.patchCoursePaymentSettings(idQuery = "eq.1", payload = syncedPayload)
+                } catch (_: Exception) {
+                    // Fallback 1: exact live schema columns without extra alias columns
+                    val liveSchemaMap = mapOf<String, Any?>(
+                        "id" to 1,
+                        "payment_methods_json" to syncedPayload.paymentMethodsJson,
+                        "bkash_number" to syncedPayload.bkashNumber,
+                        "bkash_enabled" to syncedPayload.bkashEnabled,
+                        "nagad_number" to syncedPayload.nagadNumber,
+                        "nagad_enabled" to syncedPayload.nagadEnabled,
+                        "rocket_number" to syncedPayload.rocketNumber,
+                        "rocket_enabled" to syncedPayload.rocketEnabled,
+                        "upay_number" to syncedPayload.upayNumber,
+                        "upay_enabled" to syncedPayload.upayEnabled,
+                        "payment_instructions_bn" to syncedPayload.paymentInstructionsBn,
+                        "updated_at" to nowIso
+                    )
+                    try {
+                        api.upsertCoursePaymentSettingsRaw(liveSchemaMap)
+                    } catch (_: Exception) {
+                        try {
+                            api.patchCoursePaymentSettingsRaw(idQuery = "eq.1", payload = liveSchemaMap)
+                        } catch (_: Exception) {
+                            // Fallback 2: minimal legacy columns if ALTER TABLE hasn't been run yet
+                            val baseMap = mapOf<String, Any?>(
+                                "id" to 1,
+                                "bkash_number" to syncedPayload.bkashNumber,
+                                "nagad_number" to syncedPayload.nagadNumber,
+                                "rocket_number" to syncedPayload.rocketNumber,
+                                "payment_instructions_bn" to syncedPayload.paymentInstructionsBn,
+                                "updated_at" to nowIso
+                            )
+                            api.upsertCoursePaymentSettingsRaw(baseMap)
+                        }
+                    }
+                }
             }
             val rawSaved = updatedList.firstOrNull()
             val saved = rawSaved?.copy(
-                bkashNumber = rawSaved.bkashNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
-                nagadNumber = rawSaved.nagadNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
-                rocketNumber = rawSaved.rocketNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
-                upayNumber = rawSaved.upayNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: ""
+                paymentMethodsJson = rawSaved.paymentMethodsJson?.takeIf { it.isNotEmpty() } ?: syncedPayload.paymentMethodsJson,
+                bkashNumber = rawSaved.bkashNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: syncedPayload.bkashNumber,
+                nagadNumber = rawSaved.nagadNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: syncedPayload.nagadNumber,
+                rocketNumber = rawSaved.rocketNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: syncedPayload.rocketNumber,
+                upayNumber = rawSaved.upayNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: syncedPayload.upayNumber
             ) ?: CoursePaymentSettings(
                 id = 1,
                 paymentMethodsJson = syncedPayload.paymentMethodsJson,

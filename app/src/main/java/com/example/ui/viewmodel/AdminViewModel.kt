@@ -384,13 +384,26 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _isProcessingCourseSalesAction = MutableStateFlow(false)
     val isProcessingCourseSalesAction: StateFlow<Boolean> = _isProcessingCourseSalesAction.asStateFlow()
 
+    private val _courseSalesSelectedSubTab = MutableStateFlow(0)
+    val courseSalesSelectedSubTab: StateFlow<Int> = _courseSalesSelectedSubTab.asStateFlow()
+
     init {
         loadAllData()
     }
 
+    fun setCourseSalesSubTab(tabIndex: Int) {
+        _courseSalesSelectedSubTab.value = tabIndex.coerceIn(0, 3)
+    }
+
+    fun openPaymentMethodsManager() {
+        _courseSalesSelectedSubTab.value = 3
+        _currentScreen.value = Screen.CourseSales
+        loadCourseSalesData()
+    }
+
     fun navigateTo(screen: Screen) {
         _currentScreen.value = screen
-        if (screen == Screen.CourseSales) {
+        if (screen == Screen.CourseSales || screen == Screen.Settings) {
             loadCourseSalesData()
         }
     }

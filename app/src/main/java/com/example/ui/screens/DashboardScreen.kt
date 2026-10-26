@@ -114,7 +114,8 @@ fun DashboardScreen(
     onRefresh: () -> Unit,
     onNavigate: (Screen) -> Unit,
     onOpenSettings: () -> Unit,
-    onShowToast: (String) -> Unit
+    onShowToast: (String) -> Unit,
+    onOpenPaymentMethodsManager: () -> Unit = {}
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
 
@@ -428,11 +429,24 @@ fun DashboardScreen(
         // 4. Admin Modules 2-Column Balanced Grid
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Featured Row 0: Course Sales, Custom Pricing, Installments & Payment Verification
+                // Featured Row 0A: Dynamic Payment Methods Manager (Add/Edit/Delete/ON-OFF bKash, Nagad, Rocket, Upay, Bank)
+                FeaturedModuleCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "পেমেন্ট মেথড ম্যানেজার (বিকাশ/নগদ/রকেট)",
+                    subtitle = "যেকোনো পেমেন্ট নম্বর যোগ (Add), এডিট, ডিলিট এবং ON / OFF সুইচ কন্ট্রোল করুন",
+                    icon = Icons.Default.Payments,
+                    badge = "+ মেথড যোগ করুন",
+                    accentColor = NeonCyan,
+                    gradientStart = NeonCyan.copy(alpha = 0.24f),
+                    onClick = onOpenPaymentMethodsManager,
+                    testTag = "mod_card_payment_methods_manager"
+                )
+
+                // Featured Row 0B: Course Sales, Custom Pricing, Installments & Payment Verification
                 FeaturedModuleCard(
                     modifier = Modifier.fillMaxWidth(),
                     title = "কোর্স বিক্রি ও কিস্তি ম্যানেজমেন্ট",
-                    subtitle = "কোর্স এক্সেস রিকোয়েস্ট, কাস্টম দাম, কিস্তি প্ল্যান ও বিকাশ/নগদ/রকেট পেমেন্ট ভেরিফিকেশন",
+                    subtitle = "কোর্স এক্সেস রিকোয়েস্ট, কাস্টম দাম, কিস্তি প্ল্যান ও পেমেন্ট ভেরিফিকেশন",
                     icon = Icons.Default.Payments,
                     badge = "কিস্তি ও পেমেন্ট",
                     accentColor = EmeraldSuccess,

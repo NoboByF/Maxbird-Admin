@@ -277,10 +277,23 @@ interface SupabaseApi {
         @Header("Prefer") prefer: String = "resolution=merge-duplicates,return=representation"
     ): List<CoursePaymentSettings>
 
+    @POST("rest/v1/course_payment_settings")
+    suspend fun upsertCoursePaymentSettingsRaw(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "resolution=merge-duplicates,return=representation"
+    ): List<CoursePaymentSettings>
+
     @PATCH("rest/v1/course_payment_settings")
     suspend fun patchCoursePaymentSettings(
         @Query("id") idQuery: String = "eq.1",
         @Body payload: UpsertCoursePaymentSettingsPayload,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): List<CoursePaymentSettings>
+
+    @PATCH("rest/v1/course_payment_settings")
+    suspend fun patchCoursePaymentSettingsRaw(
+        @Query("id") idQuery: String = "eq.1",
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
         @Header("Prefer") prefer: String = "return=representation"
     ): List<CoursePaymentSettings>
 

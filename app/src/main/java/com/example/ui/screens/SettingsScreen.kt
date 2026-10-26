@@ -55,6 +55,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.CoursePaymentSettings
+import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.ui.theme.CardBorderGradientEnd
 import com.example.ui.theme.CardBorderGradientStart
 import com.example.ui.theme.CoralDanger
@@ -74,6 +76,30 @@ import com.example.ui.theme.Violet500
 
 private const val SUPABASE_SCHEMA_SQL = """-- MaxBird Supabase Setup SQL Script
 -- Run this in your Supabase Dashboard -> SQL Editor
+
+-- Dynamic Payment Methods Table & Columns
+CREATE TABLE IF NOT EXISTS public.course_payment_settings (
+    id integer NOT NULL DEFAULT 1 PRIMARY KEY,
+    payment_methods_json jsonb DEFAULT '[]'::jsonb,
+    bkash_number text DEFAULT ''::text,
+    bkash_enabled boolean DEFAULT false,
+    nagad_number text DEFAULT ''::text,
+    nagad_enabled boolean DEFAULT false,
+    rocket_number text DEFAULT ''::text,
+    rocket_enabled boolean DEFAULT false,
+    upay_number text DEFAULT ''::text,
+    upay_enabled boolean DEFAULT false,
+    payment_instructions_bn text DEFAULT 'প্রদত্ত পেমেন্ট নম্বরে টাকা পাঠিয়ে আপনার প্রেরক মোবাইল নম্বর এবং Transaction ID দিয়ে সাবমিট করুন।'::text,
+    updated_at timestamp with time zone DEFAULT now()
+);
+
+ALTER TABLE public.course_payment_settings
+    ADD COLUMN IF NOT EXISTS payment_methods_json jsonb DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS bkash_enabled boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS nagad_enabled boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS rocket_enabled boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS upay_number text DEFAULT ''::text,
+    ADD COLUMN IF NOT EXISTS upay_enabled boolean DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS access_codes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -187,7 +213,10 @@ fun SettingsScreen(
     shikhoConnectedPhone: String = "",
     shikhoConnectedUserId: String = "",
     onOpenShikhoLogin: () -> Unit = {},
-    onLogoutShikho: () -> Unit = {}
+    onLogoutShikho: () -> Unit = {},
+    paymentSettings: CoursePaymentSettings = CoursePaymentSettings(),
+    isSavingPaymentSettings: Boolean = false,
+    onSavePaymentSettings: (UpsertCoursePaymentSettingsPayload) -> Unit = {}
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
 
@@ -198,7 +227,21 @@ fun SettingsScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Shikho Account API Connection Card
+        // 1. Dynamic Payment Methods Manager (Top Priority in Settings!)
+        item {
+            DynamicPaymentMethodsManagerSection(
+                settings = paymentSettings,
+                isSaving = isSavingPaymentSettings,
+                onSave = onSavePaymentSettings,
+                onCopyText = { label, text ->
+                    clipboardManager.setText(AnnotatedString(text))
+                    onShowToast("$label কপি করা হয়েছে!")
+                },
+                onShowToast = onShowToast
+            )
+        }
+
+        // 2. Shikho Account API Connection Card
         item {
             ShikhoConnectionBannerCard(
                 isConnected = isShikhoConnected,

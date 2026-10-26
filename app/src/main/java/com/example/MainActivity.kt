@@ -189,7 +189,8 @@ class MainActivity : ComponentActivity() {
                                     onRefresh = { viewModel.refreshStats() },
                                     onNavigate = { screen -> viewModel.navigateTo(screen) },
                                     onOpenSettings = { viewModel.navigateTo(Screen.Settings) },
-                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                    onShowToast = { msg -> viewModel.showToast(msg) },
+                                    onOpenPaymentMethodsManager = { viewModel.openPaymentMethodsManager() }
                                 )
                             }
 
@@ -199,6 +200,7 @@ class MainActivity : ComponentActivity() {
                                 val paymentSettings by viewModel.coursePaymentSettings.collectAsStateWithLifecycle()
                                 val isLoadingCourseSales by viewModel.isLoadingCourseSales.collectAsStateWithLifecycle()
                                 val isProcessingCourseSales by viewModel.isProcessingCourseSalesAction.collectAsStateWithLifecycle()
+                                val selectedCourseSalesTab by viewModel.courseSalesSelectedSubTab.collectAsStateWithLifecycle()
 
                                 CourseSalesManagementScreen(
                                     enrollments = enrollments,
@@ -225,7 +227,9 @@ class MainActivity : ComponentActivity() {
                                     onSavePaymentSettings = { payload ->
                                         viewModel.saveCoursePaymentSettings(payload)
                                     },
-                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                    onShowToast = { msg -> viewModel.showToast(msg) },
+                                    initialSubTab = selectedCourseSalesTab,
+                                    onSubTabChanged = { tabIdx -> viewModel.setCourseSalesSubTab(tabIdx) }
                                 )
                             }
 
@@ -579,6 +583,8 @@ class MainActivity : ComponentActivity() {
                                 val isTestingConnection by viewModel.isTestingConnection.collectAsStateWithLifecycle()
                                 val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
                                 val isConnectionSuccess by viewModel.isConnectionSuccess.collectAsStateWithLifecycle()
+                                val paymentSettings by viewModel.coursePaymentSettings.collectAsStateWithLifecycle()
+                                val isProcessingCourseSales by viewModel.isProcessingCourseSalesAction.collectAsStateWithLifecycle()
 
                                 SettingsScreen(
                                     supabaseUrl = supabaseUrl,
@@ -595,7 +601,12 @@ class MainActivity : ComponentActivity() {
                                     shikhoConnectedPhone = shikhoConnectedPhone,
                                     shikhoConnectedUserId = shikhoConnectedUserId,
                                     onOpenShikhoLogin = { viewModel.openShikhoLoginDialog() },
-                                    onLogoutShikho = { viewModel.logoutShikhoAccount() }
+                                    onLogoutShikho = { viewModel.logoutShikhoAccount() },
+                                    paymentSettings = paymentSettings,
+                                    isSavingPaymentSettings = isProcessingCourseSales,
+                                    onSavePaymentSettings = { payload ->
+                                        viewModel.saveCoursePaymentSettings(payload)
+                                    }
                                 )
                             }
                         }

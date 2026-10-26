@@ -140,7 +140,9 @@ fun CourseSalesManagementScreen(
     onExtendDueDate: (CourseAccessEnrollment, Int) -> Unit,
     onUpdateEnrollmentStatus: (CourseAccessEnrollment, String) -> Unit,
     onSavePaymentSettings: (UpsertCoursePaymentSettingsPayload) -> Unit,
-    onShowToast: (String) -> Unit
+    onShowToast: (String) -> Unit,
+    initialSubTab: Int = 0,
+    onSubTabChanged: (Int) -> Unit = {}
 ) {
     val clipboardManager = LocalClipboardManager.current
 
@@ -148,9 +150,15 @@ fun CourseSalesManagementScreen(
     // 0 -> এক্সেস রিকোয়েস্ট (REQUESTED)
     // 1 -> পেমেন্ট ভেরিফিকেশন (PENDING Transactions)
     // 2 -> চলমান কিস্তি ও বকেয়া (ACTIVE & OVERDUE)
-    // 3 -> পেমেন্ট নম্বর সেটিংস (course_payment_settings)
-    var selectedTab by remember { mutableIntStateOf(0) }
+    // 3 -> পেমেন্ট মেথড ও নম্বর সেটিংস (course_payment_settings)
+    var selectedTab by remember(initialSubTab) { mutableIntStateOf(initialSubTab.coerceIn(0, 3)) }
     var searchQuery by remember { mutableStateOf("") }
+
+    fun selectTab(tabIndex: Int) {
+        val clamped = tabIndex.coerceIn(0, 3)
+        selectedTab = clamped
+        onSubTabChanged(clamped)
+    }
 
     // Sub-filters per tab
     var requestTabFilter by remember { mutableStateOf("REQUESTED") } // REQUESTED, APPROVED_TO_BUY, ALL
@@ -178,6 +186,12 @@ fun CourseSalesManagementScreen(
             (it.status.equals("ACTIVE", ignoreCase = true) && it.dueAmount > 0) ||
                 it.status.equals("OVERDUE", ignoreCase = true)
         }
+    }
+    val effectivePaymentMethods = remember(paymentSettings) {
+        paymentSettings.effectivePaymentMethods()
+    }
+    val enabledPaymentMethodsCount = remember(effectivePaymentMethods) {
+        effectivePaymentMethods.count { it.isEnabled }
     }
 
     // Pricing & Installment Plan Builder Dialog
@@ -264,21 +278,102 @@ fun CourseSalesManagementScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Quick Live Counters Row
+                // Prominent Quick-Access Bar for Payment Methods Manager
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (selectedTab == 3) NeonCyan.copy(alpha = 0.18f) else Slate900,
+                    border = BorderStroke(
+                        1.dp,
+                        if (selectedTab == 3) NeonCyan else EmeraldSuccess.copy(alpha = 0.55f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { selectTab(3) }
+                        .testTag("banner_open_payment_methods_manager")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountBalanceWallet,
+                                contentDescription = null,
+                                tint = EmeraldSuccess,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "পেমেন্ট মেথড ম্যানেজার (বিকাশ / নগদ / রকেট / উপায়)",
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        color = Color.White,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                )
+                                Text(
+                                    text = "মোট ${effectivePaymentMethods.size}টি মেথড • সক্রিয় (ON): $enabledPaymentMethodsCount টি",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = if (enabledPaymentMethodsCount > 0) EmeraldSuccess else AmberWarning,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = EmeraldSuccess,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .clickable { selectTab(3) }
+                                .testTag("btn_quick_open_payment_methods")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = null,
+                                    tint = Slate950,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = if (selectedTab == 3) "মেথড লিস্ট" else "+ মেথড যোগ",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = Slate950,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 11.sp
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Quick Live Counters Row (4 Equal Pills including Payment Methods)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     MiniSummaryPill(
                         modifier = Modifier.weight(1f),
-                        label = "নতুন রিকোয়েস্ট",
+                        label = "রিকোয়েস্ট",
                         count = requestedCount,
                         accentColor = ElectricBlue,
                         isSelected = selectedTab == 0,
-                        onClick = { selectedTab = 0 }
+                        onClick = { selectTab(0) }
                     )
                     MiniSummaryPill(
                         modifier = Modifier.weight(1f),
@@ -286,7 +381,7 @@ fun CourseSalesManagementScreen(
                         count = pendingPaymentsCount,
                         accentColor = AmberWarning,
                         isSelected = selectedTab == 1,
-                        onClick = { selectedTab = 1 }
+                        onClick = { selectTab(1) }
                     )
                     MiniSummaryPill(
                         modifier = Modifier.weight(1f),
@@ -294,7 +389,15 @@ fun CourseSalesManagementScreen(
                         count = activeDueCount,
                         accentColor = if (overdueCount > 0) CoralDanger else EmeraldSuccess,
                         isSelected = selectedTab == 2,
-                        onClick = { selectedTab = 2 }
+                        onClick = { selectTab(2) }
+                    )
+                    MiniSummaryPill(
+                        modifier = Modifier.weight(1f),
+                        label = "পেমেন্ট মেথড",
+                        count = enabledPaymentMethodsCount,
+                        accentColor = NeonCyan,
+                        isSelected = selectedTab == 3,
+                        onClick = { selectTab(3) }
                     )
                 }
 
@@ -306,12 +409,21 @@ fun CourseSalesManagementScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     SubTabChip(
+                        title = "পেমেন্ট মেথড সেটিংস",
+                        badgeCount = enabledPaymentMethodsCount,
+                        icon = Icons.Default.AccountBalanceWallet,
+                        selected = selectedTab == 3,
+                        accentColor = NeonCyan,
+                        onClick = { selectTab(3) },
+                        testTag = "subtab_settings"
+                    )
+                    SubTabChip(
                         title = "এক্সেস রিকোয়েস্ট",
                         badgeCount = requestedCount,
                         icon = Icons.Default.NotificationsActive,
                         selected = selectedTab == 0,
                         accentColor = ElectricBlue,
-                        onClick = { selectedTab = 0 },
+                        onClick = { selectTab(0) },
                         testTag = "subtab_requests"
                     )
                     SubTabChip(
@@ -320,7 +432,7 @@ fun CourseSalesManagementScreen(
                         icon = Icons.Default.PriceCheck,
                         selected = selectedTab == 1,
                         accentColor = AmberWarning,
-                        onClick = { selectedTab = 1 },
+                        onClick = { selectTab(1) },
                         testTag = "subtab_payments"
                     )
                     SubTabChip(
@@ -329,17 +441,8 @@ fun CourseSalesManagementScreen(
                         icon = Icons.Default.EventRepeat,
                         selected = selectedTab == 2,
                         accentColor = if (overdueCount > 0) CoralDanger else EmeraldSuccess,
-                        onClick = { selectedTab = 2 },
+                        onClick = { selectTab(2) },
                         testTag = "subtab_installments"
-                    )
-                    SubTabChip(
-                        title = "পেমেন্ট নম্বর সেটিংস",
-                        badgeCount = 0,
-                        icon = Icons.Default.AccountBalanceWallet,
-                        selected = selectedTab == 3,
-                        accentColor = NeonCyan,
-                        onClick = { selectedTab = 3 },
-                        testTag = "subtab_settings"
                     )
                 }
 
@@ -1701,6 +1804,32 @@ private fun PaymentGatewaySettingsSubTab(
     onCopyText: (String, String) -> Unit,
     onShowToast: (String) -> Unit
 ) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            DynamicPaymentMethodsManagerSection(
+                settings = settings,
+                isSaving = isSaving,
+                onSave = onSave,
+                onCopyText = onCopyText,
+                onShowToast = onShowToast
+            )
+        }
+        item { Spacer(modifier = Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+fun DynamicPaymentMethodsManagerSection(
+    settings: CoursePaymentSettings,
+    isSaving: Boolean,
+    onSave: (UpsertCoursePaymentSettingsPayload) -> Unit,
+    onCopyText: (String, String) -> Unit,
+    onShowToast: (String) -> Unit
+) {
     val initialMethods = remember(settings) { settings.effectivePaymentMethods() }
     val methodsList = remember(settings) {
         mutableStateListOf<DynamicPaymentMethodItem>().apply {
@@ -1803,120 +1932,114 @@ private fun PaymentGatewaySettingsSubTab(
 
     val enabledCount = methodsList.count { it.isEnabled }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(14.dp),
+    Column(
+        modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Header + Add Payment Method Button Card
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Slate800),
-                shape = RoundedCornerShape(18.dp),
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Slate800),
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, NeonCyan.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, NeonCyan.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f)
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(NeonCyan.copy(alpha = 0.18f)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(NeonCyan.copy(alpha = 0.18f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AccountBalanceWallet,
-                                    contentDescription = null,
-                                    tint = NeonCyan,
-                                    modifier = Modifier.size(24.dp)
+                            Icon(
+                                imageVector = Icons.Default.AccountBalanceWallet,
+                                contentDescription = null,
+                                tint = NeonCyan,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "ডায়নামিক পেমেন্ট মেথড ম্যানেজার",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    color = Color.White,
+                                    fontWeight = FontWeight.ExtraBold
                                 )
-                            }
-                            Column {
-                                Text(
-                                    text = "ডায়নামিক পেমেন্ট মেথড ম্যানেজার",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        color = Color.White,
-                                        fontWeight = FontWeight.ExtraBold
-                                    )
+                            )
+                            Text(
+                                text = "মোট ${methodsList.size}টি মেথড • সক্রিয় (ON) আছে $enabledCount টি",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = if (enabledCount > 0) EmeraldSuccess else AmberWarning,
+                                    fontWeight = FontWeight.Bold
                                 )
-                                Text(
-                                    text = "মোট ${methodsList.size}টি মেথড • সক্রিয় (ON) আছে $enabledCount টি",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (enabledCount > 0) EmeraldSuccess else AmberWarning,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                )
-                            }
+                            )
                         }
                     }
+                }
 
-                    Text(
-                        text = "যে পেমেন্ট মেথডগুলো এখানে যোগ করে ON রাখবেন, স্টুডেন্ট অ্যাপে শুধুমাত্র সেগুলোই রিয়েল-টাইমে দেখাবে। কোনো ডামি নম্বর কখনোই দেখানো হবে না।",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = Slate400,
-                            fontSize = 11.sp
-                        )
+                Text(
+                    text = "যে পেমেন্ট মেথডগুলো এখানে যোগ করে ON রাখবেন, স্টুডেন্ট অ্যাপে শুধুমাত্র সেগুলোই রিয়েল-টাইমে দেখাবে। কোনো ডামি নম্বর কখনোই দেখানো হবে না।",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = Slate400,
+                        fontSize = 11.sp
                     )
+                )
 
-                    Button(
-                        onClick = {
-                            editingMethodIndex = null
-                            isAddOrEditDialogOpen = true
-                        },
-                        enabled = !isSaving,
-                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("btn_add_payment_method")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            tint = Slate950,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "নতুন পেমেন্ট মেথড যোগ করুন (+ Add Payment Method)",
-                            color = Slate950,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 13.sp
-                        )
-                    }
+                Button(
+                    onClick = {
+                        editingMethodIndex = null
+                        isAddOrEditDialogOpen = true
+                    },
+                    enabled = !isSaving,
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("btn_add_payment_method")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        tint = Slate950,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "নতুন পেমেন্ট মেথড যোগ করুন (+ Add Payment Method)",
+                        color = Slate950,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 13.sp
+                    )
                 }
             }
         }
 
         // Dynamic Payment Methods List
         if (methodsList.isEmpty()) {
-            item {
-                EmptyStateBox(
-                    icon = Icons.Default.AccountBalanceWallet,
-                    title = "কোনো পেমেন্ট মেথড যোগ করা হয়নি",
-                    subtitle = "উপরের '+ নতুন পেমেন্ট মেথড যোগ করুন' বাটনে ক্লিক করে বিকাশ, নগদ, রকেট, উপায় বা ব্যাংক নম্বর যোগ করুন।"
-                )
-            }
+            EmptyStateBox(
+                icon = Icons.Default.AccountBalanceWallet,
+                title = "কোনো পেমেন্ট মেথড যোগ করা হয়নি",
+                subtitle = "উপরের '+ নতুন পেমেন্ট মেথড যোগ করুন' বাটনে ক্লিক করে বিকাশ, নগদ, রকেট, উপায় বা ব্যাংক নম্বর যোগ করুন।"
+            )
         } else {
-            items(methodsList.size, key = { idx -> "${methodsList[idx].id}_$idx" }) { idx ->
-                val method = methodsList[idx]
+            methodsList.forEachIndexed { idx, method ->
                 DynamicPaymentMethodCard(
                     method = method,
                     isSaving = isSaving,
@@ -1939,91 +2062,87 @@ private fun PaymentGatewaySettingsSubTab(
         }
 
         // General Instructions & Default Course Fee Card
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Slate800),
-                shape = RoundedCornerShape(18.dp),
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Slate800),
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Slate700, RoundedCornerShape(18.dp))
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Slate700, RoundedCornerShape(18.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
+                Text(
+                    text = "সাধারণ পেমেন্ট নির্দেশনা ও ডিফল্ট কোর্স ফি",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        color = NeonCyan,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                )
+
+                OutlinedTextField(
+                    value = defaultPriceText,
+                    onValueChange = { defaultPriceText = it.filter { ch -> ch.isDigit() } },
+                    label = { Text("ডিফল্ট কোর্স ফি (Default Course Price ৳)") },
+                    placeholder = { Text("যেমন: 1000") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = adminTextFieldColors(),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .testTag("input_default_course_price")
+                )
+
+                OutlinedTextField(
+                    value = instructionsBn,
+                    onValueChange = { instructionsBn = it },
+                    label = { Text("সাধারণ পেমেন্টের নিয়মাবলী ও নির্দেশনা (বাংলায়)") },
+                    minLines = 3,
+                    maxLines = 6,
+                    colors = adminTextFieldColors(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_payment_instructions_bn")
+                )
+
+                Button(
+                    onClick = {
+                        pushSyncedSave(methodsList.toList())
+                    },
+                    enabled = !isSaving,
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .testTag("btn_save_payment_settings")
                 ) {
-                    Text(
-                        text = "সাধারণ পেমেন্ট নির্দেশনা ও ডিফল্ট কোর্স ফি",
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            color = NeonCyan,
-                            fontWeight = FontWeight.ExtraBold
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White
                         )
-                    )
-
-                    OutlinedTextField(
-                        value = defaultPriceText,
-                        onValueChange = { defaultPriceText = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("ডিফল্ট কোর্স ফি (Default Course Price ৳)") },
-                        placeholder = { Text("যেমন: 1000") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        colors = adminTextFieldColors(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("input_default_course_price")
-                    )
-
-                    OutlinedTextField(
-                        value = instructionsBn,
-                        onValueChange = { instructionsBn = it },
-                        label = { Text("সাধারণ পেমেন্টের নিয়মাবলী ও নির্দেশনা (বাংলায়)") },
-                        minLines = 3,
-                        maxLines = 6,
-                        colors = adminTextFieldColors(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("input_payment_instructions_bn")
-                    )
-
-                    Button(
-                        onClick = {
-                            pushSyncedSave(methodsList.toList())
-                        },
-                        enabled = !isSaving,
-                        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                            .testTag("btn_save_payment_settings")
-                    ) {
-                        if (isSaving) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Save,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                        }
-                        Text(
-                            text = "পেমেন্ট সেটিংস সেভ করুন",
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 14.sp
+                        Spacer(modifier = Modifier.width(8.dp))
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Save,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
                     }
+                    Text(
+                        text = "পেমেন্ট সেটিংস সেভ করুন",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 14.sp
+                    )
                 }
             }
         }
-
-        item { Spacer(modifier = Modifier.height(24.dp)) }
     }
 }
 
