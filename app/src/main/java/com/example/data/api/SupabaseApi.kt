@@ -22,6 +22,7 @@ import com.example.data.model.UpdateSupportLinkStatusPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import com.example.data.model.UpdateDeviceBanPayload
+import com.example.data.model.UserGeminiApiKey
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -81,6 +82,12 @@ interface SupabaseApi {
     suspend fun updateDeviceBlockedStatus(
         @Query("id") idQuery: String, // e.g. "eq.<uuid>"
         @Body payload: UpdateDeviceBlockedPayload
+    ): Response<Unit>
+
+    @PATCH("rest/v1/activated_devices")
+    suspend fun patchActivatedDeviceByHash(
+        @Query("device_hash") deviceHashQuery: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
 
     @DELETE("rest/v1/activated_devices")
@@ -308,6 +315,19 @@ interface SupabaseApi {
         @Query("program_id") programIdQuery: String, // e.g. "eq.prog_123"
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
+
+    @PATCH("rest/v1/course_access_enrollments")
+    suspend fun patchCourseAccessEnrollmentByUserPhoneAndProgram(
+        @Query("user_phone") userPhoneQuery: String, // e.g. "eq.017XXXXXXXX"
+        @Query("program_id") programIdQuery: String, // e.g. "eq.prog_123"
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @GET("rest/v1/user_gemini_api_keys")
+    suspend fun getUserGeminiApiKeys(
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "updated_at.desc.nullslast"
+    ): List<UserGeminiApiKey>
 
     @GET("rest/v1/course_payment_transactions")
     suspend fun getCoursePaymentTransactions(

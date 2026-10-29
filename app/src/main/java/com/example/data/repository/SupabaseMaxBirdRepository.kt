@@ -15,6 +15,7 @@ import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.DynamicPaymentMethodItem
 import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpdateCodeStatusPayload
@@ -27,6 +28,7 @@ import com.example.data.model.UserDevice
 import com.example.data.model.UpdateDeviceBanPayload
 import com.example.data.api.SupabaseClient
 import com.example.data.preferences.AdminPreferences
+import com.squareup.moshi.Types
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -353,7 +355,13 @@ class SupabaseMaxBirdRepository(
     override suspend fun getAccessCodes(forceRefresh: Boolean): Result<List<AccessCode>> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
-            val remoteCodes = api.getAccessCodes()
+            val remoteCodes = api.getAccessCodes().map { code ->
+                code.copy(
+                    studentName = code.effectiveStudentName,
+                    maxDevices = code.effectiveMaxDevices,
+                    expiresAt = code.effectiveExpiresAt
+                )
+            }
             cachedCodes.clear()
             cachedCodes.addAll(remoteCodes)
             Result.success(remoteCodes)
@@ -365,20 +373,40 @@ class SupabaseMaxBirdRepository(
 
     override suspend fun createAccessCode(payload: CreateAccessCodePayload): Result<AccessCode> = withContext(Dispatchers.IO) {
         val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-        val localNewCode = AccessCode(
-            id = UUID.randomUUID().toString(),
+        val syncedPayload = payload.copy(
             code = payload.code.uppercase().trim(),
             studentName = payload.studentName.trim(),
+            name = payload.studentName.trim(),
             maxDevices = payload.maxDevices,
+            deviceLimit = payload.maxDevices,
             isActive = payload.isActive,
+            status = if (payload.isActive) "active" else "inactive",
+            note = payload.note ?: ""
+        )
+        val localNewCode = AccessCode(
+            id = UUID.randomUUID().toString(),
+            code = syncedPayload.code,
+            studentName = syncedPayload.studentName,
+            name = syncedPayload.name,
+            maxDevices = syncedPayload.maxDevices,
+            deviceLimit = syncedPayload.deviceLimit,
+            isActive = syncedPayload.isActive,
+            status = syncedPayload.status,
             createdAt = now,
-            note = payload.note
+            updatedAt = now,
+            note = syncedPayload.note
         )
 
         try {
             val api = supabaseClient.getApi()
-            val createdList = api.createAccessCode(payload)
-            val created = createdList.firstOrNull() ?: localNewCode
+            val createdList = api.createAccessCode(syncedPayload)
+            val created = createdList.firstOrNull()?.let {
+                it.copy(
+                    studentName = it.effectiveStudentName,
+                    maxDevices = it.effectiveMaxDevices,
+                    expiresAt = it.effectiveExpiresAt
+                )
+            } ?: localNewCode
             cachedCodes.add(0, created)
             Result.success(created)
         } catch (e: Exception) {
@@ -388,17 +416,18 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun toggleCodeStatus(codeId: String, isActive: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+        val statusStr = if (isActive) "active" else "inactive"
         val index = cachedCodes.indexOfFirst { it.id == codeId }
         if (index != -1) {
             val existing = cachedCodes[index]
-            cachedCodes[index] = existing.copy(isActive = isActive)
+            cachedCodes[index] = existing.copy(isActive = isActive, status = statusStr)
         }
 
         try {
             val api = supabaseClient.getApi()
             api.updateAccessCodeStatus(
                 idQuery = "eq.$codeId",
-                payload = UpdateCodeStatusPayload(isActive = isActive)
+                payload = UpdateCodeStatusPayload(isActive = isActive, status = statusStr)
             )
             Result.success(Unit)
         } catch (e: Exception) {
@@ -407,6 +436,7 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun extendAccessCodeValidity(codeId: String, extraDays: Int): Result<Unit> = withContext(Dispatchers.IO) {
+        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
         val cal = Calendar.getInstance()
         cal.add(Calendar.DAY_OF_YEAR, extraDays)
         val newExpiryIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
@@ -417,7 +447,14 @@ class SupabaseMaxBirdRepository(
             val existing = cachedCodes[index]
             val cleanNote = existing.note.orEmpty().replace(Regex("\\s*\\|\\s*মেয়াদ:.*$"), "").trim()
             val noteWithExpiry = if (cleanNote.isBlank()) "মেয়াদ: $newExpiryDisplay" else "$cleanNote | মেয়াদ: $newExpiryDisplay"
-            cachedCodes[index] = existing.copy(isActive = true, expiresAt = newExpiryIso, note = noteWithExpiry)
+            cachedCodes[index] = existing.copy(
+                isActive = true,
+                status = "active",
+                expiresAt = newExpiryIso,
+                expiryDate = newExpiryIso,
+                note = noteWithExpiry,
+                updatedAt = nowIso
+            )
             noteWithExpiry
         } else {
             "মেয়াদ: $newExpiryDisplay"
@@ -429,8 +466,11 @@ class SupabaseMaxBirdRepository(
                 idQuery = "eq.$codeId",
                 payload = mapOf(
                     "is_active" to true,
+                    "status" to "active",
                     "expires_at" to newExpiryIso,
-                    "note" to updatedNote
+                    "expiry_date" to newExpiryIso,
+                    "note" to updatedNote,
+                    "updated_at" to nowIso
                 )
             )
             if (!res.isSuccessful) {
@@ -438,6 +478,7 @@ class SupabaseMaxBirdRepository(
                     idQuery = "eq.$codeId",
                     payload = mapOf(
                         "is_active" to true,
+                        "expires_at" to newExpiryIso,
                         "note" to updatedNote
                     )
                 )
@@ -486,10 +527,26 @@ class SupabaseMaxBirdRepository(
         }
     }
 
+    private fun enrichActivatedDevice(dev: ActivatedDevice): ActivatedDevice {
+        val matchInDevices = cachedUserDevices.firstOrNull {
+            dev.deviceHash.isNotBlank() && it.deviceHash.equals(dev.deviceHash, ignoreCase = true)
+        }
+        val resolvedId = matchInDevices?.displayDeviceId?.takeIf { it.isNotBlank() }
+            ?: dev.effectiveDeviceId
+        val resolvedModel = matchInDevices?.fullPhoneModel?.takeIf { it.isNotBlank() && it != "Unknown Device" }
+            ?: dev.effectiveDeviceModel
+        val resolvedLastSeen = dev.effectiveLastSeen ?: matchInDevices?.lastSeen
+        return dev.copy(
+            deviceId = resolvedId,
+            deviceModel = resolvedModel,
+            lastActiveAt = resolvedLastSeen
+        )
+    }
+
     override suspend fun getActivatedDevices(forceRefresh: Boolean): Result<List<ActivatedDevice>> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
-            val remoteDevices = api.getActivatedDevices()
+            val remoteDevices = api.getActivatedDevices().map { enrichActivatedDevice(it) }
             cachedDevices.clear()
             cachedDevices.addAll(remoteDevices)
             Result.success(remoteDevices)
@@ -502,7 +559,7 @@ class SupabaseMaxBirdRepository(
     override suspend fun getDevicesForCode(codeId: String): Result<List<ActivatedDevice>> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
-            val devices = api.getDevicesForCode(codeIdQuery = "eq.$codeId")
+            val devices = api.getDevicesForCode(codeIdQuery = "eq.$codeId").map { enrichActivatedDevice(it) }
             Result.success(devices)
         } catch (e: Exception) {
             val localFiltered = cachedDevices.filter { it.codeId == codeId }
@@ -519,8 +576,8 @@ class SupabaseMaxBirdRepository(
         val joined = devices.map { device ->
             val linkedCode = codeMap[device.codeId]
             DeviceWithStudent(
-                device = device,
-                studentName = linkedCode?.studentName ?: "Unknown Student",
+                device = enrichActivatedDevice(device),
+                studentName = linkedCode?.effectiveStudentName ?: "Unknown Student",
                 accessCode = linkedCode?.code ?: "N/A"
             )
         }
@@ -1138,11 +1195,12 @@ class SupabaseMaxBirdRepository(
                 }
             }
 
-            // 2. Patch `public.devices` directly as well
+            // 2. Patch `public.devices` directly as well (including `banned_at` column from SQL schema)
             val fullMap = mutableMapOf<String, Any?>(
                 "status" to targetStatus,
                 "is_banned" to isBlocked,
                 "ban_reason" to cleanReason,
+                "banned_at" to if (isBlocked) nowIso else null,
                 "updated_at" to nowIso
             )
             if (!isBlocked) {
@@ -1154,6 +1212,17 @@ class SupabaseMaxBirdRepository(
                 "ban_reason" to cleanReason
             )
             patchPublicDeviceRecord(device, fullMap, minimalMap)
+
+            // 3. Also sync `is_blocked` in `public.activated_devices` if present for this `device_hash`
+            if (device.deviceHash.isNotBlank()) {
+                try {
+                    api.patchActivatedDeviceByHash(
+                        deviceHashQuery = "eq.${device.deviceHash}",
+                        payload = mapOf("is_blocked" to isBlocked)
+                    )
+                } catch (_: Exception) {
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.success(Unit)
@@ -1253,6 +1322,15 @@ class SupabaseMaxBirdRepository(
                 device = targetDevice,
                 fullPayload = mapOf("can_view_profiles" to canViewProfiles)
             )
+            if (targetDevice.deviceHash.isNotBlank()) {
+                try {
+                    supabaseClient.getApi().patchActivatedDeviceByHash(
+                        deviceHashQuery = "eq.${targetDevice.deviceHash}",
+                        payload = mapOf("can_view_profiles" to canViewProfiles)
+                    )
+                } catch (_: Exception) {
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.success(Unit)
@@ -1301,22 +1379,140 @@ class SupabaseMaxBirdRepository(
     // Course Sales, Installment Plans & Payment Verification
     // =========================================================================
 
+    private fun parseSavedPaymentMethodsFromPrefs(): List<DynamicPaymentMethodItem>? {
+        val rawJson = adminPreferences.getSavedPaymentMethodsJson()?.takeIf { it.isNotBlank() } ?: return null
+        return try {
+            val listType = Types.newParameterizedType(List::class.java, DynamicPaymentMethodItem::class.java)
+            val adapter = supabaseClient.moshi.adapter<List<DynamicPaymentMethodItem>>(listType)
+            adapter.fromJson(rawJson)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun savePaymentMethodsToPrefs(methods: List<DynamicPaymentMethodItem>) {
+        try {
+            val listType = Types.newParameterizedType(List::class.java, DynamicPaymentMethodItem::class.java)
+            val adapter = supabaseClient.moshi.adapter<List<DynamicPaymentMethodItem>>(listType)
+            adminPreferences.setSavedPaymentMethodsJson(adapter.toJson(methods))
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Reconciles locally saved payment methods (which include disabled toggles or custom methods like Upay/CellFin)
+     * with the live `public.course_payment_settings` columns (`bkash_number`, `nagad_number`, `rocket_number`).
+     */
+    private fun reconcileMethodsWithLiveColumns(
+        remoteMethods: List<DynamicPaymentMethodItem>?,
+        cleanBkash: String,
+        cleanNagad: String,
+        cleanRocket: String
+    ): List<DynamicPaymentMethodItem>? {
+        if (!remoteMethods.isNullOrEmpty()) {
+            savePaymentMethodsToPrefs(remoteMethods)
+            return remoteMethods
+        }
+
+        val savedLocal = parseSavedPaymentMethodsFromPrefs() ?: return null
+        val reconciled = savedLocal.map { item ->
+            when {
+                item.id.equals("bkash", ignoreCase = true) || item.code.equals("bKash", ignoreCase = true) -> {
+                    if (cleanBkash.isNotBlank()) item.copy(accountNumber = cleanBkash, isEnabled = true)
+                    else item.copy(isEnabled = false)
+                }
+                item.id.equals("nagad", ignoreCase = true) || item.code.equals("Nagad", ignoreCase = true) -> {
+                    if (cleanNagad.isNotBlank()) item.copy(accountNumber = cleanNagad, isEnabled = true)
+                    else item.copy(isEnabled = false)
+                }
+                item.id.equals("rocket", ignoreCase = true) || item.code.equals("Rocket", ignoreCase = true) -> {
+                    if (cleanRocket.isNotBlank()) item.copy(accountNumber = cleanRocket, isEnabled = true)
+                    else item.copy(isEnabled = false)
+                }
+                else -> item
+            }
+        }.toMutableList()
+
+        if (cleanBkash.isNotBlank() && reconciled.none { it.id.equals("bkash", ignoreCase = true) || it.code.equals("bKash", ignoreCase = true) }) {
+            reconciled.add(
+                0,
+                DynamicPaymentMethodItem(
+                    id = "bkash",
+                    code = "bKash",
+                    nameBn = "বিকাশ",
+                    accountNumber = cleanBkash,
+                    accountType = "Send Money করুন",
+                    instructionBn = "বিকাশ পার্সোনাল নম্বরে Send Money করে TrxID দিন।",
+                    colorHex = "#E2136E",
+                    isEnabled = true
+                )
+            )
+        }
+        if (cleanNagad.isNotBlank() && reconciled.none { it.id.equals("nagad", ignoreCase = true) || it.code.equals("Nagad", ignoreCase = true) }) {
+            reconciled.add(
+                DynamicPaymentMethodItem(
+                    id = "nagad",
+                    code = "Nagad",
+                    nameBn = "নগদ",
+                    accountNumber = cleanNagad,
+                    accountType = "Send Money করুন",
+                    instructionBn = "নগদ পার্সোনাল নম্বরে Send Money করে TrxID দিন।",
+                    colorHex = "#F7941D",
+                    isEnabled = true
+                )
+            )
+        }
+        if (cleanRocket.isNotBlank() && reconciled.none { it.id.equals("rocket", ignoreCase = true) || it.code.equals("Rocket", ignoreCase = true) }) {
+            reconciled.add(
+                DynamicPaymentMethodItem(
+                    id = "rocket",
+                    code = "Rocket",
+                    nameBn = "রকেট",
+                    accountNumber = cleanRocket,
+                    accountType = "Send Money করুন",
+                    instructionBn = "রকেট নম্বরে Send Money করে TrxID দিন।",
+                    colorHex = "#8C3494",
+                    isEnabled = true
+                )
+            )
+        }
+
+        return reconciled
+    }
+
     override suspend fun getCoursePaymentSettings(): Result<CoursePaymentSettings> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
             val list = api.getCoursePaymentSettings(idQuery = "eq.1")
             val raw = list.firstOrNull()
             val settings = if (raw != null) {
+                val cleanBkash = raw.bkashNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
+                val cleanNagad = raw.nagadNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
+                val cleanRocket = raw.rocketNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
+                val cleanUpay = raw.upayNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
+
+                val reconciledMethods = reconcileMethodsWithLiveColumns(
+                    remoteMethods = raw.paymentMethodsJson,
+                    cleanBkash = cleanBkash,
+                    cleanNagad = cleanNagad,
+                    cleanRocket = cleanRocket
+                )
+
                 raw.copy(
-                    bkashNumber = raw.bkashNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
-                    nagadNumber = raw.nagadNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
-                    rocketNumber = raw.rocketNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
-                    upayNumber = raw.upayNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: ""
+                    paymentMethodsJson = reconciledMethods,
+                    bkashNumber = cleanBkash,
+                    bkashEnabled = cleanBkash.isNotBlank(),
+                    nagadNumber = cleanNagad,
+                    nagadEnabled = cleanNagad.isNotBlank(),
+                    rocketNumber = cleanRocket,
+                    rocketEnabled = cleanRocket.isNotBlank(),
+                    upayNumber = cleanUpay,
+                    upayEnabled = cleanUpay.isNotBlank()
                 )
             } else {
                 CoursePaymentSettings(
                     id = 1,
-                    paymentMethodsJson = emptyList(),
+                    paymentMethodsJson = parseSavedPaymentMethodsFromPrefs() ?: emptyList(),
                     bkashNumber = "",
                     bkashEnabled = false,
                     nagadNumber = "",
@@ -1348,53 +1544,64 @@ class SupabaseMaxBirdRepository(
                 upayNumber = payload.upayNumber.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
                 paymentInstructionBn = payload.paymentInstructionsBn
             )
+
+            // Save full dynamic payment methods list locally so disabled toggles & custom methods persist
+            savePaymentMethodsToPrefs(syncedPayload.paymentMethodsJson)
+
+            // Exact 8 columns of `public.course_payment_settings` in the live Supabase SQL schema:
+            // id, bkash_number, nagad_number, rocket_number, payment_instructions_bn, default_course_price, updated_at, payment_instruction_bn
+            val exactSqlSchemaMap = mapOf<String, Any?>(
+                "id" to 1,
+                "bkash_number" to syncedPayload.bkashNumber,
+                "nagad_number" to syncedPayload.nagadNumber,
+                "rocket_number" to syncedPayload.rocketNumber,
+                "payment_instructions_bn" to syncedPayload.paymentInstructionsBn,
+                "payment_instruction_bn" to syncedPayload.paymentInstructionBn,
+                "default_course_price" to syncedPayload.defaultCoursePrice,
+                "updated_at" to nowIso
+            )
+
             val api = supabaseClient.getApi()
             val updatedList = try {
-                api.upsertCoursePaymentSettings(syncedPayload)
+                // Primary: Upsert exact 8 columns matching live `public.course_payment_settings`
+                api.upsertCoursePaymentSettingsRaw(exactSqlSchemaMap)
             } catch (_: Exception) {
                 try {
-                    api.patchCoursePaymentSettings(idQuery = "eq.1", payload = syncedPayload)
+                    api.patchCoursePaymentSettingsRaw(idQuery = "eq.1", payload = exactSqlSchemaMap)
                 } catch (_: Exception) {
-                    val liveSchemaMap = mapOf<String, Any?>(
+                    val minimalMap = mapOf<String, Any?>(
                         "id" to 1,
-                        "payment_methods_json" to syncedPayload.paymentMethodsJson,
                         "bkash_number" to syncedPayload.bkashNumber,
-                        "bkash_enabled" to syncedPayload.bkashEnabled,
                         "nagad_number" to syncedPayload.nagadNumber,
-                        "nagad_enabled" to syncedPayload.nagadEnabled,
                         "rocket_number" to syncedPayload.rocketNumber,
-                        "rocket_enabled" to syncedPayload.rocketEnabled,
-                        "upay_number" to syncedPayload.upayNumber,
-                        "upay_enabled" to syncedPayload.upayEnabled,
                         "payment_instructions_bn" to syncedPayload.paymentInstructionsBn,
+                        "default_course_price" to syncedPayload.defaultCoursePrice,
                         "updated_at" to nowIso
                     )
-                    try {
-                        api.upsertCoursePaymentSettingsRaw(liveSchemaMap)
-                    } catch (_: Exception) {
-                        try {
-                            api.patchCoursePaymentSettingsRaw(idQuery = "eq.1", payload = liveSchemaMap)
-                        } catch (_: Exception) {
-                            val baseMap = mapOf<String, Any?>(
-                                "id" to 1,
-                                "bkash_number" to syncedPayload.bkashNumber,
-                                "nagad_number" to syncedPayload.nagadNumber,
-                                "rocket_number" to syncedPayload.rocketNumber,
-                                "payment_instructions_bn" to syncedPayload.paymentInstructionsBn,
-                                "updated_at" to nowIso
-                            )
-                            api.upsertCoursePaymentSettingsRaw(baseMap)
-                        }
-                    }
+                    api.upsertCoursePaymentSettingsRaw(minimalMap)
                 }
             }
+
+            // Optional secondary attempt: if the database also has `payment_methods_json` column, sync it silently
+            try {
+                api.patchCoursePaymentSettingsRaw(
+                    idQuery = "eq.1",
+                    payload = mapOf("payment_methods_json" to syncedPayload.paymentMethodsJson)
+                )
+            } catch (_: Exception) {
+            }
+
             val rawSaved = updatedList.firstOrNull()
             val saved = rawSaved?.copy(
-                paymentMethodsJson = rawSaved.paymentMethodsJson?.takeIf { it.isNotEmpty() } ?: syncedPayload.paymentMethodsJson,
+                paymentMethodsJson = syncedPayload.paymentMethodsJson,
                 bkashNumber = rawSaved.bkashNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: syncedPayload.bkashNumber,
+                bkashEnabled = syncedPayload.bkashEnabled,
                 nagadNumber = rawSaved.nagadNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: syncedPayload.nagadNumber,
+                nagadEnabled = syncedPayload.nagadEnabled,
                 rocketNumber = rawSaved.rocketNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: syncedPayload.rocketNumber,
-                upayNumber = rawSaved.upayNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: syncedPayload.upayNumber
+                rocketEnabled = syncedPayload.rocketEnabled,
+                upayNumber = syncedPayload.upayNumber,
+                upayEnabled = syncedPayload.upayEnabled
             ) ?: CoursePaymentSettings(
                 id = 1,
                 paymentMethodsJson = syncedPayload.paymentMethodsJson,
@@ -1475,6 +1682,15 @@ class SupabaseMaxBirdRepository(
                     if (res.isSuccessful) primaryResponse = res
                 } catch (_: Exception) {
                 }
+                try {
+                    val res = api.patchCourseAccessEnrollmentByUserPhoneAndProgram(
+                        userPhoneQuery = "eq.$cleanPhone",
+                        programIdQuery = "eq.$cleanProgId",
+                        payload = patchMap
+                    )
+                    if (res.isSuccessful) primaryResponse = res
+                } catch (_: Exception) {
+                }
             }
         }
 
@@ -1499,6 +1715,13 @@ class SupabaseMaxBirdRepository(
                     "due_amount" to 0,
                     "installment_enabled" to false,
                     "allow_installments" to false,
+                    "selected_plan_id" to "FULL",
+                    "selected_plan_title" to "এককালীন সম্পূর্ণ পেমেন্ট",
+                    "active_plan_id" to "FULL",
+                    "active_plan_title" to "এককালীন সম্পূর্ণ পেমেন্ট",
+                    "total_installments" to 1,
+                    "completed_installments" to 1,
+                    "next_installment_amount" to 0,
                     "installment_plans_json" to emptyList<Any>(),
                     "admin_note" to payload.adminNote,
                     "approved_at" to nowIso,
@@ -1507,6 +1730,7 @@ class SupabaseMaxBirdRepository(
                 )
                 if (CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
                     freeUnlockPatch["student_phone"] = cleanPhone
+                    freeUnlockPatch["user_phone"] = cleanPhone
                     freeUnlockPatch["shikho_account_key"] = cleanAccountKey.ifBlank { cleanPhone }
                 }
                 val patchRes = patchEnrollmentByIdOrAccount(
@@ -1551,15 +1775,22 @@ class SupabaseMaxBirdRepository(
             }
 
             val firstPlan = payload.installmentPlansJson.firstOrNull()
+            val resolvedPlanId = firstPlan?.planId?.takeIf { it.isNotBlank() } ?: "FULL"
+            val resolvedPlanTitle = firstPlan?.effectiveTitle?.takeIf { it.isNotBlank() } ?: "এককালীন সম্পূর্ণ পেমেন্ট"
             val patchMap = mutableMapOf<String, Any?>(
                 "status" to if (payload.instantFreeUnlock) "ACTIVE" else "APPROVED_TO_BUY",
                 "total_price" to payload.totalPrice,
                 "due_amount" to payload.totalPrice,
                 "installment_enabled" to payload.installmentEnabled,
                 "allow_installments" to payload.installmentEnabled,
+                "selected_plan_id" to resolvedPlanId,
+                "selected_plan_title" to resolvedPlanTitle,
+                "active_plan_id" to resolvedPlanId,
+                "active_plan_title" to resolvedPlanTitle,
+                "total_installments" to (firstPlan?.effectiveInstallmentsCount ?: 1),
                 "installment_plans_json" to payload.installmentPlansJson,
                 "next_installment_amount" to (firstPlan?.effectiveAmountPerInstallment ?: payload.totalPrice),
-                "installment_interval_days" to (firstPlan?.intervalDays ?: 30),
+                "installment_interval_days" to (firstPlan?.intervalDays ?: 7),
                 "admin_note" to payload.adminNote,
                 "rejection_reason" to "",
                 "approved_at" to nowIso,
@@ -1567,6 +1798,7 @@ class SupabaseMaxBirdRepository(
             )
             if (CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
                 patchMap["student_phone"] = cleanPhone
+                patchMap["user_phone"] = cleanPhone
                 patchMap["shikho_account_key"] = cleanAccountKey.ifBlank { cleanPhone }
             }
 
@@ -1650,11 +1882,17 @@ class SupabaseMaxBirdRepository(
             }
 
             // CRITICAL REQUIREMENT:
-            // Set `student_phone`, `shikho_account_key`, and `device_id` all to the 11-digit mobile number (`cleanPhone`)
+            // Set `student_phone`, `user_phone`, `shikho_account_key`, `device_id`, `device_hash`, and `display_device_id`
+            // all to the 11-digit mobile number (`cleanPhone`)
+            val resolvedPlanId = firstPlan?.planId?.takeIf { it.isNotBlank() } ?: "FULL"
+            val resolvedPlanTitle = firstPlan?.effectiveTitle?.takeIf { it.isNotBlank() } ?: "এককালীন সম্পূর্ণ পেমেন্ট"
             val recordMap = mutableMapOf<String, Any?>(
                 "student_phone" to cleanPhone,
+                "user_phone" to cleanPhone,
                 "shikho_account_key" to cleanPhone,
                 "device_id" to cleanPhone,
+                "device_hash" to cleanPhone,
+                "display_device_id" to cleanPhone,
                 "student_name" to payload.studentName.trim().ifBlank { "শিক্ষার্থী ($cleanPhone)" },
                 "program_id" to cleanProgramId,
                 "program_title" to payload.programTitle.trim().ifBlank { cleanProgramId },
@@ -1664,6 +1902,10 @@ class SupabaseMaxBirdRepository(
                 "due_amount" to safeDueAmount,
                 "installment_enabled" to payload.installmentEnabled,
                 "allow_installments" to payload.installmentEnabled,
+                "selected_plan_id" to resolvedPlanId,
+                "selected_plan_title" to resolvedPlanTitle,
+                "active_plan_id" to resolvedPlanId,
+                "active_plan_title" to resolvedPlanTitle,
                 "installment_plans_json" to payload.installmentPlansJson,
                 "total_installments" to totalInstallments,
                 "completed_installments" to completedInstallments,
@@ -1877,24 +2119,43 @@ class SupabaseMaxBirdRepository(
                             null
                         }
 
+                        val resolvedPlanId = targetTx?.planId?.takeIf { it.isNotBlank() }
+                            ?: targetTx?.selectedPlanId?.takeIf { it.isNotBlank() }
+                            ?: enrollment.selectedPlanId?.takeIf { it.isNotBlank() }
+                            ?: "FULL"
+                        val resolvedPlanTitle = targetTx?.effectivePlanTitle?.takeIf { it.isNotBlank() }
+                            ?: enrollment.selectedPlanTitle?.takeIf { it.isNotBlank() }
+                            ?: "এককালীন সম্পূর্ণ পেমেন্ট"
+
                         val enrollPatch = mutableMapOf<String, Any?>(
                             "status" to "ACTIVE",
                             "paid_amount" to newPaid,
                             "due_amount" to newDue,
                             "completed_installments" to newCompleted,
                             "total_installments" to totalInst,
+                            "selected_plan_id" to resolvedPlanId,
+                            "selected_plan_title" to resolvedPlanTitle,
+                            "active_plan_id" to resolvedPlanId,
+                            "active_plan_title" to resolvedPlanTitle,
                             "next_due_date" to nextDueIso,
                             "pending_installment_tx_id" to "",
                             "pending_installment_amount" to 0,
                             "rejection_reason" to "",
-                            "unlocked_at" to (enrollment.unlockedAt ?: nowIso),
+                            "unlocked_at" to (enrollment.unlockedAt?.takeIf { it.isNotBlank() } ?: nowIso),
                             "updated_at" to nowIso
                         )
+                        if (targetTx != null) {
+                            enrollPatch["last_transaction_id"] = targetTx.transactionId ?: ""
+                            enrollPatch["last_payment_amount"] = targetTx.amount
+                            enrollPatch["last_sender_mobile"] = targetTx.senderMobile ?: ""
+                            enrollPatch["last_payment_method"] = targetTx.paymentMethod ?: "bKash"
+                        }
                         val validPhone = CourseAccessEnrollment.normalizeBdPhone(enrollment.effectivePhone)
                             .takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
                             ?: txPhone.takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
                         if (!validPhone.isNullOrBlank()) {
                             enrollPatch["student_phone"] = validPhone
+                            enrollPatch["user_phone"] = validPhone
                             enrollPatch["shikho_account_key"] = validPhone
                         }
 
@@ -1976,6 +2237,7 @@ class SupabaseMaxBirdRepository(
             val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(studentPhone)
             if (CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
                 patchMap["student_phone"] = cleanPhone
+                patchMap["user_phone"] = cleanPhone
                 patchMap["shikho_account_key"] = CourseAccessEnrollment.normalizeBdPhone(shikhoAccountKey).ifBlank { cleanPhone }
             }
 

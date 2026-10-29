@@ -19,11 +19,20 @@ class AdminPreferences(context: Context) {
         private const val KEY_ADMIN_PIN = "admin_pin"
         private const val KEY_SUPABASE_URL = "supabase_url"
         private const val KEY_SUPABASE_KEY = "supabase_key"
+        private const val KEY_SAVED_PAYMENT_METHODS_JSON = "saved_payment_methods_json"
         const val DEFAULT_PIN = "8899"
 
         // Default project fallback
         const val DEFAULT_FALLBACK_URL = "https://krmhyxovnpxlqfaptyuv.supabase.co/"
         const val DEFAULT_FALLBACK_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.fake_key"
+    }
+
+    fun getSavedPaymentMethodsJson(): String? {
+        return prefs.getString(KEY_SAVED_PAYMENT_METHODS_JSON, null)
+    }
+
+    fun setSavedPaymentMethodsJson(json: String) {
+        prefs.edit().putString(KEY_SAVED_PAYMENT_METHODS_JSON, json).apply()
     }
 
     private val _isSessionUnlocked = MutableStateFlow(true) // Always unlocked (No PIN barrier)

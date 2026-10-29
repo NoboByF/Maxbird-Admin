@@ -292,13 +292,14 @@ data class UpsertCoursePaymentSettingsPayload(
             val rocket = findBestMethod("rocket")
             val upay = findBestMethod("upay")
 
-            // Note: Only write legacy number if enabled OR if the method exists;
-            // to ensure legacy Student Apps only see enabled numbers if they read bkash_number directly without checking bkash_enabled,
-            // we set bkash_number = bkash.accountNumber when bkash != null, and bkash_enabled = bkash.isEnabled.
-            val bkashNum = if (bkash != null && bkash.isEnabled) bkash.accountNumber else (bkash?.accountNumber ?: "")
-            val nagadNum = if (nagad != null && nagad.isEnabled) nagad.accountNumber else (nagad?.accountNumber ?: "")
-            val rocketNum = if (rocket != null && rocket.isEnabled) rocket.accountNumber else (rocket?.accountNumber ?: "")
-            val upayNum = if (upay != null && upay.isEnabled) upay.accountNumber else (upay?.accountNumber ?: "")
+            // IMPORTANT: In the live `public.course_payment_settings` table, the columns are
+            // `bkash_number`, `nagad_number`, `rocket_number` (without separate `*_enabled` columns).
+            // Therefore, when a payment method is switched OFF (`isEnabled == false`), we MUST write "" (empty string)
+            // to its column in `course_payment_settings` so the Student App immediately hides it.
+            val bkashNum = if (bkash != null && bkash.isEnabled) bkash.accountNumber else ""
+            val nagadNum = if (nagad != null && nagad.isEnabled) nagad.accountNumber else ""
+            val rocketNum = if (rocket != null && rocket.isEnabled) rocket.accountNumber else ""
+            val upayNum = if (upay != null && upay.isEnabled) upay.accountNumber else ""
 
             val cleanInstructions = instructionsBn.trim()
 
@@ -330,7 +331,7 @@ data class UpsertCoursePaymentSettingsPayload(
 @JsonClass(generateAdapter = true)
 data class InstallmentPlanItem(
     @Json(name = "plan_id")
-    val planId: String = "full",
+    val planId: String = "FULL",
 
     @Json(name = "title")
     val title: String? = null,
@@ -362,7 +363,7 @@ data class InstallmentPlanItem(
     val effectiveTitle: String
         get() = title?.takeIf { it.isNotBlank() }
             ?: titleBn?.takeIf { it.isNotBlank() }
-            ?: "একবারে সম্পূর্ণ পেমেন্ট"
+            ?: "এককালীন সম্পূর্ণ পেমেন্ট"
 
     val effectiveInstallmentsCount: Int
         get() = (installmentsCount ?: installmentCount ?: 1).coerceAtLeast(1)
@@ -417,11 +418,11 @@ data class InstallmentPlanItem(
             if (safePrice == 0) {
                 return listOf(
                     create(
-                        planId = "full",
-                        titleText = "একবারে সম্পূর্ণ পেমেন্ট (০ টাকা)",
+                        planId = "FULL",
+                        titleText = "এককালীন সম্পূর্ণ পেমেন্ট (০ টাকা)",
                         count = 1,
                         amountPerInst = 0,
-                        intervalDays = 30,
+                        intervalDays = 0,
                         schedule = listOf(0)
                     )
                 )
@@ -438,11 +439,11 @@ data class InstallmentPlanItem(
 
             return listOf(
                 create(
-                    planId = "full",
-                    titleText = "একবারে সম্পূর্ণ পেমেন্ট ($safePrice টাকা)",
+                    planId = "FULL",
+                    titleText = "এককালীন সম্পূর্ণ পেমেন্ট ($safePrice টাকা)",
                     count = 1,
                     amountPerInst = safePrice,
-                    intervalDays = 30,
+                    intervalDays = 0,
                     schedule = listOf(safePrice)
                 ),
                 create(
@@ -787,16 +788,18 @@ data class CoursePaymentTransaction(
     val userPhone: String? = null
 ) {
     val effectiveStudentPhone: String
-        get() = studentPhone?.takeIf { it.isNotBlank() }
-            ?: userPhone?.takeIf { it.isNotBlank() }
+        get() = userPhone?.takeIf { it.isNotBlank() }
             ?: shikhoAccountKey?.takeIf { it.isNotBlank() }
+            ?: studentPhone?.takeIf { it.isNotBlank() }
+            ?: deviceId?.takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
             ?: senderMobile?.takeIf { it.isNotBlank() }
             ?: ""
 
     val effectiveAccountKey: String
         get() = shikhoAccountKey?.takeIf { it.isNotBlank() }
-            ?: studentPhone?.takeIf { it.isNotBlank() }
             ?: userPhone?.takeIf { it.isNotBlank() }
+            ?: studentPhone?.takeIf { it.isNotBlank() }
+            ?: deviceId?.takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
             ?: shikhoUserId?.takeIf { it.isNotBlank() }
             ?: ""
 
