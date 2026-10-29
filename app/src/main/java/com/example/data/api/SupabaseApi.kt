@@ -187,7 +187,12 @@ interface SupabaseApi {
     @GET("rest/v1/devices")
     suspend fun getDevices(
         @Query("select") select: String = "*",
-        @Query("order") order: String = "last_seen.desc.nullslast"
+        @Query("order") order: String = "requested_at.desc.nullslast,updated_at.desc.nullslast"
+    ): List<UserDevice>
+
+    @GET("rest/v1/devices")
+    suspend fun getDevicesUnordered(
+        @Query("select") select: String = "*"
     ): List<UserDevice>
 
     @PATCH("rest/v1/devices")
@@ -203,10 +208,38 @@ interface SupabaseApi {
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
 
+    @PATCH("rest/v1/devices")
+    suspend fun patchDeviceByHash(
+        @Query("device_hash") deviceHashQuery: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @PATCH("rest/v1/devices")
+    suspend fun patchDeviceByDisplayId(
+        @Query("display_device_id") displayIdQuery: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
     @DELETE("rest/v1/devices")
     suspend fun deleteDeviceRecord(
         @Query("id") idQuery: String
     ): Response<Unit>
+
+    @DELETE("rest/v1/devices")
+    suspend fun deleteDeviceRecordByHash(
+        @Query("device_hash") deviceHashQuery: String
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/admin_approve_device_verification")
+    suspend fun approveDeviceVerificationRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/admin_set_device_block_status")
+    suspend fun setDeviceBlockStatusRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
 
     // =========================================================================
     // Course Sales, Installment Plans & Payment Verification Endpoints

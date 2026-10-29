@@ -88,8 +88,8 @@ sealed class Screen(
 
     data object Devices : Screen(
         route = "devices",
-        titleEn = "Devices",
-        titleBn = "ডিভাইস",
+        titleEn = "One-Click Student Device Verification",
+        titleBn = "স্টুডেন্ট ডিভাইস ভেরিফিকেশন ও কন্ট্রোল",
         selectedIcon = Icons.Filled.Devices,
         unselectedIcon = Icons.Outlined.Devices
     )
@@ -116,7 +116,7 @@ sealed class Screen(
             CourseSales -> "কিস্তি ও বিক্রি"
             Codes -> "কোডসমূহ"
             CloudinaryMedia -> "মিডিয়া"
-            Devices -> "ডিভাইস"
+            Devices -> "ভেরিফিকেশন"
             Settings -> "সেটিংস"
             Generator -> "নতুন কোড"
             Notices -> "নোটিশ"
@@ -127,8 +127,9 @@ sealed class Screen(
     companion object {
         // Core 5 primary destinations for clean, spacious Material 3 NavigationBar
         val bottomNavItems: List<Screen>
-            get() = listOf(Dashboard, CourseSales, Codes, Devices, Settings)
+            get() = listOf(Dashboard, Devices, CourseSales, Codes, Settings)
     }
 }
+
 
 

@@ -331,23 +331,27 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     MetricStatCard(
-                        modifier = Modifier.weight(1f),
-                        title = "মোট কোড",
-                        subtitle = "Total Access Keys",
-                        value = "${stats.totalCodes}",
-                        icon = Icons.Default.VpnKey,
-                        accentColor = ElectricBlue,
-                        gradientColors = listOf(ElectricBlue.copy(alpha = 0.2f), Slate800),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onNavigate(Screen.Devices) },
+                        title = "অপেক্ষমান আবেদন",
+                        subtitle = "Pending Verification",
+                        value = "${stats.pendingVerificationDevices}",
+                        icon = Icons.Default.Security,
+                        accentColor = AmberWarning,
+                        gradientColors = listOf(AmberWarning.copy(alpha = 0.22f), Slate800),
                         testTag = "stat_total_codes"
                     )
                     MetricStatCard(
-                        modifier = Modifier.weight(1f),
-                        title = "সক্রিয় শিক্ষার্থী",
-                        subtitle = "Active Students",
-                        value = "${stats.activeStudents}",
-                        icon = Icons.Default.Person,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onNavigate(Screen.Devices) },
+                        title = "ভেরিফাইড ডিভাইস",
+                        subtitle = "Active Devices",
+                        value = "${stats.activeVerifiedDevices}",
+                        icon = Icons.Default.CheckCircle,
                         accentColor = EmeraldSuccess,
-                        gradientColors = listOf(EmeraldSuccess.copy(alpha = 0.2f), Slate800),
+                        gradientColors = listOf(EmeraldSuccess.copy(alpha = 0.22f), Slate800),
                         testTag = "stat_active_students"
                     )
                 }
@@ -357,9 +361,11 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     MetricStatCard(
-                        modifier = Modifier.weight(1f),
-                        title = "বাইন্ডেড ডিভাইস",
-                        subtitle = "Bound Hardware",
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onNavigate(Screen.Devices) },
+                        title = "মোট ডিভাইস",
+                        subtitle = "Total Devices",
                         value = "${stats.totalDevices}",
                         icon = Icons.Default.Devices,
                         accentColor = NeonCyan,
@@ -367,9 +373,11 @@ fun DashboardScreen(
                         testTag = "stat_total_devices"
                     )
                     MetricStatCard(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onNavigate(Screen.Devices) },
                         title = "ব্লকড ডিভাইস",
-                        subtitle = "Kill-Switch Blocked",
+                        subtitle = "Blocked Devices",
                         value = "${stats.blockedDevices}",
                         icon = Icons.Default.Block,
                         accentColor = CoralDanger,
@@ -414,10 +422,10 @@ fun DashboardScreen(
                     border = androidx.compose.foundation.BorderStroke(1.dp, Slate700)
                 ) {
                     Text(
-                        text = "৯টি মডিউল",
+                        text = "১-ক্লিক কন্ট্রোল",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = Slate400,
+                            color = NeonCyan,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp
                         )
@@ -429,6 +437,23 @@ fun DashboardScreen(
         // 4. Admin Modules 2-Column Balanced Grid
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Featured Row 00: 1-Click Student Device Verification & Control
+                FeaturedModuleCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "স্টুডেন্ট ডিভাইস ভেরিফিকেশন ও কন্ট্রোল",
+                    subtitle = "১-ক্লিকে নতুন ডিভাইস অ্যাপ্রুভ (Pending), স্টুডেন্টের নাম/নোট এডিট এবং ব্লক/আনব্লক কন্ট্রোল",
+                    icon = Icons.Default.Devices,
+                    badge = if (stats.pendingVerificationDevices > 0) {
+                        "⏳ ${stats.pendingVerificationDevices}টি পেন্ডিং"
+                    } else {
+                        "১-ক্লিকে ভেরিফাই"
+                    },
+                    accentColor = if (stats.pendingVerificationDevices > 0) AmberWarning else EmeraldSuccess,
+                    gradientStart = (if (stats.pendingVerificationDevices > 0) AmberWarning else EmeraldSuccess).copy(alpha = 0.24f),
+                    onClick = { onNavigate(Screen.Devices) },
+                    testTag = "mod_card_devices"
+                )
+
                 // Featured Row 0A: Dynamic Payment Methods Manager (Add/Edit/Delete/ON-OFF bKash, Nagad, Rocket, Upay, Bank)
                 FeaturedModuleCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -455,36 +480,7 @@ fun DashboardScreen(
                     testTag = "mod_card_course_sales"
                 )
 
-                // Row 1: Cloudinary & New Code
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    FeaturedModuleCard(
-                        modifier = Modifier.weight(1f),
-                        title = "Shikho ক্লাউডনারি",
-                        subtitle = "সরাসরি মিডিয়া আপলোড ও পার্মানেন্ট লিংক",
-                        icon = Icons.Default.CloudUpload,
-                        badge = "Direct URL",
-                        accentColor = NeonCyan,
-                        gradientStart = NeonCyan.copy(alpha = 0.18f),
-                        onClick = { onNavigate(Screen.CloudinaryMedia) },
-                        testTag = "mod_card_cloudinary_uploader"
-                    )
-                    FeaturedModuleCard(
-                        modifier = Modifier.weight(1f),
-                        title = "নতুন কোড",
-                        subtitle = "স্টুডেন্ট অ্যাক্সেস কোড জেনারেটর",
-                        icon = Icons.Default.AddModerator,
-                        badge = "Create",
-                        accentColor = ElectricBlue,
-                        gradientStart = ElectricBlue.copy(alpha = 0.18f),
-                        onClick = { onNavigate(Screen.Generator) },
-                        testTag = "mod_card_generator"
-                    )
-                }
-
-                // Row 2: Notices & App Updates
+                // Row 1: Notices & App Updates
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -513,7 +509,7 @@ fun DashboardScreen(
                     )
                 }
 
-                // Row 3: Support Links & Kill-Switch
+                // Row 2: Support Links & Cloudinary
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -531,26 +527,26 @@ fun DashboardScreen(
                     )
                     FeaturedModuleCard(
                         modifier = Modifier.weight(1f),
-                        title = "কিল-সুইচ",
-                        subtitle = "ডিভাইস লক ও হার্ডওয়্যার ব্যান",
-                        icon = Icons.Default.Devices,
-                        badge = null,
-                        accentColor = CoralDanger,
-                        gradientStart = CoralDanger.copy(alpha = 0.18f),
-                        onClick = { onNavigate(Screen.Devices) },
-                        testTag = "mod_card_devices"
+                        title = "Shikho ক্লাউডনারি",
+                        subtitle = "সরাসরি মিডিয়া আপলোড ও পার্মানেন্ট লিংক",
+                        icon = Icons.Default.CloudUpload,
+                        badge = "Direct URL",
+                        accentColor = NeonCyan,
+                        gradientStart = NeonCyan.copy(alpha = 0.18f),
+                        onClick = { onNavigate(Screen.CloudinaryMedia) },
+                        testTag = "mod_card_cloudinary_uploader"
                     )
                 }
 
-                // Row 4: Student List & System Settings
+                // Row 3: Legacy Code List & System Settings
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     FeaturedModuleCard(
                         modifier = Modifier.weight(1f),
-                        title = "শিক্ষার্থী তালিকা",
-                        subtitle = "সকল অ্যাক্সেস কোড ডাটাবেজ",
+                        title = "পুরনো কোড লিস্ট",
+                        subtitle = "অ্যাক্সেস কোড আর্কাইভ (ঐচ্ছিক)",
                         icon = Icons.Default.Group,
                         badge = null,
                         accentColor = Sky500,
@@ -561,7 +557,7 @@ fun DashboardScreen(
                     FeaturedModuleCard(
                         modifier = Modifier.weight(1f),
                         title = "সিস্টেম সেটিংস",
-                        subtitle = "সুপাবেস ডাটাবেজ ও রিলিজ APK",
+                        subtitle = "সুপাবেস ডাটাবেজ ও পেমেন্ট সেটিংস",
                         icon = Icons.Default.Settings,
                         badge = null,
                         accentColor = Slate400,

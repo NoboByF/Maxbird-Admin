@@ -79,7 +79,9 @@ data class DashboardStats(
     val activeStudents: Int = 0,
     val totalDevices: Int = 0,
     val blockedDevices: Int = 0,
-    val availableSlots: Int = 0
+    val availableSlots: Int = 0,
+    val pendingVerificationDevices: Int = 0,
+    val activeVerifiedDevices: Int = 0
 )
 
 /**
@@ -207,7 +209,7 @@ data class UpdateSupportLinkStatusPayload(
 )
 
 /**
- * User Device model representing user telemetry and hardware binding.
+ * User Device model representing One-Click Student Verification & Hardware Control.
  * Matches Supabase table: `public.devices`
  */
 @JsonClass(generateAdapter = true)
@@ -215,20 +217,52 @@ data class UserDevice(
     @Json(name = "id") val id: String = "",
     @Json(name = "device_hash") val deviceHash: String = "",
     @Json(name = "display_device_id") val displayDeviceId: String = "",
+    @Json(name = "student_note") val studentNote: String? = null,
     @Json(name = "device_model") val deviceModel: String = "Unknown Device",
     @Json(name = "device_brand") val deviceBrand: String? = null,
     @Json(name = "android_version") val androidVersion: String? = null,
     @Json(name = "app_version") val appVersion: String? = null,
     @Json(name = "applied_code") val appliedCode: String? = null,
+    @Json(name = "status") val status: String = "pending",
     @Json(name = "is_banned") val isBanned: Boolean = false,
     @Json(name = "ban_reason") val banReason: String? = null,
-    @Json(name = "status") val status: String = "active",
+    @Json(name = "requested_at") val requestedAt: String? = null,
+    @Json(name = "approved_at") val approvedAt: String? = null,
+    @Json(name = "updated_at") val updatedAt: String? = null,
     @Json(name = "last_seen") val lastSeen: String? = null,
     @Json(name = "can_view_profiles") val canViewProfiles: Boolean = false
-)
+) {
+    val isBlockedDevice: Boolean
+        get() = isBanned ||
+            status.equals("blocked", ignoreCase = true) ||
+            status.equals("banned", ignoreCase = true)
+
+    val isPendingDevice: Boolean
+        get() = !isBlockedDevice && status.equals("pending", ignoreCase = true)
+
+    val isActiveDevice: Boolean
+        get() = !isBlockedDevice && status.equals("active", ignoreCase = true)
+
+    val displayStudentName: String
+        get() = studentNote?.trim()?.takeIf { it.isNotEmpty() } ?: "নতুন শিক্ষার্থী"
+
+    val fullPhoneModel: String
+        get() {
+            val brand = deviceBrand?.trim().orEmpty()
+            val model = deviceModel.trim()
+            return if (brand.isNotEmpty() && !model.startsWith(brand, ignoreCase = true)) {
+                "$brand $model"
+            } else {
+                model.ifEmpty { "Unknown Device" }
+            }
+        }
+
+    val effectiveKey: String
+        get() = deviceHash.ifBlank { id.ifBlank { displayDeviceId } }
+}
 
 /**
- * Request payload to update device ban status.
+ * Request payload to update device ban/block status.
  */
 @JsonClass(generateAdapter = true)
 data class UpdateDeviceBanPayload(
@@ -236,3 +270,4 @@ data class UpdateDeviceBanPayload(
     @Json(name = "status") val status: String,
     @Json(name = "ban_reason") val banReason: String?
 )
+

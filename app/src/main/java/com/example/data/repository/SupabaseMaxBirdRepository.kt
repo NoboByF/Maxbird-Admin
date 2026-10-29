@@ -272,16 +272,37 @@ class SupabaseMaxBirdRepository(
                 listOf(
                     UserDevice(
                         id = UUID.randomUUID().toString(),
+                        deviceHash = "sha256_hw_oneplus_pending_01",
+                        displayDeviceId = "MX-9A41-2B7C-E810",
+                        studentNote = "রাফি ইসলাম (HSC 26)",
+                        deviceModel = "OnePlus 11R 5G",
+                        deviceBrand = "OnePlus",
+                        androidVersion = "Android 14 (API 34)",
+                        appVersion = "1.0.0",
+                        status = "pending",
+                        isBanned = false,
+                        banReason = "",
+                        requestedAt = now,
+                        updatedAt = now,
+                        lastSeen = now,
+                        canViewProfiles = false
+                    ),
+                    UserDevice(
+                        id = UUID.randomUUID().toString(),
                         deviceHash = "sha256_hw_xiaomi_9a12c40",
                         displayDeviceId = "MX-7F3A-9B21-C04E",
+                        studentNote = "তানভীর আহমেদ",
                         deviceModel = "Xiaomi Redmi Note 12",
                         deviceBrand = "Xiaomi",
                         androidVersion = "Android 14 (API 34)",
                         appVersion = "1.0.0",
                         appliedCode = "VIP-STUDENT-01",
-                        isBanned = false,
-                        banReason = null,
                         status = "active",
+                        isBanned = false,
+                        banReason = "",
+                        requestedAt = now,
+                        approvedAt = now,
+                        updatedAt = now,
                         lastSeen = now,
                         canViewProfiles = false
                     ),
@@ -289,14 +310,18 @@ class SupabaseMaxBirdRepository(
                         id = UUID.randomUUID().toString(),
                         deviceHash = "sha256_hw_samsung_b38df9",
                         displayDeviceId = "MX-4C82-1D5E-F93A",
+                        studentNote = "সাকিবুল হাসান (SSC 26)",
                         deviceModel = "Samsung Galaxy S23",
                         deviceBrand = "Samsung",
                         androidVersion = "Android 14 (API 34)",
                         appVersion = "1.0.0",
                         appliedCode = "MAX-8921",
-                        isBanned = false,
-                        banReason = null,
                         status = "active",
+                        isBanned = false,
+                        banReason = "",
+                        requestedAt = now,
+                        approvedAt = now,
+                        updatedAt = now,
                         lastSeen = now,
                         canViewProfiles = true
                     ),
@@ -304,14 +329,17 @@ class SupabaseMaxBirdRepository(
                         id = UUID.randomUUID().toString(),
                         deviceHash = "sha256_hw_realme_e847c1",
                         displayDeviceId = "MX-89AB-CDEF-0123",
+                        studentNote = "মেহেদী হাসান",
                         deviceModel = "Realme 11 Pro+",
                         deviceBrand = "Realme",
                         androidVersion = "Android 13 (API 33)",
                         appVersion = "1.0.0",
                         appliedCode = "MAX-1144",
+                        status = "blocked",
                         isBanned = true,
-                        banReason = "একাধিক ডিভাইসে শেয়ার করার অভিযোগে ব্যান করা হয়েছে",
-                        status = "banned",
+                        banReason = "একাধিক ডিভাইসে শেয়ার করার অভিযোগে ব্লক করা হয়েছে",
+                        requestedAt = now,
+                        updatedAt = now,
                         lastSeen = now,
                         canViewProfiles = false
                     )
@@ -532,14 +560,19 @@ class SupabaseMaxBirdRepository(
 
     override suspend fun getDashboardStats(): Result<DashboardStats> = withContext(Dispatchers.IO) {
         val codes = getAccessCodes().getOrDefault(cachedCodes)
-        val devices = getActivatedDevices().getOrDefault(cachedDevices)
+        val activatedDevices = getActivatedDevices().getOrDefault(cachedDevices)
+        val realDevices = getUserDevices().getOrDefault(cachedUserDevices)
+
+        val pendingCount = realDevices.count { it.isPendingDevice }
+        val activeVerifiedCount = realDevices.count { it.isActiveDevice }
+        val blockedRealCount = realDevices.count { it.isBlockedDevice }
 
         val totalCodes = codes.size
-        val activeStudents = codes.count { it.isActive }
-        val totalDevices = devices.size
-        val blockedDevices = devices.count { it.isBlocked }
+        val activeStudents = if (activeVerifiedCount > 0) activeVerifiedCount else codes.count { it.isActive }
+        val totalDevices = if (realDevices.isNotEmpty()) realDevices.size else activatedDevices.size
+        val blockedDevices = if (realDevices.isNotEmpty()) blockedRealCount else activatedDevices.count { it.isBlocked }
         val totalCapacity = codes.sumOf { it.maxDevices }
-        val availableSlots = (totalCapacity - totalDevices).coerceAtLeast(0)
+        val availableSlots = (totalCapacity - activatedDevices.size).coerceAtLeast(0)
 
         Result.success(
             DashboardStats(
@@ -547,7 +580,9 @@ class SupabaseMaxBirdRepository(
                 activeStudents = activeStudents,
                 totalDevices = totalDevices,
                 blockedDevices = blockedDevices,
-                availableSlots = availableSlots
+                availableSlots = availableSlots,
+                pendingVerificationDevices = pendingCount,
+                activeVerifiedDevices = activeVerifiedCount
             )
         )
     }
@@ -920,52 +955,303 @@ class SupabaseMaxBirdRepository(
     override suspend fun getUserDevices(forceRefresh: Boolean): Result<List<UserDevice>> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
-            val remoteDevices = api.getDevices()
+            val remoteDevices = try {
+                api.getDevices()
+            } catch (_: Exception) {
+                api.getDevicesUnordered()
+            }
+            val sorted = remoteDevices.sortedWith(
+                compareByDescending<UserDevice> { it.requestedAt ?: it.updatedAt ?: it.lastSeen ?: "" }
+            )
             cachedUserDevices.clear()
-            cachedUserDevices.addAll(remoteDevices)
-            Result.success(remoteDevices)
+            cachedUserDevices.addAll(sorted)
+            Result.success(sorted)
         } catch (e: Exception) {
+            initSampleDataIfNeeded()
             Result.success(cachedUserDevices.toList())
         }
     }
 
-    override suspend fun toggleUserDeviceBan(deviceId: String, isBanned: Boolean, banReason: String?): Result<Unit> = withContext(Dispatchers.IO) {
-        val newStatus = if (isBanned) "banned" else "active"
-        val idx = cachedUserDevices.indexOfFirst { it.id == deviceId || it.deviceHash == deviceId }
+    private suspend fun patchPublicDeviceRecord(
+        device: UserDevice,
+        fullPayload: Map<String, Any?>,
+        minimalPayload: Map<String, Any?> = fullPayload
+    ): Boolean {
+        val api = supabaseClient.getApi()
+        var patched = false
+
+        suspend fun attemptPatch(payloadToUse: Map<String, Any?>): Boolean {
+            var ok = false
+            if (device.deviceHash.isNotBlank()) {
+                try {
+                    val res = api.patchDeviceByHash("eq.${device.deviceHash}", payloadToUse)
+                    if (res.isSuccessful) ok = true
+                } catch (_: Exception) {
+                }
+            }
+            if (!ok && device.id.isNotBlank()) {
+                try {
+                    val res = api.patchDevice("eq.${device.id}", payloadToUse)
+                    if (res.isSuccessful) ok = true
+                } catch (_: Exception) {
+                }
+            }
+            if (!ok && device.displayDeviceId.isNotBlank()) {
+                try {
+                    val res = api.patchDeviceByDisplayId("eq.${device.displayDeviceId}", payloadToUse)
+                    if (res.isSuccessful) ok = true
+                } catch (_: Exception) {
+                }
+            }
+            return ok
+        }
+
+        patched = attemptPatch(fullPayload)
+        if (!patched && minimalPayload != fullPayload) {
+            patched = attemptPatch(minimalPayload)
+        }
+        return patched
+    }
+
+    override suspend fun approveUserDeviceVerification(
+        device: UserDevice,
+        studentNote: String?
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val resolvedNote = studentNote?.trim() ?: device.studentNote
+
+        // Update local cache optimistically
+        val idx = cachedUserDevices.indexOfFirst {
+            (device.deviceHash.isNotBlank() && it.deviceHash == device.deviceHash) ||
+                (device.id.isNotBlank() && it.id == device.id) ||
+                (device.displayDeviceId.isNotBlank() && it.displayDeviceId == device.displayDeviceId)
+        }
         if (idx != -1) {
             val old = cachedUserDevices[idx]
             cachedUserDevices[idx] = old.copy(
-                isBanned = isBanned,
-                status = newStatus,
-                banReason = if (isBanned) (banReason ?: "অ্যাডমিন কর্তৃক ব্যান করা হয়েছে") else null
+                status = "active",
+                isBanned = false,
+                banReason = "",
+                studentNote = resolvedNote ?: old.studentNote,
+                approvedAt = nowIso,
+                updatedAt = nowIso
             )
         }
 
         try {
             val api = supabaseClient.getApi()
-            val payload = UpdateDeviceBanPayload(
-                isBanned = isBanned,
-                status = newStatus,
-                banReason = if (isBanned) (banReason ?: "অ্যাডমিন কর্তৃক ব্যান করা হয়েছে") else null
+            // 1. Call official RPC `admin_approve_device_verification(p_device_hash)`
+            if (device.deviceHash.isNotBlank()) {
+                try {
+                    api.approveDeviceVerificationRpc(
+                        mapOf("p_device_hash" to device.deviceHash)
+                    )
+                } catch (_: Exception) {
+                }
+            }
+
+            // 2. Also ensure `public.devices` row has `status = 'active', is_banned = false, ban_reason = '', approved_at = now()`
+            val fullMap = mutableMapOf<String, Any?>(
+                "status" to "active",
+                "is_banned" to false,
+                "ban_reason" to "",
+                "approved_at" to nowIso,
+                "updated_at" to nowIso
             )
-            api.updateDeviceBan("eq.$deviceId", payload)
+            val minimalMap = mutableMapOf<String, Any?>(
+                "status" to "active",
+                "is_banned" to false,
+                "ban_reason" to ""
+            )
+            if (studentNote != null) {
+                fullMap["student_note"] = studentNote.trim()
+                minimalMap["student_note"] = studentNote.trim()
+            }
+            patchPublicDeviceRecord(device, fullMap, minimalMap)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.success(Unit)
         }
     }
 
-    override suspend fun toggleDeviceCanViewProfiles(deviceId: String, canViewProfiles: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
-        val idx = cachedUserDevices.indexOfFirst { it.id == deviceId || it.deviceHash == deviceId }
+    override suspend fun setUserDeviceBlockStatus(
+        device: UserDevice,
+        isBlocked: Boolean,
+        banReason: String?
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val targetStatus = if (isBlocked) "blocked" else "active"
+        val cleanReason = if (isBlocked) {
+            banReason?.trim()?.ifBlank { "অ্যাডমিন কর্তৃক ব্লক করা হয়েছে" } ?: "অ্যাডমিন কর্তৃক ব্লক করা হয়েছে"
+        } else {
+            ""
+        }
+
+        val idx = cachedUserDevices.indexOfFirst {
+            (device.deviceHash.isNotBlank() && it.deviceHash == device.deviceHash) ||
+                (device.id.isNotBlank() && it.id == device.id) ||
+                (device.displayDeviceId.isNotBlank() && it.displayDeviceId == device.displayDeviceId)
+        }
         if (idx != -1) {
-            cachedUserDevices[idx] = cachedUserDevices[idx].copy(canViewProfiles = canViewProfiles)
+            val old = cachedUserDevices[idx]
+            cachedUserDevices[idx] = old.copy(
+                status = targetStatus,
+                isBanned = isBlocked,
+                banReason = cleanReason,
+                approvedAt = if (!isBlocked) nowIso else old.approvedAt,
+                updatedAt = nowIso
+            )
         }
 
         try {
             val api = supabaseClient.getApi()
-            api.patchDevice(
-                idQuery = "eq.$deviceId",
-                payload = mapOf("can_view_profiles" to canViewProfiles)
+            // 1. Call official RPC `admin_set_device_block_status(p_device_hash, p_is_banned, p_reason)`
+            if (device.deviceHash.isNotBlank()) {
+                try {
+                    val res = api.setDeviceBlockStatusRpc(
+                        mapOf(
+                            "p_device_hash" to device.deviceHash,
+                            "p_is_banned" to isBlocked,
+                            "p_reason" to cleanReason
+                        )
+                    )
+                    if (!res.isSuccessful) {
+                        api.setDeviceBlockStatusRpc(
+                            mapOf(
+                                "p_device_hash" to device.deviceHash,
+                                "p_is_blocked" to isBlocked,
+                                "p_reason" to cleanReason
+                            )
+                        )
+                    }
+                } catch (_: Exception) {
+                }
+
+                // If unblocking & approving, also call approve RPC so device becomes active immediately
+                if (!isBlocked) {
+                    try {
+                        api.approveDeviceVerificationRpc(
+                            mapOf("p_device_hash" to device.deviceHash)
+                        )
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+
+            // 2. Patch `public.devices` directly as well
+            val fullMap = mutableMapOf<String, Any?>(
+                "status" to targetStatus,
+                "is_banned" to isBlocked,
+                "ban_reason" to cleanReason,
+                "updated_at" to nowIso
+            )
+            if (!isBlocked) {
+                fullMap["approved_at"] = nowIso
+            }
+            val minimalMap = mapOf<String, Any?>(
+                "status" to targetStatus,
+                "is_banned" to isBlocked,
+                "ban_reason" to cleanReason
+            )
+            patchPublicDeviceRecord(device, fullMap, minimalMap)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun revokeUserDeviceToPending(device: UserDevice): Result<Unit> = withContext(Dispatchers.IO) {
+        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val idx = cachedUserDevices.indexOfFirst {
+            (device.deviceHash.isNotBlank() && it.deviceHash == device.deviceHash) ||
+                (device.id.isNotBlank() && it.id == device.id) ||
+                (device.displayDeviceId.isNotBlank() && it.displayDeviceId == device.displayDeviceId)
+        }
+        if (idx != -1) {
+            val old = cachedUserDevices[idx]
+            cachedUserDevices[idx] = old.copy(
+                status = "pending",
+                isBanned = false,
+                banReason = "",
+                updatedAt = nowIso
+            )
+        }
+
+        try {
+            val fullMap = mapOf<String, Any?>(
+                "status" to "pending",
+                "is_banned" to false,
+                "ban_reason" to "",
+                "updated_at" to nowIso
+            )
+            val minimalMap = mapOf<String, Any?>(
+                "status" to "pending",
+                "is_banned" to false,
+                "ban_reason" to ""
+            )
+            patchPublicDeviceRecord(device, fullMap, minimalMap)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun updateUserDeviceStudentNote(
+        device: UserDevice,
+        studentNote: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val trimmedNote = studentNote.trim()
+        val idx = cachedUserDevices.indexOfFirst {
+            (device.deviceHash.isNotBlank() && it.deviceHash == device.deviceHash) ||
+                (device.id.isNotBlank() && it.id == device.id) ||
+                (device.displayDeviceId.isNotBlank() && it.displayDeviceId == device.displayDeviceId)
+        }
+        if (idx != -1) {
+            cachedUserDevices[idx] = cachedUserDevices[idx].copy(
+                studentNote = trimmedNote,
+                updatedAt = nowIso
+            )
+        }
+
+        try {
+            val fullMap = mapOf<String, Any?>(
+                "student_note" to trimmedNote,
+                "updated_at" to nowIso
+            )
+            val minimalMap = mapOf<String, Any?>(
+                "student_note" to trimmedNote
+            )
+            patchPublicDeviceRecord(device, fullMap, minimalMap)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun toggleUserDeviceBan(deviceId: String, isBanned: Boolean, banReason: String?): Result<Unit> = withContext(Dispatchers.IO) {
+        val targetDevice = cachedUserDevices.firstOrNull {
+            it.id == deviceId || it.deviceHash == deviceId || it.displayDeviceId == deviceId
+        } ?: UserDevice(id = deviceId, deviceHash = deviceId)
+        setUserDeviceBlockStatus(targetDevice, isBlocked = isBanned, banReason = banReason)
+    }
+
+    override suspend fun toggleDeviceCanViewProfiles(deviceId: String, canViewProfiles: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+        val idx = cachedUserDevices.indexOfFirst {
+            it.id == deviceId || it.deviceHash == deviceId || it.displayDeviceId == deviceId
+        }
+        val targetDevice = if (idx != -1) {
+            val updated = cachedUserDevices[idx].copy(canViewProfiles = canViewProfiles)
+            cachedUserDevices[idx] = updated
+            updated
+        } else {
+            UserDevice(id = deviceId, deviceHash = deviceId, canViewProfiles = canViewProfiles)
+        }
+
+        try {
+            patchPublicDeviceRecord(
+                device = targetDevice,
+                fullPayload = mapOf("can_view_profiles" to canViewProfiles)
             )
             Result.success(Unit)
         } catch (e: Exception) {
@@ -974,11 +1260,37 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun deleteUserDevice(deviceId: String): Result<Unit> = withContext(Dispatchers.IO) {
-        cachedUserDevices.removeAll { it.id == deviceId || it.deviceHash == deviceId }
+        val target = cachedUserDevices.firstOrNull {
+            it.id == deviceId || it.deviceHash == deviceId || it.displayDeviceId == deviceId
+        }
+        cachedUserDevices.removeAll {
+            it.id == deviceId || it.deviceHash == deviceId || it.displayDeviceId == deviceId
+        }
 
         try {
             val api = supabaseClient.getApi()
-            api.deleteDeviceRecord("eq.$deviceId")
+            val hashToUse = target?.deviceHash?.takeIf { it.isNotBlank() }
+            val idToUse = target?.id?.takeIf { it.isNotBlank() }
+            var deleted = false
+            if (hashToUse != null) {
+                try {
+                    val res = api.deleteDeviceRecordByHash("eq.$hashToUse")
+                    if (res.isSuccessful) deleted = true
+                } catch (_: Exception) {
+                }
+            }
+            if (!deleted && idToUse != null) {
+                try {
+                    api.deleteDeviceRecord("eq.$idToUse")
+                } catch (_: Exception) {
+                }
+            } else if (!deleted) {
+                try {
+                    api.deleteDeviceRecordByHash("eq.$deviceId")
+                } catch (_: Exception) {
+                    api.deleteDeviceRecord("eq.$deviceId")
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.success(Unit)

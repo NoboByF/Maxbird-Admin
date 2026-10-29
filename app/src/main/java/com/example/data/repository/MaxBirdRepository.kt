@@ -83,11 +83,20 @@ interface MaxBirdRepository {
 
     suspend fun getUserDevices(forceRefresh: Boolean = false): Result<List<UserDevice>>
 
+    suspend fun approveUserDeviceVerification(device: UserDevice, studentNote: String? = null): Result<Unit>
+
+    suspend fun setUserDeviceBlockStatus(device: UserDevice, isBlocked: Boolean, banReason: String? = null): Result<Unit>
+
+    suspend fun revokeUserDeviceToPending(device: UserDevice): Result<Unit>
+
+    suspend fun updateUserDeviceStudentNote(device: UserDevice, studentNote: String): Result<Unit>
+
     suspend fun toggleUserDeviceBan(deviceId: String, isBanned: Boolean, banReason: String?): Result<Unit>
 
     suspend fun toggleDeviceCanViewProfiles(deviceId: String, canViewProfiles: Boolean): Result<Unit>
 
     suspend fun deleteUserDevice(deviceId: String): Result<Unit>
+
 
     // Course Sales, Installment Plans & Payment Verification
     suspend fun getCoursePaymentSettings(): Result<CoursePaymentSettings>

@@ -269,6 +269,21 @@ class MainActivity : ComponentActivity() {
                                     onSearchChange = { viewModel.setDeviceSearchQuery(it) },
                                     onFilterChange = { viewModel.setDeviceFilter(it) },
                                     onRefresh = { viewModel.loadUserDevices(forceRefresh = true) },
+                                    onApproveDevice = { device, note ->
+                                        viewModel.approveUserDeviceVerification(device, note)
+                                    },
+                                    onBlockDevice = { device, reason ->
+                                        viewModel.setUserDeviceBlockStatus(device, isBlocked = true, banReason = reason)
+                                    },
+                                    onUnblockAndApproveDevice = { device ->
+                                        viewModel.setUserDeviceBlockStatus(device, isBlocked = false, banReason = "")
+                                    },
+                                    onRevokeDeviceToPending = { device ->
+                                        viewModel.revokeUserDeviceToPending(device)
+                                    },
+                                    onUpdateStudentNote = { device, note ->
+                                        viewModel.updateUserDeviceStudentNote(device, note)
+                                    },
                                     onToggleBan = { device, reason -> viewModel.toggleUserDeviceBan(device, reason) },
                                     onToggleCanViewProfiles = { device -> viewModel.toggleDeviceCanViewProfiles(device) },
                                     onDeleteDevice = { device -> viewModel.deleteUserDevice(device) },

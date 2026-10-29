@@ -125,7 +125,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _deviceSearchQuery = MutableStateFlow("")
     val deviceSearchQuery: StateFlow<String> = _deviceSearchQuery.asStateFlow()
 
-    private val _deviceFilter = MutableStateFlow("ALL") // ALL, ACTIVE, BANNED
+    private val _deviceFilter = MutableStateFlow("PENDING") // PENDING, ACTIVE, BLOCKED
     val deviceFilter: StateFlow<String> = _deviceFilter.asStateFlow()
 
     private val _isLoadingDevices = MutableStateFlow(false)
@@ -313,6 +313,8 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         _currentScreen.value = screen
         if (screen == Screen.CourseSales || screen == Screen.Settings) {
             loadCourseSalesData()
+        } else if (screen == Screen.Devices) {
+            loadUserDevices(forceRefresh = true)
         }
     }
 
@@ -602,16 +604,63 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun toggleUserDeviceBan(device: UserDevice, banReason: String? = null) {
-        val willBan = !device.isBanned
+    fun approveUserDeviceVerification(device: UserDevice, studentNote: String? = null) {
         viewModelScope.launch {
             try {
-                val targetReason = if (willBan) (banReason ?: "অ্যাডমিন কর্তৃক ব্যান করা হয়েছে") else null
-                val result = repository.toggleUserDeviceBan(device.id, willBan, targetReason)
+                // Optimistic UI update
+                _userDevices.value = _userDevices.value.map { existing ->
+                    if (existing.effectiveKey == device.effectiveKey) {
+                        existing.copy(
+                            status = "active",
+                            isBanned = false,
+                            banReason = "",
+                            studentNote = studentNote?.trim() ?: existing.studentNote
+                        )
+                    } else {
+                        existing
+                    }
+                }
+                val result = repository.approveUserDeviceVerification(device, studentNote)
                 if (result.isSuccess) {
                     loadUserDevices(forceRefresh = true)
                     refreshStats()
-                    val msg = if (willBan) "🚫 ডিভাইস সফলভাবে ব্যান করা হয়েছে!" else "✅ ডিভাইস আন-ব্যান করা হয়েছে (সক্রিয়)!"
+                    showToast("✅ ডিভাইসটি ভেরিফাই ও অ্যাপ্রুভ (Active) করা হয়েছে!")
+                }
+            } catch (e: Throwable) {
+                showToast("অ্যাপ্রুভ করতে ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    fun setUserDeviceBlockStatus(device: UserDevice, isBlocked: Boolean, banReason: String? = null) {
+        viewModelScope.launch {
+            try {
+                val targetStatus = if (isBlocked) "blocked" else "active"
+                val cleanReason = if (isBlocked) {
+                    banReason?.trim()?.ifBlank { "অ্যাডমিন কর্তৃক ব্লক করা হয়েছে" } ?: "অ্যাডমিন কর্তৃক ব্লক করা হয়েছে"
+                } else {
+                    ""
+                }
+                _userDevices.value = _userDevices.value.map { existing ->
+                    if (existing.effectiveKey == device.effectiveKey) {
+                        existing.copy(
+                            status = targetStatus,
+                            isBanned = isBlocked,
+                            banReason = cleanReason
+                        )
+                    } else {
+                        existing
+                    }
+                }
+                val result = repository.setUserDeviceBlockStatus(device, isBlocked, cleanReason)
+                if (result.isSuccess) {
+                    loadUserDevices(forceRefresh = true)
+                    refreshStats()
+                    val msg = if (isBlocked) {
+                        "🚫 ডিভাইসটি সফলভাবে ব্লক করা হয়েছে!"
+                    } else {
+                        "🔓 ডিভাইসটি আনব্লক ও অ্যাপ্রুভ (Active) করা হয়েছে!"
+                    }
                     showToast(msg)
                 }
             } catch (e: Throwable) {
@@ -620,20 +669,71 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun revokeUserDeviceToPending(device: UserDevice) {
+        viewModelScope.launch {
+            try {
+                _userDevices.value = _userDevices.value.map { existing ->
+                    if (existing.effectiveKey == device.effectiveKey) {
+                        existing.copy(
+                            status = "pending",
+                            isBanned = false,
+                            banReason = ""
+                        )
+                    } else {
+                        existing
+                    }
+                }
+                val result = repository.revokeUserDeviceToPending(device)
+                if (result.isSuccess) {
+                    loadUserDevices(forceRefresh = true)
+                    refreshStats()
+                    showToast("⏳ ডিভাইসটি আবার পেন্ডিং (Pending) তালিকায় নেওয়া হয়েছে।")
+                }
+            } catch (e: Throwable) {
+                showToast("স্ট্যাটাস পরিবর্তন ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    fun updateUserDeviceStudentNote(device: UserDevice, studentNote: String) {
+        viewModelScope.launch {
+            try {
+                val trimmed = studentNote.trim()
+                _userDevices.value = _userDevices.value.map { existing ->
+                    if (existing.effectiveKey == device.effectiveKey) {
+                        existing.copy(studentNote = trimmed)
+                    } else {
+                        existing
+                    }
+                }
+                val result = repository.updateUserDeviceStudentNote(device, trimmed)
+                if (result.isSuccess) {
+                    loadUserDevices(forceRefresh = true)
+                    showToast("✅ শিক্ষার্থীর নাম/নোট সেভ করা হয়েছে!")
+                }
+            } catch (e: Throwable) {
+                showToast("নোট সেভ করতে ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    fun toggleUserDeviceBan(device: UserDevice, banReason: String? = null) {
+        val willBlock = !device.isBlockedDevice
+        setUserDeviceBlockStatus(device, isBlocked = willBlock, banReason = banReason)
+    }
+
     fun toggleDeviceCanViewProfiles(device: UserDevice) {
         val nextValue = !device.canViewProfiles
         viewModelScope.launch {
             try {
                 _userDevices.value = _userDevices.value.map { existing ->
-                    if ((device.id.isNotBlank() && existing.id == device.id) ||
-                        (device.deviceHash.isNotBlank() && existing.deviceHash == device.deviceHash)
-                    ) {
+                    if (existing.effectiveKey == device.effectiveKey) {
                         existing.copy(canViewProfiles = nextValue)
                     } else {
                         existing
                     }
                 }
-                val result = repository.toggleDeviceCanViewProfiles(device.id.ifBlank { device.deviceHash }, nextValue)
+                val result = repository.toggleDeviceCanViewProfiles(device.effectiveKey, nextValue)
                 if (result.isSuccess) {
                     loadUserDevices(forceRefresh = true)
                     val msg = if (nextValue) {
@@ -652,7 +752,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteUserDevice(device: UserDevice) {
         viewModelScope.launch {
             try {
-                val result = repository.deleteUserDevice(device.id)
+                val result = repository.deleteUserDevice(device.effectiveKey)
                 if (result.isSuccess) {
                     loadUserDevices(forceRefresh = true)
                     refreshStats()
