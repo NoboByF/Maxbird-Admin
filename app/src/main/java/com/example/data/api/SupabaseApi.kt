@@ -351,6 +351,16 @@ interface SupabaseApi {
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
 
+    @POST("rest/v1/rpc/admin_approve_course_access_with_trial")
+    suspend fun approveCourseAccessWithTrialRpcRaw(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/admin_manage_course_trial")
+    suspend fun manageCourseTrialRpcRaw(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
     @POST("rest/v1/rpc/admin_set_course_access_offer")
     suspend fun setCourseAccessOfferRpcRaw(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
@@ -376,4 +386,5 @@ interface SupabaseApi {
         @Body payload: Map<String, @JvmSuppressWildcards Any?> = emptyMap()
     ): Response<Unit>
 }
+
 

@@ -16,6 +16,7 @@ import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
 import com.example.data.model.DynamicPaymentMethodItem
+import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpdateCodeStatusPayload
@@ -35,6 +36,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 
 class SupabaseMaxBirdRepository(
@@ -1697,12 +1699,20 @@ class SupabaseMaxBirdRepository(
         return primaryResponse
     }
 
+    private fun formatUtcIso(epochMillis: Long): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        return sdf.format(Date(epochMillis))
+    }
+
     override suspend fun approveCourseAccessRequest(
         payload: ApproveCourseAccessRequestRpcPayload
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
-            val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+            val nowMillis = System.currentTimeMillis()
+            val nowIso = formatUtcIso(nowMillis)
             val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(payload.studentPhone)
             val cleanAccountKey = CourseAccessEnrollment.normalizeBdPhone(payload.shikhoAccountKey)
                 .ifBlank { cleanPhone }
@@ -1723,6 +1733,9 @@ class SupabaseMaxBirdRepository(
                     "completed_installments" to 1,
                     "next_installment_amount" to 0,
                     "installment_plans_json" to emptyList<Any>(),
+                    "trial_enabled" to false,
+                    "trial_days" to 0,
+                    "trial_hours" to 0,
                     "admin_note" to payload.adminNote,
                     "approved_at" to nowIso,
                     "unlocked_at" to nowIso,
@@ -1745,8 +1758,43 @@ class SupabaseMaxBirdRepository(
                 }
             }
 
+            val safeTrialDays = if (payload.trialEnabled) payload.trialDays.coerceAtLeast(0) else 0
+            val safeTrialHours = if (payload.trialEnabled) payload.trialHours.coerceAtLeast(0) else 0
+            val totalTrialDurationHours = (safeTrialDays * 24) + safeTrialHours
+            val shouldStartTrialNow = payload.trialEnabled && payload.startTrialImmediately && totalTrialDurationHours > 0
+            val trialEndsIso = if (shouldStartTrialNow) {
+                formatUtcIso(nowMillis + (totalTrialDurationHours * 3600_000L))
+            } else {
+                null
+            }
+
             var rpcSucceeded = false
-            if (payload.enrollmentId > 0L) {
+
+            // 1. Try `admin_approve_course_access_with_trial` RPC first
+            try {
+                val withTrialRpcMap = mutableMapOf<String, Any?>(
+                    "p_enrollment_id" to payload.enrollmentId,
+                    "p_student_phone" to cleanPhone,
+                    "p_shikho_account_key" to cleanAccountKey,
+                    "p_program_id" to cleanProgramId,
+                    "p_total_price" to payload.totalPrice,
+                    "p_installment_enabled" to payload.installmentEnabled,
+                    "p_allow_installments" to payload.installmentEnabled,
+                    "p_installment_plans_json" to payload.installmentPlansJson,
+                    "p_admin_note" to payload.adminNote,
+                    "p_trial_enabled" to payload.trialEnabled,
+                    "p_trial_days" to safeTrialDays,
+                    "p_trial_hours" to safeTrialHours,
+                    "p_start_trial_immediately" to shouldStartTrialNow
+                )
+                val trialRpcRes = api.approveCourseAccessWithTrialRpcRaw(withTrialRpcMap)
+                rpcSucceeded = trialRpcRes.isSuccessful
+            } catch (_: Exception) {
+                rpcSucceeded = false
+            }
+
+            // 2. Fallback to `admin_approve_course_access_request`
+            if (!rpcSucceeded && payload.enrollmentId > 0L) {
                 try {
                     val rpcRes = api.approveCourseAccessRequestRpc(payload)
                     rpcSucceeded = rpcRes.isSuccessful
@@ -1755,6 +1803,7 @@ class SupabaseMaxBirdRepository(
                 }
             }
 
+            // 3. Fallback to `admin_set_course_access_offer`
             if (!rpcSucceeded) {
                 try {
                     val offerRpcMap = mutableMapOf<String, Any?>(
@@ -1774,11 +1823,18 @@ class SupabaseMaxBirdRepository(
                 }
             }
 
+            // 4. Direct table patch on `public.course_access_enrollments` so all Free Trial columns & status are guaranteed 100% synced
             val firstPlan = payload.installmentPlansJson.firstOrNull()
             val resolvedPlanId = firstPlan?.planId?.takeIf { it.isNotBlank() } ?: "FULL"
             val resolvedPlanTitle = firstPlan?.effectiveTitle?.takeIf { it.isNotBlank() } ?: "এককালীন সম্পূর্ণ পেমেন্ট"
+            val targetStatus = when {
+                payload.instantFreeUnlock -> "ACTIVE"
+                shouldStartTrialNow -> "TRIAL_ACTIVE"
+                else -> "APPROVED_TO_BUY"
+            }
+
             val patchMap = mutableMapOf<String, Any?>(
-                "status" to if (payload.instantFreeUnlock) "ACTIVE" else "APPROVED_TO_BUY",
+                "status" to targetStatus,
                 "total_price" to payload.totalPrice,
                 "due_amount" to payload.totalPrice,
                 "installment_enabled" to payload.installmentEnabled,
@@ -1791,11 +1847,20 @@ class SupabaseMaxBirdRepository(
                 "installment_plans_json" to payload.installmentPlansJson,
                 "next_installment_amount" to (firstPlan?.effectiveAmountPerInstallment ?: payload.totalPrice),
                 "installment_interval_days" to (firstPlan?.intervalDays ?: 7),
+                "trial_enabled" to payload.trialEnabled,
+                "trial_days" to safeTrialDays,
+                "trial_hours" to safeTrialHours,
+                "trial_started_at" to if (shouldStartTrialNow) nowIso else null,
+                "trial_ends_at" to trialEndsIso,
+                "is_trial_used" to shouldStartTrialNow,
                 "admin_note" to payload.adminNote,
                 "rejection_reason" to "",
                 "approved_at" to nowIso,
                 "updated_at" to nowIso
             )
+            if (shouldStartTrialNow || payload.instantFreeUnlock) {
+                patchMap["unlocked_at"] = nowIso
+            }
             if (CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
                 patchMap["student_phone"] = cleanPhone
                 patchMap["user_phone"] = cleanPhone
@@ -1848,12 +1913,26 @@ class SupabaseMaxBirdRepository(
             }
 
             val api = supabaseClient.getApi()
-            val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+            val nowMillis = System.currentTimeMillis()
+            val nowIso = formatUtcIso(nowMillis)
 
             val safeTotalPrice = payload.totalPrice.coerceAtLeast(0)
             val safePaidAmount = payload.paidAmount.coerceIn(0, safeTotalPrice)
             val safeDueAmount = (safeTotalPrice - safePaidAmount).coerceAtLeast(0)
             val isUnlockedActive = payload.status.equals("ACTIVE", ignoreCase = true)
+            val isTrialActiveMode = payload.status.equals("TRIAL_ACTIVE", ignoreCase = true) ||
+                (payload.trialEnabled && payload.startTrialImmediately)
+
+            val safeTrialDays = if (payload.trialEnabled || isTrialActiveMode) payload.trialDays.coerceAtLeast(0) else 0
+            val safeTrialHours = if (payload.trialEnabled || isTrialActiveMode) payload.trialHours.coerceAtLeast(0) else 0
+            val totalTrialHours = ((safeTrialDays * 24) + safeTrialHours).let {
+                if (isTrialActiveMode && it <= 0) 24 else it
+            }
+            val trialEndsIso = if (isTrialActiveMode) {
+                formatUtcIso(nowMillis + (totalTrialHours * 3600_000L))
+            } else {
+                null
+            }
 
             val firstPlan = payload.installmentPlansJson.firstOrNull()
             val totalInstallments = firstPlan?.effectiveInstallmentsCount ?: 1
@@ -1869,7 +1948,7 @@ class SupabaseMaxBirdRepository(
             val nextDueDateIso = if (isUnlockedActive && safeDueAmount > 0) {
                 val cal = Calendar.getInstance()
                 cal.add(Calendar.DAY_OF_YEAR, intervalDays)
-                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
+                formatUtcIso(cal.timeInMillis)
             } else {
                 null
             }
@@ -1881,9 +1960,12 @@ class SupabaseMaxBirdRepository(
                 0
             }
 
-            // CRITICAL REQUIREMENT:
-            // Set `student_phone`, `user_phone`, `shikho_account_key`, `device_id`, `device_hash`, and `display_device_id`
-            // all to the 11-digit mobile number (`cleanPhone`)
+            val resolvedStatus = when {
+                isTrialActiveMode -> "TRIAL_ACTIVE"
+                isUnlockedActive -> "ACTIVE"
+                else -> "APPROVED_TO_BUY"
+            }
+
             val resolvedPlanId = firstPlan?.planId?.takeIf { it.isNotBlank() } ?: "FULL"
             val resolvedPlanTitle = firstPlan?.effectiveTitle?.takeIf { it.isNotBlank() } ?: "এককালীন সম্পূর্ণ পেমেন্ট"
             val recordMap = mutableMapOf<String, Any?>(
@@ -1896,7 +1978,7 @@ class SupabaseMaxBirdRepository(
                 "student_name" to payload.studentName.trim().ifBlank { "শিক্ষার্থী ($cleanPhone)" },
                 "program_id" to cleanProgramId,
                 "program_title" to payload.programTitle.trim().ifBlank { cleanProgramId },
-                "status" to if (isUnlockedActive) "ACTIVE" else "APPROVED_TO_BUY",
+                "status" to resolvedStatus,
                 "total_price" to safeTotalPrice,
                 "paid_amount" to safePaidAmount,
                 "due_amount" to safeDueAmount,
@@ -1912,13 +1994,19 @@ class SupabaseMaxBirdRepository(
                 "next_installment_amount" to nextInstallmentAmount,
                 "installment_interval_days" to intervalDays,
                 "next_due_date" to nextDueDateIso,
+                "trial_enabled" to (payload.trialEnabled || isTrialActiveMode),
+                "trial_days" to if (isTrialActiveMode && safeTrialDays == 0 && safeTrialHours == 0) 1 else safeTrialDays,
+                "trial_hours" to safeTrialHours,
+                "trial_started_at" to if (isTrialActiveMode) nowIso else null,
+                "trial_ends_at" to trialEndsIso,
+                "is_trial_used" to isTrialActiveMode,
                 "admin_note" to payload.adminNote.trim(),
                 "rejection_reason" to "",
                 "approved_at" to nowIso,
                 "updated_at" to nowIso
             )
 
-            if (isUnlockedActive) {
+            if (isUnlockedActive || isTrialActiveMode) {
                 recordMap["unlocked_at"] = nowIso
             }
 
@@ -1984,6 +2072,162 @@ class SupabaseMaxBirdRepository(
                     "কোর্স এক্সেস সেভ ব্যর্থ (HTTP ${createRes.code()})${if (errBody.isNotBlank()) ": $errBody" else ""}"
                 )
             )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun manageCourseTrial(
+        payload: ManageCourseTrialPayload
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val nowMillis = System.currentTimeMillis()
+            val nowIso = formatUtcIso(nowMillis)
+            val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(payload.studentPhone)
+            val cleanAccountKey = CourseAccessEnrollment.normalizeBdPhone(payload.shikhoAccountKey)
+                .ifBlank { cleanPhone }
+            val cleanProgramId = payload.programId?.trim().orEmpty()
+            val actionUpper = payload.action.trim().uppercase(Locale.US)
+
+            val safeDays = payload.days.coerceAtLeast(0)
+            val safeHours = payload.hours.coerceAtLeast(0)
+            val deltaHours = ((safeDays * 24) + safeHours)
+
+            // 1. Try calling `admin_manage_course_trial` RPC
+            var rpcSucceeded = false
+            try {
+                val rpcMap = mutableMapOf<String, Any?>(
+                    "p_enrollment_id" to payload.enrollmentId,
+                    "p_action" to actionUpper,
+                    "p_days" to safeDays,
+                    "p_hours" to safeHours,
+                    "p_total_hours" to deltaHours,
+                    "p_student_phone" to cleanPhone,
+                    "p_shikho_account_key" to cleanAccountKey,
+                    "p_program_id" to cleanProgramId
+                )
+                val rpcRes = api.manageCourseTrialRpcRaw(rpcMap)
+                rpcSucceeded = rpcRes.isSuccessful
+            } catch (_: Exception) {
+                rpcSucceeded = false
+            }
+
+            // 2. Build direct table update map for `public.course_access_enrollments`
+            val currentEndsMillis = CourseAccessEnrollment.parseIsoTimestampToMillis(payload.currentTrialEndsAt)
+            val patchMap = mutableMapOf<String, Any?>(
+                "updated_at" to nowIso
+            )
+
+            when (actionUpper) {
+                "ADD_HOURS" -> {
+                    val effectiveAddHours = deltaHours.coerceAtLeast(1)
+                    val baseMillis = if (currentEndsMillis != null && currentEndsMillis > nowMillis) {
+                        currentEndsMillis
+                    } else {
+                        nowMillis
+                    }
+                    val newEndsMillis = baseMillis + (effectiveAddHours * 3600_000L)
+                    val newEndsIso = formatUtcIso(newEndsMillis)
+                    val startedIso = payload.currentTrialStartedAt?.takeIf { it.isNotBlank() } ?: nowIso
+
+                    patchMap["status"] = "TRIAL_ACTIVE"
+                    patchMap["trial_enabled"] = true
+                    patchMap["is_trial_used"] = true
+                    patchMap["trial_started_at"] = startedIso
+                    patchMap["trial_ends_at"] = newEndsIso
+                    patchMap["trial_days"] = (payload.currentTrialDays.coerceAtLeast(0) + safeDays)
+                    patchMap["trial_hours"] = (payload.currentTrialHours.coerceAtLeast(0) + safeHours)
+                    patchMap["unlocked_at"] = nowIso
+                }
+
+                "REDUCE_HOURS" -> {
+                    val effectiveReduceHours = deltaHours.coerceAtLeast(1)
+                    val baseMillis = currentEndsMillis ?: nowMillis
+                    val newEndsMillis = baseMillis - (effectiveReduceHours * 3600_000L)
+                    val newEndsIso = formatUtcIso(newEndsMillis)
+                    val newStatus = if (newEndsMillis <= nowMillis) "TRIAL_EXPIRED" else "TRIAL_ACTIVE"
+
+                    patchMap["status"] = newStatus
+                    patchMap["trial_enabled"] = true
+                    patchMap["is_trial_used"] = true
+                    patchMap["trial_ends_at"] = newEndsIso
+                }
+
+                "SET_DURATION" -> {
+                    val effectiveTotalHours = deltaHours.coerceAtLeast(1)
+                    val newEndsMillis = nowMillis + (effectiveTotalHours * 3600_000L)
+                    val newEndsIso = formatUtcIso(newEndsMillis)
+
+                    patchMap["status"] = "TRIAL_ACTIVE"
+                    patchMap["trial_enabled"] = true
+                    patchMap["trial_days"] = safeDays
+                    patchMap["trial_hours"] = safeHours
+                    patchMap["trial_started_at"] = nowIso
+                    patchMap["trial_ends_at"] = newEndsIso
+                    patchMap["is_trial_used"] = true
+                    patchMap["unlocked_at"] = nowIso
+                }
+
+                "END_TRIAL_NOW" -> {
+                    val endedIso = formatUtcIso(nowMillis - 60_000L) // now() - interval '1 minute'
+                    patchMap["status"] = "APPROVED_TO_BUY"
+                    patchMap["trial_ends_at"] = endedIso
+                    patchMap["is_trial_used"] = true
+                }
+
+                "RESET_TRIAL" -> {
+                    val resetDays = if (safeDays > 0 || safeHours > 0) {
+                        safeDays
+                    } else if (payload.currentTrialDays > 0 || payload.currentTrialHours > 0) {
+                        payload.currentTrialDays
+                    } else {
+                        1
+                    }
+                    val resetHours = if (safeDays > 0 || safeHours > 0) {
+                        safeHours
+                    } else {
+                        payload.currentTrialHours.coerceAtLeast(0)
+                    }
+
+                    patchMap["status"] = "APPROVED_TO_BUY"
+                    patchMap["trial_enabled"] = true
+                    patchMap["is_trial_used"] = false
+                    patchMap["trial_started_at"] = null
+                    patchMap["trial_ends_at"] = null
+                    patchMap["trial_days"] = resetDays
+                    patchMap["trial_hours"] = resetHours
+                }
+            }
+
+            if (CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
+                patchMap["student_phone"] = cleanPhone
+                patchMap["user_phone"] = cleanPhone
+                patchMap["shikho_account_key"] = cleanAccountKey.ifBlank { cleanPhone }
+            }
+
+            val patchRes = patchEnrollmentByIdOrAccount(
+                enrollmentId = payload.enrollmentId,
+                studentPhone = cleanPhone,
+                shikhoAccountKey = cleanAccountKey,
+                programId = cleanProgramId,
+                patchMap = patchMap
+            )
+
+            if (rpcSucceeded || patchRes?.isSuccessful == true) {
+                Result.success(Unit)
+            } else {
+                val errBody = try {
+                    patchRes?.errorBody()?.string().orEmpty()
+                } catch (_: Exception) {
+                    ""
+                }
+                Result.failure(
+                    Exception(
+                        "ট্রায়াল আপডেট ব্যর্থ (HTTP ${patchRes?.code() ?: 400})${if (errBody.isNotBlank()) ": $errBody" else ""}"
+                    )
+                )
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }

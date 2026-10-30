@@ -636,7 +636,25 @@ data class CourseAccessEnrollment(
     val shikhoUserId: String? = null,
 
     @Json(name = "user_phone")
-    val userPhone: String? = null
+    val userPhone: String? = null,
+
+    @Json(name = "trial_enabled")
+    val trialEnabled: Boolean = false,
+
+    @Json(name = "trial_days")
+    val trialDays: Int = 0,
+
+    @Json(name = "trial_hours")
+    val trialHours: Int = 0,
+
+    @Json(name = "trial_started_at")
+    val trialStartedAt: String? = null,
+
+    @Json(name = "trial_ends_at")
+    val trialEndsAt: String? = null,
+
+    @Json(name = "is_trial_used")
+    val isTrialUsed: Boolean = false
 ) {
     fun parsedInstallmentPlans(): List<InstallmentPlanItem> = installmentPlansJson.orEmpty()
 
@@ -677,6 +695,76 @@ data class CourseAccessEnrollment(
     val effectiveInstallmentsEnabled: Boolean
         get() = installmentEnabled && (allowInstallments ?: true)
 
+    val isAccessRequestedStatus: Boolean
+        get() = status.equals("ACCESS_REQUESTED", ignoreCase = true) ||
+            status.equals("REQUESTED", ignoreCase = true)
+
+    val isOverdueStatus: Boolean
+        get() = status.equals("INSTALLMENT_OVERDUE", ignoreCase = true) ||
+            status.equals("OVERDUE", ignoreCase = true)
+
+    val isTrialActiveStatus: Boolean
+        get() = status.equals("TRIAL_ACTIVE", ignoreCase = true)
+
+    val isTrialExpiredStatus: Boolean
+        get() = status.equals("TRIAL_EXPIRED", ignoreCase = true)
+
+    fun parseTrialEndsAtMillis(): Long? = parseIsoTimestampToMillis(trialEndsAt)
+
+    fun parseTrialStartedAtMillis(): Long? = parseIsoTimestampToMillis(trialStartedAt)
+
+    fun remainingTrialMillis(nowMillis: Long = System.currentTimeMillis()): Long {
+        val endMillis = parseTrialEndsAtMillis() ?: return 0L
+        return endMillis - nowMillis
+    }
+
+    fun isTrialCurrentlyRunning(nowMillis: Long = System.currentTimeMillis()): Boolean {
+        if (!isTrialActiveStatus) return false
+        val endMillis = parseTrialEndsAtMillis() ?: return true
+        return endMillis > nowMillis
+    }
+
+    fun formatConfiguredTrialDurationBn(): String {
+        val d = trialDays.coerceAtLeast(0)
+        val h = trialHours.coerceAtLeast(0)
+        return when {
+            d > 0 && h > 0 -> "${d} দিন ${h} ঘণ্টা"
+            d > 0 -> "${d} দিন"
+            h > 0 -> "${h} ঘণ্টা"
+            else -> "নির্ধারিত নেই"
+        }
+    }
+
+    fun formatTrialCountdownBn(nowMillis: Long = System.currentTimeMillis()): String {
+        val endMillis = parseTrialEndsAtMillis()
+        if (endMillis != null) {
+            val diff = endMillis - nowMillis
+            if (diff > 0L) {
+                val totalSeconds = diff / 1000L
+                val days = totalSeconds / 86400L
+                val hours = (totalSeconds % 86400L) / 3600L
+                val minutes = (totalSeconds % 3600L) / 60L
+                val seconds = totalSeconds % 60L
+                return buildString {
+                    append("⏳ বাকি: ")
+                    if (days > 0) append("${days} দিন ")
+                    if (hours > 0 || days > 0) append("${hours} ঘণ্টা ")
+                    append("${minutes} মিনিট ")
+                    if (days == 0L) append("${seconds} সেকেন্ড")
+                }.trim()
+            } else {
+                return "⌛ ট্রায়ালের মেয়াদ শেষ (Expired)"
+            }
+        }
+        return when {
+            isTrialActiveStatus -> "⏳ ট্রায়াল চলমান (${formatConfiguredTrialDurationBn()})"
+            isTrialExpiredStatus -> "⌛ ট্রায়ালের মেয়াদ শেষ (Expired)"
+            trialEnabled && !isTrialUsed -> "🎁 ট্রায়াল অনুমোদিত: ${formatConfiguredTrialDurationBn()} (এখনো শুরু করেনি)"
+            trialEnabled && isTrialUsed -> "⌛ ট্রায়াল ব্যবহৃত হয়েছে (${formatConfiguredTrialDurationBn()})"
+            else -> "ফ্রি ট্রায়াল চালু নেই"
+        }
+    }
+
     companion object {
         fun normalizeBdPhone(raw: String?): String {
             val digits = raw?.filter { it.isDigit() }.orEmpty()
@@ -690,6 +778,37 @@ data class CourseAccessEnrollment(
         fun isValidBdPhone(raw: String?): Boolean {
             val normalized = normalizeBdPhone(raw)
             return normalized.matches(Regex("^01[3-9]\\d{8}$"))
+        }
+
+        fun parseIsoTimestampToMillis(rawIso: String?): Long? {
+            if (rawIso.isNullOrBlank()) return null
+            return try {
+                val clean = rawIso.trim()
+                    .replace(" ", "T")
+                    .let { s ->
+                        val dotIdx = s.indexOf('.')
+                        if (dotIdx != -1) {
+                            val prefix = s.substring(0, dotIdx)
+                            val rest = s.substring(dotIdx + 1)
+                            val tzIdx = rest.indexOfFirst { it == 'Z' || it == '+' || it == '-' }
+                            if (tzIdx != -1) prefix + rest.substring(tzIdx) else prefix + "Z"
+                        } else {
+                            s
+                        }
+                    }
+                    .let { s ->
+                        if (s.endsWith("+00:00")) s.removeSuffix("+00:00") + "Z"
+                        else if (s.endsWith("+00")) s.removeSuffix("+00") + "Z"
+                        else if (!s.endsWith("Z") && !s.contains("+")) "${s}Z"
+                        else s
+                    }
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }
+                sdf.parse(clean.take(19) + "Z")?.time
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 }
@@ -815,7 +934,7 @@ data class CoursePaymentTransaction(
 
 /**
  * RPC Payload for `POST /rest/v1/rpc/admin_approve_course_access_request`
- * Matches `admin_approve_course_access_request(p_enrollment_id, p_total_price, p_installment_enabled, p_installment_plans_json, p_admin_note)`
+ * and `POST /rest/v1/rpc/admin_approve_course_access_with_trial`
  */
 @JsonClass(generateAdapter = true)
 data class ApproveCourseAccessRequestRpcPayload(
@@ -835,6 +954,18 @@ data class ApproveCourseAccessRequestRpcPayload(
     val adminNote: String,
 
     @Transient
+    val trialEnabled: Boolean = false,
+
+    @Transient
+    val trialDays: Int = 0,
+
+    @Transient
+    val trialHours: Int = 0,
+
+    @Transient
+    val startTrialImmediately: Boolean = false,
+
+    @Transient
     val instantFreeUnlock: Boolean = false,
 
     @Transient
@@ -848,7 +979,7 @@ data class ApproveCourseAccessRequestRpcPayload(
 )
 
 /**
- * Payload for manually granting course access or configuring an installment plan
+ * Payload for manually granting course access, configuring an installment plan, or enabling Free Trial
  * for a student using their 11-digit mobile number (`01XXXXXXXXX`).
  * Saves the mobile number into `student_phone`, `shikho_account_key`, and `device_id`.
  */
@@ -859,14 +990,46 @@ data class ManualCourseAccessPayload(
     val programTitle: String,
     val classCode: String = "",
     val groupCode: String = "",
-    val status: String = "ACTIVE", // "ACTIVE" or "APPROVED_TO_BUY"
+    val status: String = "ACTIVE", // "ACTIVE", "APPROVED_TO_BUY", or "TRIAL_ACTIVE"
     val totalPrice: Int = 0,
     val paidAmount: Int = 0,
     val installmentEnabled: Boolean = true,
     val installmentPlansJson: List<InstallmentPlanItem> = emptyList(),
     val nextDueDays: Int? = null,
-    val adminNote: String = ""
+    val adminNote: String = "",
+    val trialEnabled: Boolean = false,
+    val trialDays: Int = 0,
+    val trialHours: Int = 0,
+    val startTrialImmediately: Boolean = false
 )
+
+/**
+ * Payload for managing Free Trial duration & status via `admin_manage_course_trial` RPC
+ * and direct `public.course_access_enrollments` table update.
+ *
+ * Supported `action` (`p_action`) values:
+ * - "ADD_HOURS": Extend trial by (days * 24 + hours) hours; sets status = 'TRIAL_ACTIVE' even if expired.
+ * - "REDUCE_HOURS": Reduce active trial by (days * 24 + hours) hours.
+ * - "SET_DURATION": Set new custom trial duration (days, hours) starting from now and set status = 'TRIAL_ACTIVE'.
+ * - "END_TRIAL_NOW": Immediately end trial (trial_ends_at = now() - 1 minute, status = 'APPROVED_TO_BUY').
+ * - "RESET_TRIAL": Reset trial (is_trial_used = false, trial_enabled = true, trial_started_at = null, trial_ends_at = null, status = 'APPROVED_TO_BUY').
+ */
+data class ManageCourseTrialPayload(
+    val enrollmentId: Long,
+    val studentPhone: String? = null,
+    val shikhoAccountKey: String? = null,
+    val programId: String? = null,
+    val action: String,
+    val days: Int = 0,
+    val hours: Int = 0,
+    val currentTrialStartedAt: String? = null,
+    val currentTrialEndsAt: String? = null,
+    val currentTrialDays: Int = 0,
+    val currentTrialHours: Int = 0
+) {
+    val totalDeltaHours: Int
+        get() = (days.coerceAtLeast(0) * 24) + hours.coerceAtLeast(0)
+}
 
 /**
  * RPC Payload for `POST /rest/v1/rpc/admin_review_course_payment`
@@ -898,4 +1061,5 @@ data class ReviewCoursePaymentRpcPayload(
     @Transient
     val programId: String? = null
 )
+
 

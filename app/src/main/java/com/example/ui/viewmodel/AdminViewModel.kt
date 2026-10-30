@@ -21,6 +21,7 @@ import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
@@ -1369,10 +1370,19 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 val result = repository.approveCourseAccessRequest(payload)
                 if (result.isSuccess) {
                     loadCourseSalesData()
-                    val msg = if (payload.instantFreeUnlock) {
-                        "✅ কোর্সটি সফলভাবে ফ্রি আনলক (ACTIVE) করে দেওয়া হয়েছে!"
-                    } else {
-                        "✅ কোর্সের দাম (৳${payload.totalPrice}) ও কিস্তি প্ল্যান সেট করে অনুমোদন দেওয়া হয়েছে!"
+                    val msg = when {
+                        payload.instantFreeUnlock -> {
+                            "✅ কোর্সটি সফলভাবে ফ্রি আনলক (ACTIVE) করে দেওয়া হয়েছে!"
+                        }
+                        payload.trialEnabled && payload.startTrialImmediately -> {
+                            "🎁 ফ্রি ট্রায়াল (${payload.trialDays} দিন ${payload.trialHours} ঘণ্টা) সাথে সাথে চালু (TRIAL_ACTIVE) করে অনুমোদন দেওয়া হয়েছে!"
+                        }
+                        payload.trialEnabled -> {
+                            "🎁 ফ্রি ট্রায়াল (${payload.trialDays} দিন ${payload.trialHours} ঘণ্টা) সুবিধা ও কোর্সের দাম (৳${payload.totalPrice}) সেট করে অনুমোদন দেওয়া হয়েছে!"
+                        }
+                        else -> {
+                            "✅ কোর্সের দাম (৳${payload.totalPrice}) ও কিস্তি প্ল্যান সেট করে অনুমোদন দেওয়া হয়েছে!"
+                        }
                     }
                     showToast(msg)
                     onSuccess()
@@ -1398,15 +1408,53 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 if (result.isSuccess) {
                     loadCourseSalesData()
                     val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(payload.studentPhone)
-                    val msg = if (payload.status.equals("ACTIVE", ignoreCase = true)) {
-                        "✅ $cleanPhone নম্বরে কোর্সটি সফলভাবে আনলক (ACTIVE) করা হয়েছে!"
-                    } else {
-                        "✅ $cleanPhone নম্বরে কোর্সের দাম ও কিস্তি প্ল্যান সেট করা হয়েছে!"
+                    val msg = when {
+                        payload.status.equals("TRIAL_ACTIVE", ignoreCase = true) ||
+                            (payload.trialEnabled && payload.startTrialImmediately) -> {
+                            "🎁 $cleanPhone নম্বরে ফ্রি ট্রায়াল (TRIAL_ACTIVE) সরাসরি চালু করা হয়েছে!"
+                        }
+                        payload.status.equals("ACTIVE", ignoreCase = true) -> {
+                            "✅ $cleanPhone নম্বরে কোর্সটি সফলভাবে আনলক (ACTIVE) করা হয়েছে!"
+                        }
+                        else -> {
+                            "✅ $cleanPhone নম্বরে কোর্সের দাম ও কিস্তি প্ল্যান সেট করা হয়েছে!"
+                        }
                     }
                     showToast(msg)
                     onSuccess()
                 } else {
                     showToast("⚠️ ${result.exceptionOrNull()?.message ?: "কোর্স অ্যাসাইন ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isProcessingCourseSalesAction.value = false
+            }
+        }
+    }
+
+    fun manageCourseTrial(
+        payload: ManageCourseTrialPayload,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                _isProcessingCourseSalesAction.value = true
+                val result = repository.manageCourseTrial(payload)
+                if (result.isSuccess) {
+                    loadCourseSalesData()
+                    val msg = when (payload.action.uppercase()) {
+                        "ADD_HOURS" -> "➕ ফ্রি ট্রায়ালের মেয়াদ বাড়ানো হয়েছে এবং কোর্স আনলক (TRIAL_ACTIVE) করা হয়েছে!"
+                        "REDUCE_HOURS" -> "➖ ফ্রি ট্রায়ালের মেয়াদ কমানো হয়েছে!"
+                        "SET_DURATION" -> "⏱️ ফ্রি ট্রায়ালের নতুন মেয়াদ (${payload.days} দিন ${payload.hours} ঘণ্টা) সেট করে চালু করা হয়েছে!"
+                        "END_TRIAL_NOW" -> "🛑 ফ্রি ট্রায়াল এখনই শেষ করা হয়েছে এবং কেনার অপশন (APPROVED_TO_BUY) চালু হয়েছে!"
+                        "RESET_TRIAL" -> "🔄 ফ্রি ট্রায়াল রিসেট করা হয়েছে! স্টুডেন্ট আবার প্রথম থেকে ট্রায়াল নিতে পারবে।"
+                        else -> "✅ ফ্রি ট্রায়াল আপডেট সম্পন্ন হয়েছে!"
+                    }
+                    showToast(msg)
+                    onSuccess()
+                } else {
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "ট্রায়াল আপডেট ব্যর্থ হয়েছে"}")
                 }
             } catch (e: Throwable) {
                 showToast("ত্রুটি: ${e.message}")

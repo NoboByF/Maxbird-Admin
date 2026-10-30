@@ -67,6 +67,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -74,8 +76,10 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -103,6 +107,7 @@ import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.DynamicPaymentMethodItem
 import com.example.data.model.InstallmentPlanItem
+import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
@@ -121,6 +126,7 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -137,6 +143,7 @@ fun CourseSalesManagementScreen(
     onRefreshAll: () -> Unit,
     onApproveAccessRequest: (ApproveCourseAccessRequestRpcPayload, onSuccess: () -> Unit) -> Unit,
     onGrantManualCourseAccess: (ManualCourseAccessPayload, onSuccess: () -> Unit) -> Unit = { _, _ -> },
+    onManageCourseTrial: (ManageCourseTrialPayload, onSuccess: () -> Unit) -> Unit = { _, _ -> },
     onReviewPayment: (ReviewCoursePaymentRpcPayload, onSuccess: () -> Unit) -> Unit,
     onEnforceOverdueInstallments: () -> Unit,
     onExtendDueDate: (CourseAccessEnrollment, Int) -> Unit,
@@ -148,10 +155,19 @@ fun CourseSalesManagementScreen(
 ) {
     val clipboardManager = LocalClipboardManager.current
 
+    // Live ticking clock for Free Trial countdowns
+    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000L)
+            nowMillis = System.currentTimeMillis()
+        }
+    }
+
     // 4 Primary Sub-tabs:
-    // 0 -> এক্সেস রিকোয়েস্ট (REQUESTED)
+    // 0 -> এক্সেস রিকোয়েস্ট (REQUESTED / ACCESS_REQUESTED / TRIAL_ACTIVE)
     // 1 -> পেমেন্ট ভেরিফিকেশন (PENDING Transactions)
-    // 2 -> চলমান কিস্তি ও বকেয়া (ACTIVE & OVERDUE)
+    // 2 -> চলমান কিস্তি ও বকেয়া (ACTIVE, TRIAL_ACTIVE, OVERDUE)
     // 3 -> পেমেন্ট মেথড ও নম্বর সেটিংস (course_payment_settings)
     var selectedTab by remember(initialSubTab) { mutableIntStateOf(initialSubTab.coerceIn(0, 3)) }
     var searchQuery by remember { mutableStateOf("") }
@@ -163,9 +179,9 @@ fun CourseSalesManagementScreen(
     }
 
     // Sub-filters per tab
-    var requestTabFilter by remember { mutableStateOf("REQUESTED") } // REQUESTED, APPROVED_TO_BUY, ALL
+    var requestTabFilter by remember { mutableStateOf("REQUESTED") } // REQUESTED, TRIAL_ACTIVE, TRIAL_EXPIRED, APPROVED_TO_BUY, ALL
     var paymentTabFilter by remember { mutableStateOf("PENDING") } // PENDING, APPROVED, REJECTED, ALL
-    var installmentTabFilter by remember { mutableStateOf("DUE_AND_OVERDUE") } // DUE_AND_OVERDUE, OVERDUE, ACTIVE_DUE, ALL_ACTIVE, REVOKED
+    var installmentTabFilter by remember { mutableStateOf("DUE_AND_OVERDUE") } // DUE_AND_OVERDUE, TRIAL_ACTIVE, TRIAL_EXPIRED, OVERDUE, ACTIVE_DUE, ALL_ACTIVE, REVOKED
 
     // Dialog states
     var enrollmentForPricingDialog by remember { mutableStateOf<CourseAccessEnrollment?>(null) }
@@ -173,21 +189,23 @@ fun CourseSalesManagementScreen(
     var transactionForApproveDialog by remember { mutableStateOf<CoursePaymentTransaction?>(null) }
     var transactionForRejectDialog by remember { mutableStateOf<CoursePaymentTransaction?>(null) }
     var enrollmentForCustomDaysDialog by remember { mutableStateOf<CourseAccessEnrollment?>(null) }
+    var trialActionDialogTarget by remember { mutableStateOf<Pair<CourseAccessEnrollment, String>?>(null) }
 
     // Counts for badges
     val requestedCount = remember(enrollments) {
-        enrollments.count { it.status.equals("REQUESTED", ignoreCase = true) }
+        enrollments.count { it.isAccessRequestedStatus }
     }
     val pendingPaymentsCount = remember(transactions) {
         transactions.count { it.status.equals("PENDING", ignoreCase = true) }
     }
     val overdueCount = remember(enrollments) {
-        enrollments.count { it.status.equals("OVERDUE", ignoreCase = true) }
+        enrollments.count { it.isOverdueStatus }
     }
     val activeDueCount = remember(enrollments) {
         enrollments.count {
             (it.status.equals("ACTIVE", ignoreCase = true) && it.dueAmount > 0) ||
-                it.status.equals("OVERDUE", ignoreCase = true)
+                it.isOverdueStatus ||
+                it.isTrialActiveStatus
         }
     }
     val effectivePaymentMethods = remember(paymentSettings) {
@@ -195,6 +213,35 @@ fun CourseSalesManagementScreen(
     }
     val enabledPaymentMethodsCount = remember(effectivePaymentMethods) {
         effectivePaymentMethods.count { it.isEnabled }
+    }
+
+    // Trial Duration Management Dialog (ADD_HOURS, REDUCE_HOURS, SET_DURATION)
+    trialActionDialogTarget?.let { (targetEnrollment, actionType) ->
+        TrialDurationManageDialog(
+            enrollment = targetEnrollment,
+            action = actionType,
+            isProcessing = isProcessingAction,
+            onDismiss = { trialActionDialogTarget = null },
+            onConfirm = { days, hours ->
+                onManageCourseTrial(
+                    ManageCourseTrialPayload(
+                        enrollmentId = targetEnrollment.id,
+                        studentPhone = targetEnrollment.effectivePhone,
+                        shikhoAccountKey = targetEnrollment.effectiveAccountKey.ifBlank { targetEnrollment.effectivePhone },
+                        programId = targetEnrollment.programId,
+                        action = actionType,
+                        days = days,
+                        hours = hours,
+                        currentTrialStartedAt = targetEnrollment.trialStartedAt,
+                        currentTrialEndsAt = targetEnrollment.trialEndsAt,
+                        currentTrialDays = targetEnrollment.trialDays,
+                        currentTrialHours = targetEnrollment.trialHours
+                    )
+                ) {
+                    trialActionDialogTarget = null
+                }
+            }
+        )
     }
 
     // Manual Course Access / Installment Assignment Dialog (by 11-digit Student Phone)
@@ -586,9 +633,17 @@ fun CourseSalesManagementScreen(
                     enrollments = enrollments,
                     searchQuery = searchQuery,
                     selectedFilter = requestTabFilter,
+                    nowMillis = nowMillis,
+                    isProcessing = isProcessingAction,
                     onFilterChange = { requestTabFilter = it },
                     onOpenApproveDialog = { enrollmentForPricingDialog = it },
                     onOpenManualAccessDialog = { isManualCourseAccessDialogOpen = true },
+                    onOpenTrialActionDialog = { enrollment, action ->
+                        trialActionDialogTarget = enrollment to action
+                    },
+                    onQuickTrialAction = { payload ->
+                        onManageCourseTrial(payload) {}
+                    },
                     onCopyText = { label, text ->
                         clipboardManager.setText(AnnotatedString(text))
                         onShowToast("$label কপি করা হয়েছে!")
@@ -616,6 +671,7 @@ fun CourseSalesManagementScreen(
                     enrollments = enrollments,
                     searchQuery = searchQuery,
                     selectedFilter = installmentTabFilter,
+                    nowMillis = nowMillis,
                     isProcessing = isProcessingAction,
                     onFilterChange = { installmentTabFilter = it },
                     onEnforceOverdue = onEnforceOverdueInstallments,
@@ -626,6 +682,12 @@ fun CourseSalesManagementScreen(
                     },
                     onOpenEditPlans = { enrollmentForPricingDialog = it },
                     onOpenManualAccessDialog = { isManualCourseAccessDialogOpen = true },
+                    onOpenTrialActionDialog = { enrollment, action ->
+                        trialActionDialogTarget = enrollment to action
+                    },
+                    onQuickTrialAction = { payload ->
+                        onManageCourseTrial(payload) {}
+                    },
                     onCopyText = { label, text ->
                         clipboardManager.setText(AnnotatedString(text))
                         onShowToast("$label কপি করা হয়েছে!")
@@ -657,17 +719,23 @@ private fun AccessRequestsSubTab(
     enrollments: List<CourseAccessEnrollment>,
     searchQuery: String,
     selectedFilter: String,
+    nowMillis: Long,
+    isProcessing: Boolean,
     onFilterChange: (String) -> Unit,
     onOpenApproveDialog: (CourseAccessEnrollment) -> Unit,
     onOpenManualAccessDialog: () -> Unit,
+    onOpenTrialActionDialog: (CourseAccessEnrollment, String) -> Unit,
+    onQuickTrialAction: (ManageCourseTrialPayload) -> Unit,
     onCopyText: (String, String) -> Unit
 ) {
     val filteredList = remember(enrollments, searchQuery, selectedFilter) {
         enrollments.filter { item ->
             val statusMatch = when (selectedFilter) {
-                "REQUESTED" -> item.status.equals("REQUESTED", ignoreCase = true)
+                "REQUESTED" -> item.isAccessRequestedStatus
                 "APPROVED_TO_BUY" -> item.status.equals("APPROVED_TO_BUY", ignoreCase = true) ||
                     item.status.equals("PAYMENT_REJECTED", ignoreCase = true)
+                "TRIAL_ACTIVE" -> item.isTrialActiveStatus
+                "TRIAL_EXPIRED" -> item.isTrialExpiredStatus
                 else -> true
             }
             val query = searchQuery.trim().lowercase()
@@ -707,7 +775,7 @@ private fun AccessRequestsSubTab(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "মোবাইল নম্বর দিয়ে সরাসরি কোর্স বা কিস্তি দিন",
+                            text = "মোবাইল নম্বর দিয়ে সরাসরি কোর্স, ফ্রি ট্রায়াল বা কিস্তি দিন",
                             style = MaterialTheme.typography.titleSmall.copy(
                                 color = Color.White,
                                 fontWeight = FontWeight.ExtraBold
@@ -759,7 +827,7 @@ private fun AccessRequestsSubTab(
                     onClick = { onFilterChange("REQUESTED") },
                     label = {
                         Text(
-                            "নতুন রিকোয়েস্ট (${enrollments.count { it.status.equals("REQUESTED", true) }})",
+                            "নতুন রিকোয়েস্ট (${enrollments.count { it.isAccessRequestedStatus }})",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -767,6 +835,40 @@ private fun AccessRequestsSubTab(
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = ElectricBlue.copy(alpha = 0.25f),
                         selectedLabelColor = NeonCyan,
+                        containerColor = Slate800,
+                        labelColor = Slate400
+                    )
+                )
+                FilterChip(
+                    selected = selectedFilter == "TRIAL_ACTIVE",
+                    onClick = { onFilterChange("TRIAL_ACTIVE") },
+                    label = {
+                        Text(
+                            "🎁 চলমান ট্রায়াল (${enrollments.count { it.isTrialActiveStatus }})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = NeonCyan.copy(alpha = 0.25f),
+                        selectedLabelColor = NeonCyan,
+                        containerColor = Slate800,
+                        labelColor = Slate400
+                    )
+                )
+                FilterChip(
+                    selected = selectedFilter == "TRIAL_EXPIRED",
+                    onClick = { onFilterChange("TRIAL_EXPIRED") },
+                    label = {
+                        Text(
+                            "⏰ ট্রায়াল শেষ (${enrollments.count { it.isTrialExpiredStatus }})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = CoralDanger.copy(alpha = 0.25f),
+                        selectedLabelColor = CoralDanger,
                         containerColor = Slate800,
                         labelColor = Slate400
                     )
@@ -820,7 +922,11 @@ private fun AccessRequestsSubTab(
             items(filteredList, key = { it.id }) { enrollment ->
                 EnrollmentRequestCard(
                     enrollment = enrollment,
+                    nowMillis = nowMillis,
+                    isProcessing = isProcessing,
                     onConfigureClick = { onOpenApproveDialog(enrollment) },
+                    onOpenTrialActionDialog = { action -> onOpenTrialActionDialog(enrollment, action) },
+                    onQuickTrialAction = onQuickTrialAction,
                     onCopyText = onCopyText
                 )
             }
@@ -833,7 +939,11 @@ private fun AccessRequestsSubTab(
 @Composable
 private fun EnrollmentRequestCard(
     enrollment: CourseAccessEnrollment,
+    nowMillis: Long,
+    isProcessing: Boolean,
     onConfigureClick: () -> Unit,
+    onOpenTrialActionDialog: (String) -> Unit,
+    onQuickTrialAction: (ManageCourseTrialPayload) -> Unit,
     onCopyText: (String, String) -> Unit
 ) {
     val statusColor = statusBadgeColor(enrollment.status)
@@ -977,7 +1087,7 @@ private fun EnrollmentRequestCard(
             }
 
             // Show already configured price & plans if approved to buy
-            if (enrollment.totalPrice > 0 || plans.isNotEmpty()) {
+            if (enrollment.totalPrice > 0 || plans.isNotEmpty() || enrollment.trialEnabled) {
                 Surface(
                     color = Slate900,
                     shape = RoundedCornerShape(10.dp),
@@ -1017,6 +1127,15 @@ private fun EnrollmentRequestCard(
                 }
             }
 
+            // Free Trial Duration Control Panel (Always visible on student Course Enrollment Card)
+            EnrollmentTrialControlPanel(
+                enrollment = enrollment,
+                nowMillis = nowMillis,
+                isProcessing = isProcessing,
+                onOpenTrialActionDialog = onOpenTrialActionDialog,
+                onQuickTrialAction = onQuickTrialAction
+            )
+
             // Timestamp + Primary Action Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1034,7 +1153,7 @@ private fun EnrollmentRequestCard(
                 Button(
                     onClick = onConfigureClick,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (enrollment.status.equals("REQUESTED", true)) ElectricBlue else Slate700
+                        containerColor = if (enrollment.isAccessRequestedStatus) ElectricBlue else Slate700
                     ),
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
@@ -1047,10 +1166,10 @@ private fun EnrollmentRequestCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (enrollment.status.equals("REQUESTED", true)) {
-                            "দাম ও কিস্তি সেট করে অনুমোদন দিন"
+                        text = if (enrollment.isAccessRequestedStatus) {
+                            "দাম, কিস্তি ও ট্রায়াল সেট করে অনুমোদন দিন"
                         } else {
-                            "দাম ও কিস্তি পরিবর্তন করুন"
+                            "দাম, কিস্তি ও ট্রায়াল পরিবর্তন করুন"
                         },
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
@@ -1465,6 +1584,7 @@ private fun ActiveInstallmentsSubTab(
     enrollments: List<CourseAccessEnrollment>,
     searchQuery: String,
     selectedFilter: String,
+    nowMillis: Long,
     isProcessing: Boolean,
     onFilterChange: (String) -> Unit,
     onEnforceOverdue: () -> Unit,
@@ -1473,20 +1593,26 @@ private fun ActiveInstallmentsSubTab(
     onSetStatus: (CourseAccessEnrollment, String) -> Unit,
     onOpenEditPlans: (CourseAccessEnrollment) -> Unit,
     onOpenManualAccessDialog: () -> Unit,
+    onOpenTrialActionDialog: (CourseAccessEnrollment, String) -> Unit,
+    onQuickTrialAction: (ManageCourseTrialPayload) -> Unit,
     onCopyText: (String, String) -> Unit
 ) {
     val filteredList = remember(enrollments, searchQuery, selectedFilter) {
         enrollments.filter { item ->
             val statusMatch = when (selectedFilter) {
                 "DUE_AND_OVERDUE" ->
-                    item.status.equals("OVERDUE", ignoreCase = true) ||
+                    item.isOverdueStatus ||
                         (item.status.equals("ACTIVE", ignoreCase = true) && item.dueAmount > 0) ||
-                        item.status.equals("PAYMENT_PENDING", ignoreCase = true)
-                "OVERDUE" -> item.status.equals("OVERDUE", ignoreCase = true)
+                        item.status.equals("PAYMENT_PENDING", ignoreCase = true) ||
+                        item.isTrialActiveStatus ||
+                        item.isTrialExpiredStatus
+                "OVERDUE" -> item.isOverdueStatus
+                "TRIAL_ACTIVE" -> item.isTrialActiveStatus
+                "TRIAL_EXPIRED" -> item.isTrialExpiredStatus
                 "ACTIVE_DUE" -> item.status.equals("ACTIVE", ignoreCase = true) && item.dueAmount > 0
-                "ALL_ACTIVE" -> item.status.equals("ACTIVE", ignoreCase = true)
+                "ALL_ACTIVE" -> item.status.equals("ACTIVE", ignoreCase = true) || item.isTrialActiveStatus
                 "REVOKED" -> item.status.equals("REVOKED", ignoreCase = true)
-                else -> !item.status.equals("REQUESTED", ignoreCase = true)
+                else -> !item.isAccessRequestedStatus
             }
             val query = searchQuery.trim().lowercase()
             val queryMatch = query.isEmpty() ||
@@ -1614,10 +1740,44 @@ private fun ActiveInstallmentsSubTab(
                 FilterChip(
                     selected = selectedFilter == "DUE_AND_OVERDUE",
                     onClick = { onFilterChange("DUE_AND_OVERDUE") },
-                    label = { Text("বকেয়া ও ওভারডিউ", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                    label = { Text("বকেয়া, ট্রায়াল ও ওভারডিউ", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = AmberWarning.copy(alpha = 0.25f),
                         selectedLabelColor = AmberWarning,
+                        containerColor = Slate800,
+                        labelColor = Slate400
+                    )
+                )
+                FilterChip(
+                    selected = selectedFilter == "TRIAL_ACTIVE",
+                    onClick = { onFilterChange("TRIAL_ACTIVE") },
+                    label = {
+                        Text(
+                            "🎁 চলমান ট্রায়াল (${enrollments.count { it.isTrialActiveStatus }})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = NeonCyan.copy(alpha = 0.25f),
+                        selectedLabelColor = NeonCyan,
+                        containerColor = Slate800,
+                        labelColor = Slate400
+                    )
+                )
+                FilterChip(
+                    selected = selectedFilter == "TRIAL_EXPIRED",
+                    onClick = { onFilterChange("TRIAL_EXPIRED") },
+                    label = {
+                        Text(
+                            "⏰ ট্রায়াল শেষ (${enrollments.count { it.isTrialExpiredStatus }})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = CoralDanger.copy(alpha = 0.25f),
+                        selectedLabelColor = CoralDanger,
                         containerColor = Slate800,
                         labelColor = Slate400
                     )
@@ -1627,7 +1787,7 @@ private fun ActiveInstallmentsSubTab(
                     onClick = { onFilterChange("OVERDUE") },
                     label = {
                         Text(
-                            "মেয়াদোত্তীর্ণ (${enrollments.count { it.status.equals("OVERDUE", true) }})",
+                            "মেয়াদোত্তীর্ণ (${enrollments.count { it.isOverdueStatus }})",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1644,7 +1804,7 @@ private fun ActiveInstallmentsSubTab(
                     onClick = { onFilterChange("ALL_ACTIVE") },
                     label = {
                         Text(
-                            "সকল সক্রিয় কোর্স (${enrollments.count { it.status.equals("ACTIVE", true) }})",
+                            "সকল সক্রিয় কোর্স (${enrollments.count { it.status.equals("ACTIVE", true) || it.isTrialActiveStatus }})",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1681,18 +1841,22 @@ private fun ActiveInstallmentsSubTab(
                 EmptyStateBox(
                     icon = Icons.Default.EventRepeat,
                     title = "এই ফিল্টারে কোনো কিস্তি বা এনরোলমেন্ট নেই",
-                    subtitle = "চলমান কিস্তি, বকেয়া টাকা এবং মেয়াদোত্তীর্ণ (Overdue) শিক্ষার্থীদের তালিকা এখানে দেখা যাবে।"
+                    subtitle = "চলমান কিস্তি, ফ্রি ট্রায়াল, বকেয়া টাকা এবং মেয়াদোত্তীর্ণ (Overdue) শিক্ষার্থীদের তালিকা এখানে দেখা যাবে।"
                 )
             }
         } else {
             items(filteredList, key = { it.id }) { enrollment ->
                 InstallmentLedgerCard(
                     enrollment = enrollment,
+                    nowMillis = nowMillis,
+                    isProcessing = isProcessing,
                     onExtend7Days = { onExtendDueDays(enrollment, 7) },
                     onExtend15Days = { onExtendDueDays(enrollment, 15) },
                     onOpenCustomDays = { onOpenCustomDaysDialog(enrollment) },
                     onSetStatus = { targetStatus -> onSetStatus(enrollment, targetStatus) },
                     onOpenEditPlans = { onOpenEditPlans(enrollment) },
+                    onOpenTrialActionDialog = { action -> onOpenTrialActionDialog(enrollment, action) },
+                    onQuickTrialAction = onQuickTrialAction,
                     onCopyText = onCopyText
                 )
             }
@@ -1705,14 +1869,18 @@ private fun ActiveInstallmentsSubTab(
 @Composable
 private fun InstallmentLedgerCard(
     enrollment: CourseAccessEnrollment,
+    nowMillis: Long,
+    isProcessing: Boolean,
     onExtend7Days: () -> Unit,
     onExtend15Days: () -> Unit,
     onOpenCustomDays: () -> Unit,
     onSetStatus: (String) -> Unit,
     onOpenEditPlans: () -> Unit,
+    onOpenTrialActionDialog: (String) -> Unit,
+    onQuickTrialAction: (ManageCourseTrialPayload) -> Unit,
     onCopyText: (String, String) -> Unit
 ) {
-    val isOverdue = enrollment.status.equals("OVERDUE", ignoreCase = true)
+    val isOverdue = enrollment.isOverdueStatus
     val isActive = enrollment.status.equals("ACTIVE", ignoreCase = true)
     val statusColor = statusBadgeColor(enrollment.status)
     val statusLabel = statusBadgeLabelBn(enrollment.status)
@@ -1884,6 +2052,15 @@ private fun InstallmentLedgerCard(
                 }
             }
 
+            // Free Trial Duration Control Panel (Always visible on student Course Enrollment Card)
+            EnrollmentTrialControlPanel(
+                enrollment = enrollment,
+                nowMillis = nowMillis,
+                isProcessing = isProcessing,
+                onOpenTrialActionDialog = onOpenTrialActionDialog,
+                onQuickTrialAction = onQuickTrialAction
+            )
+
             // Quick Due-Date Extension Buttons (+7 days, +15 days, Custom)
             if (enrollment.dueAmount > 0 || isOverdue) {
                 Row(
@@ -1892,7 +2069,7 @@ private fun InstallmentLedgerCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "মেয়াদ বাড়ান:",
+                        text = "কিস্তির মেয়াদ বাড়ান:",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = Slate200,
                             fontWeight = FontWeight.Bold
@@ -1916,9 +2093,11 @@ private fun InstallmentLedgerCard(
                 }
             }
 
-            // Quick Manual Status Control: ACTIVE / OVERDUE / REVOKED
+            // Quick Manual Status Control: ACTIVE / TRIAL_ACTIVE / OVERDUE / REVOKED
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1965,7 +2144,7 @@ private fun InstallmentLedgerCard(
                         modifier = Modifier.size(15.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("প্ল্যান ও দাম এডিট", color = Slate200, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("প্ল্যান, দাম ও ট্রায়াল এডিট", color = Slate200, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Button(
@@ -3121,7 +3300,7 @@ private fun AddOrEditPaymentMethodDialog(
 }
 
 // =============================================================================
-// Dialog 1: Approve Course Access Request + Custom Price & Installment Builder
+// Dialog 1: Approve Course Access Request + Custom Price, Installments & Free Trial Builder
 // =============================================================================
 @Composable
 private fun ApproveCourseAccessPricingDialog(
@@ -3139,6 +3318,26 @@ private fun ApproveCourseAccessPricingDialog(
             enrollment.adminNote?.takeIf { it.isNotBlank() }
                 ?: "বিকাশ বা নগদে সেন্ড মানি করে ট্রানজেকশন আইডি জমা দাও।"
         )
+    }
+
+    // Free Trial State (`trial_enabled`, `trial_days`, `trial_hours`, `start_trial_immediately`)
+    var trialEnabled by remember(enrollment) {
+        mutableStateOf(enrollment.trialEnabled || enrollment.isTrialActiveStatus)
+    }
+    var trialDaysText by remember(enrollment) {
+        mutableStateOf(
+            if (enrollment.trialDays > 0 || enrollment.trialHours > 0) {
+                enrollment.trialDays.toString()
+            } else {
+                "1"
+            }
+        )
+    }
+    var trialHoursText by remember(enrollment) {
+        mutableStateOf(enrollment.trialHours.toString())
+    }
+    var startTrialImmediately by remember(enrollment) {
+        mutableStateOf(enrollment.isTrialActiveStatus)
     }
 
     val existingPlans = remember(enrollment) { enrollment.parsedInstallmentPlans() }
@@ -3185,7 +3384,7 @@ private fun ApproveCourseAccessPricingDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "কোর্সের মূল্য ও কিস্তি নির্ধারণ",
+                            text = "কোর্সের মূল্য, কিস্তি ও ফ্রি ট্রায়াল নির্ধারণ",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 color = Color.White,
                                 fontWeight = FontWeight.ExtraBold
@@ -3500,6 +3699,192 @@ private fun ApproveCourseAccessPricingDialog(
                     }
                 }
 
+                // =========================================================================
+                // Step 4: 🎁 ফ্রি ট্রায়াল সুবিধা (Free Trial) Section
+                // =========================================================================
+                Surface(
+                    color = Slate950,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(
+                        width = if (trialEnabled) 1.5.dp else 1.dp,
+                        color = if (trialEnabled) NeonCyan else Slate700
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "🎁 ফ্রি ট্রায়াল সুবিধা (Free Trial)",
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        color = NeonCyan,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                )
+                                Text(
+                                    text = "কেনার আগে ফ্রি ট্রায়াল দিন (trial_enabled)",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = Color.White,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                )
+                            }
+                            Switch(
+                                checked = trialEnabled,
+                                onCheckedChange = { enabled ->
+                                    trialEnabled = enabled
+                                    if (enabled && (trialDaysText.toIntOrNull() ?: 0) == 0 && (trialHoursText.toIntOrNull() ?: 0) == 0) {
+                                        trialDaysText = "1"
+                                    }
+                                    if (!enabled) {
+                                        startTrialImmediately = false
+                                    }
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Slate950,
+                                    checkedTrackColor = NeonCyan
+                                ),
+                                modifier = Modifier.testTag("switch_trial_enabled")
+                            )
+                        }
+
+                        AnimatedVisibility(visible = trialEnabled) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                // Days (`trial_days`) & Hours (`trial_hours`) Input Boxes
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = trialDaysText,
+                                        onValueChange = { trialDaysText = it.filter { ch -> ch.isDigit() } },
+                                        label = { Text("দিন (trial_days)") },
+                                        placeholder = { Text("যেমন: 1, 3") },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        colors = adminTextFieldColors(),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("input_trial_days")
+                                    )
+                                    OutlinedTextField(
+                                        value = trialHoursText,
+                                        onValueChange = { trialHoursText = it.filter { ch -> ch.isDigit() } },
+                                        label = { Text("ঘণ্টা (trial_hours)") },
+                                        placeholder = { Text("যেমন: 0, 12") },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        colors = adminTextFieldColors(),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("input_trial_hours")
+                                    )
+                                }
+
+                                // Quick Preset Buttons: ১ দিন, ২ দিন, ৩ দিন, ৭ দিন, ১২ ঘণ্টা
+                                Text(
+                                    text = "কুইক প্রিসেট বাটন:",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = Slate400,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    val presets = listOf(
+                                         Triple("১ দিন", 1, 0),
+                                        Triple("২ দিন", 2, 0),
+                                        Triple("৩ দিন", 3, 0),
+                                        Triple("৭ দিন", 7, 0),
+                                        Triple("১২ ঘণ্টা", 0, 12)
+                                    )
+                                    presets.forEach { (label, pDays, pHours) ->
+                                        val isCurrentPreset =
+                                            (trialDaysText.toIntOrNull() ?: 0) == pDays &&
+                                                (trialHoursText.toIntOrNull() ?: 0) == pHours
+                                        SmallActionChip(
+                                            label = label,
+                                            color = if (isCurrentPreset) NeonCyan else Slate200,
+                                            onClick = {
+                                                trialDaysText = pDays.toString()
+                                                trialHoursText = pHours.toString()
+                                            }
+                                        )
+                                    }
+                                }
+
+                                // Optional Checkbox: "এখনই সরাসরি ট্রায়াল চালু করে দিন (Start Trial Immediately)"
+                                Surface(
+                                    color = if (startTrialImmediately) EmeraldSuccess.copy(alpha = 0.16f) else Slate900,
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (startTrialImmediately) EmeraldSuccess else Slate700
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { startTrialImmediately = !startTrialImmediately }
+                                        .testTag("checkbox_start_trial_immediately")
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Checkbox(
+                                            checked = startTrialImmediately,
+                                            onCheckedChange = { startTrialImmediately = it },
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = EmeraldSuccess,
+                                                uncheckedColor = Slate400,
+                                                checkmarkColor = Slate950
+                                            )
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "এখনই সরাসরি ট্রায়াল চালু করে দিন (Start Trial Immediately)",
+                                                style = MaterialTheme.typography.labelMedium.copy(
+                                                    color = if (startTrialImmediately) EmeraldSuccess else Color.White,
+                                                    fontWeight = FontWeight.ExtraBold
+                                                )
+                                            )
+                                            Text(
+                                                text = if (startTrialImmediately) {
+                                                    "এখনই status = 'TRIAL_ACTIVE' এবং trial_ends_at সেট হয়ে সাথে সাথে কোর্স আনলক হবে।"
+                                                } else {
+                                                    "আনচেক থাকলে status = 'APPROVED_TO_BUY' হবে এবং স্টুডেন্ট অ্যাপ থেকে নিজে 'ফ্রি ট্রায়াল শুরু করুন' বাটনে চাপতে পারবে।"
+                                                },
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    color = Slate400,
+                                                    fontSize = 10.sp
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Admin Note Input
                 OutlinedTextField(
                     value = adminNote,
@@ -3513,7 +3898,7 @@ private fun ApproveCourseAccessPricingDialog(
 
                 HorizontalDivider(color = Slate700)
 
-                // Action 1: Approve with Price & Installment Plans (`APPROVED_TO_BUY`)
+                // Action 1: Approve with Price, Installment Plans & Free Trial (`APPROVED_TO_BUY` or `TRIAL_ACTIVE`)
                 Button(
                     onClick = {
                         val totalPrice = totalPriceText.toIntOrNull()?.coerceAtLeast(0) ?: 1000
@@ -3534,6 +3919,10 @@ private fun ApproveCourseAccessPricingDialog(
                             plansList.toList()
                         }
 
+                        val rawDays = if (trialEnabled) (trialDaysText.toIntOrNull()?.coerceAtLeast(0) ?: 0) else 0
+                        val rawHours = if (trialEnabled) (trialHoursText.toIntOrNull()?.coerceAtLeast(0) ?: 0) else 0
+                        val safeDays = if (trialEnabled && rawDays == 0 && rawHours == 0) 1 else rawDays
+
                         onSubmit(
                             ApproveCourseAccessRequestRpcPayload(
                                 enrollmentId = enrollment.id,
@@ -3544,12 +3933,18 @@ private fun ApproveCourseAccessPricingDialog(
                                 instantFreeUnlock = false,
                                 studentPhone = enrollment.effectivePhone,
                                 shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { enrollment.effectivePhone },
-                                programId = enrollment.programId
+                                programId = enrollment.programId,
+                                trialEnabled = trialEnabled,
+                                trialDays = safeDays,
+                                trialHours = rawHours,
+                                startTrialImmediately = trialEnabled && startTrialImmediately
                             )
                         )
                     },
                     enabled = !isProcessing,
-                    colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (trialEnabled && startTrialImmediately) NeonCyan else ElectricBlue
+                    ),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -3560,15 +3955,25 @@ private fun ApproveCourseAccessPricingDialog(
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,
-                            color = Color.White
+                            color = if (trialEnabled && startTrialImmediately) Slate950 else Color.White
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                     } else {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = if (trialEnabled && startTrialImmediately) Slate950 else Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(8.dp))
                     }
                     Text(
-                        text = "দাম ও কিস্তি সেট করে অনুমোদন দিন",
+                        text = when {
+                            trialEnabled && startTrialImmediately -> "এখনই ফ্রি ট্রায়াল চালু ও অনুমোদন দিন"
+                            trialEnabled -> "দাম, কিস্তি ও ফ্রি ট্রায়ালসহ অনুমোদন দিন"
+                            else -> "দাম ও কিস্তি সেট করে অনুমোদন দিন"
+                        },
+                        color = if (trialEnabled && startTrialImmediately) Slate950 else Color.White,
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 13.sp
                     )
@@ -4587,27 +4992,383 @@ private fun adminTextFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedLabelColor = Slate400
 )
 
+// =============================================================================
+// Free Trial Control Panel on Each Student Course Enrollment Card
+// =============================================================================
+@Composable
+private fun EnrollmentTrialControlPanel(
+    enrollment: CourseAccessEnrollment,
+    nowMillis: Long,
+    isProcessing: Boolean,
+    onOpenTrialActionDialog: (String) -> Unit,
+    onQuickTrialAction: (ManageCourseTrialPayload) -> Unit
+) {
+    val isTrialRunning = enrollment.isTrialCurrentlyRunning(nowMillis)
+    val isTrialExpired = enrollment.isTrialExpiredStatus ||
+        (enrollment.isTrialActiveStatus && !isTrialRunning && enrollment.parseTrialEndsAtMillis() != null)
+    val hasTrialConfig = enrollment.trialEnabled ||
+        enrollment.isTrialUsed ||
+        enrollment.trialDays > 0 ||
+        enrollment.trialHours > 0 ||
+        enrollment.isTrialActiveStatus ||
+        enrollment.isTrialExpiredStatus
+
+    val borderColor = when {
+        isTrialRunning -> NeonCyan.copy(alpha = 0.65f)
+        isTrialExpired -> CoralDanger.copy(alpha = 0.6f)
+        enrollment.trialEnabled -> EmeraldSuccess.copy(alpha = 0.5f)
+        else -> Slate700
+    }
+
+    Surface(
+        color = Slate950,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, borderColor),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("trial_control_panel_${enrollment.id}")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(11.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Top Row: Title + Live Trial Status / Countdown Badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "🎁 ফ্রি ট্রায়াল কন্ট্রোল প্যানেল",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = NeonCyan,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    )
+                }
+
+                val badgeText = when {
+                    isTrialRunning -> "চলমান • ${enrollment.formatTrialCountdownBn(nowMillis)}"
+                    isTrialExpired -> "ট্রায়ালের মেয়াদ শেষ"
+                    enrollment.trialEnabled && !enrollment.isTrialUsed -> "অনুমোদিত (${enrollment.formatConfiguredTrialDurationBn()})"
+                    enrollment.isTrialUsed -> "ট্রায়াল ব্যবহৃত"
+                    else -> "ট্রায়াল বন্ধ"
+                }
+                val badgeColor = when {
+                    isTrialRunning -> NeonCyan
+                    isTrialExpired -> CoralDanger
+                    enrollment.trialEnabled && !enrollment.isTrialUsed -> EmeraldSuccess
+                    else -> Slate400
+                }
+                StatusPill(label = badgeText, color = badgeColor)
+            }
+
+            // Detailed Trial Timing Info (if configured or active)
+            if (hasTrialConfig) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = buildString {
+                            append("বরাদ্দ: ${enrollment.formatConfiguredTrialDurationBn()}")
+                            append(" • ব্যবহৃত: ${if (enrollment.isTrialUsed) "হ্যাঁ" else "না"}")
+                        },
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = Slate200,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 11.sp
+                        )
+                    )
+                    if (!enrollment.trialEndsAt.isNullOrBlank()) {
+                        Text(
+                            text = "শেষ: ${formatIsoTimestampBn(enrollment.trialEndsAt)}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = if (isTrialExpired) CoralDanger else NeonCyan,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            )
+                        )
+                    }
+                }
+            }
+
+            // 5 Action Buttons Row (Scrollable chips for mobile ergonomics):
+            // 1. ➕ মেয়াদ বাড়ান (ADD_HOURS)
+            // 2. ➖ মেয়াদ কমান (REDUCE_HOURS)
+            // 3. ⏱️ নতুন মেয়াদ সেট করুন (SET_DURATION)
+            // 4. 🛑 ট্রায়াল এখনই শেষ করুন (END_TRIAL_NOW)
+            // 5. 🔄 ট্রায়াল রিসেট করুন (RESET_TRIAL)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SmallActionChip(
+                    label = "➕ মেয়াদ বাড়ান",
+                    color = EmeraldSuccess,
+                    onClick = { if (!isProcessing) onOpenTrialActionDialog("ADD_HOURS") }
+                )
+
+                SmallActionChip(
+                    label = "➖ মেয়াদ কমান",
+                    color = AmberWarning,
+                    onClick = { if (!isProcessing) onOpenTrialActionDialog("REDUCE_HOURS") }
+                )
+
+                SmallActionChip(
+                    label = "⏱️ নতুন মেয়াদ সেট করুন",
+                    color = NeonCyan,
+                    onClick = { if (!isProcessing) onOpenTrialActionDialog("SET_DURATION") }
+                )
+
+                SmallActionChip(
+                    label = "🛑 ট্রায়াল এখনই শেষ করুন",
+                    color = CoralDanger,
+                    onClick = {
+                        if (!isProcessing) {
+                            onQuickTrialAction(
+                                ManageCourseTrialPayload(
+                                    enrollmentId = enrollment.id,
+                                    studentPhone = enrollment.effectivePhone,
+                                    shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { enrollment.effectivePhone },
+                                    programId = enrollment.programId,
+                                    action = "END_TRIAL_NOW",
+                                    days = 0,
+                                    hours = 0,
+                                    currentTrialStartedAt = enrollment.trialStartedAt,
+                                    currentTrialEndsAt = enrollment.trialEndsAt,
+                                    currentTrialDays = enrollment.trialDays,
+                                    currentTrialHours = enrollment.trialHours
+                                )
+                            )
+                        }
+                    }
+                )
+
+                SmallActionChip(
+                    label = "🔄 ট্রায়াল রিসেট করুন",
+                    color = ElectricBlueLight,
+                    onClick = {
+                        if (!isProcessing) {
+                            onQuickTrialAction(
+                                ManageCourseTrialPayload(
+                                    enrollmentId = enrollment.id,
+                                    studentPhone = enrollment.effectivePhone,
+                                    shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { enrollment.effectivePhone },
+                                    programId = enrollment.programId,
+                                    action = "RESET_TRIAL",
+                                    days = enrollment.trialDays.takeIf { it > 0 } ?: 1,
+                                    hours = enrollment.trialHours,
+                                    currentTrialStartedAt = enrollment.trialStartedAt,
+                                    currentTrialEndsAt = enrollment.trialEndsAt,
+                                    currentTrialDays = enrollment.trialDays,
+                                    currentTrialHours = enrollment.trialHours
+                                )
+                            )
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Dialog 5: Trial Duration Management Dialog (ADD_HOURS, REDUCE_HOURS, SET_DURATION)
+// =============================================================================
+@Composable
+private fun TrialDurationManageDialog(
+    enrollment: CourseAccessEnrollment,
+    action: String,
+    isProcessing: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (days: Int, hours: Int) -> Unit
+) {
+    val defaultDays = when (action) {
+        "SET_DURATION" -> if (enrollment.trialDays > 0 || enrollment.trialHours > 0) enrollment.trialDays else 1
+        "ADD_HOURS" -> 1
+        else -> 0
+    }
+    val defaultHours = when (action) {
+        "SET_DURATION" -> enrollment.trialHours
+        "REDUCE_HOURS" -> 6
+        else -> 0
+    }
+
+    var daysText by remember(enrollment, action) { mutableStateOf(defaultDays.toString()) }
+    var hoursText by remember(enrollment, action) { mutableStateOf(defaultHours.toString()) }
+
+    val dialogTitle = when (action) {
+        "ADD_HOURS" -> "➕ ফ্রি ট্রায়ালের মেয়াদ বাড়ান (Extend Trial)"
+        "REDUCE_HOURS" -> "➖ ফ্রি ট্রায়ালের মেয়াদ কমান (Reduce Trial)"
+        else -> "⏱️ ফ্রি ট্রায়ালের নতুন মেয়াদ সেট করুন"
+    }
+
+    val dialogDescription = when (action) {
+        "ADD_HOURS" -> "নির্ধারিত দিন ও ঘণ্টা বর্তমান ট্রায়ালের সাথে যোগ হবে। ট্রায়াল শেষ হয়ে গেলেও নতুন করে status = 'TRIAL_ACTIVE' হয়ে কোর্স আনলক হয়ে যাবে।"
+        "REDUCE_HOURS" -> "চলমান ট্রায়ালের শেষ সময় (trial_ends_at) থেকে নির্ধারিত দিন বা ঘণ্টা কমে যাবে।"
+        else -> "এখন থেকে নির্ধারিত দিন ও ঘণ্টার জন্য নতুন করে ট্রায়াল চালু (status = 'TRIAL_ACTIVE') হবে।"
+    }
+
+    val accentColor = when (action) {
+        "ADD_HOURS" -> EmeraldSuccess
+        "REDUCE_HOURS" -> AmberWarning
+        else -> NeonCyan
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!isProcessing) onDismiss() },
+        containerColor = Slate900,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = dialogTitle,
+                    color = accentColor,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 15.sp
+                )
+                Text(
+                    text = "${enrollment.studentName ?: "শিক্ষার্থী"} • ${enrollment.programTitle ?: enrollment.programId ?: ""}",
+                    style = MaterialTheme.typography.labelSmall.copy(color = Color.White)
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = dialogDescription,
+                    style = MaterialTheme.typography.bodySmall.copy(color = Slate200)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = daysText,
+                        onValueChange = { daysText = it.filter { c -> c.isDigit() } },
+                        label = { Text("দিন (Days)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = hoursText,
+                        onValueChange = { hoursText = it.filter { c -> c.isDigit() } },
+                        label = { Text("ঘণ্টা (Hours)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Text(
+                    text = "কুইক প্রিসেট:",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = Slate400,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val presets = listOf(
+                        Triple("৬ ঘণ্টা", 0, 6),
+                        Triple("১২ ঘণ্টা", 0, 12),
+                        Triple("১ দিন", 1, 0),
+                        Triple("২ দিন", 2, 0),
+                        Triple("৩ দিন", 3, 0),
+                        Triple("৭ দিন", 7, 0)
+                    )
+                    presets.forEach { (label, pDays, pHours) ->
+                        val selected = (daysText.toIntOrNull() ?: 0) == pDays &&
+                            (hoursText.toIntOrNull() ?: 0) == pHours
+                        SmallActionChip(
+                            label = label,
+                            color = if (selected) accentColor else Slate200,
+                            onClick = {
+                                daysText = pDays.toString()
+                                hoursText = pHours.toString()
+                            }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val d = daysText.toIntOrNull()?.coerceAtLeast(0) ?: 0
+                    val h = hoursText.toIntOrNull()?.coerceAtLeast(0) ?: 0
+                    if (d == 0 && h == 0) {
+                        onConfirm(0, 1)
+                    } else {
+                        onConfirm(d, h)
+                    }
+                },
+                enabled = !isProcessing,
+                colors = ButtonDefaults.buttonColors(containerColor = accentColor)
+            ) {
+                Text(
+                    text = when (action) {
+                        "ADD_HOURS" -> "মেয়াদ বাড়ান"
+                        "REDUCE_HOURS" -> "মেয়াদ কমান"
+                        else -> "নতুন মেয়াদ সেট করুন"
+                    },
+                    color = Slate950,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isProcessing) {
+                Text("বাতিল", color = Slate400)
+            }
+        }
+    )
+}
+
 private fun statusBadgeColor(status: String?): Color {
-    return when (status?.uppercase()) {
-        "REQUESTED" -> ElectricBlueLight
+    return when (status?.uppercase()?.trim()) {
+        "REQUESTED", "ACCESS_REQUESTED" -> ElectricBlueLight
         "APPROVED_TO_BUY" -> AmberWarning
+        "TRIAL_ACTIVE" -> NeonCyan
+        "TRIAL_EXPIRED" -> CoralDanger
         "PAYMENT_PENDING" -> NeonCyan
         "ACTIVE" -> EmeraldSuccess
         "PAYMENT_REJECTED" -> CoralDanger
-        "OVERDUE" -> CoralDanger
+        "OVERDUE", "INSTALLMENT_OVERDUE" -> CoralDanger
         "REVOKED" -> CoralDanger
         else -> Slate400
     }
 }
 
 private fun statusBadgeLabelBn(status: String?): String {
-    return when (status?.uppercase()) {
-        "REQUESTED" -> "নতুন রিকোয়েস্ট"
+    return when (status?.uppercase()?.trim()) {
+        "REQUESTED", "ACCESS_REQUESTED" -> "নতুন রিকোয়েস্ট"
         "APPROVED_TO_BUY" -> "কেনার অনুমতি প্রাপ্ত"
+        "TRIAL_ACTIVE" -> "🎁 ফ্রি ট্রায়াল চলমান"
+        "TRIAL_EXPIRED" -> "⏰ ট্রায়ালের মেয়াদ শেষ"
         "PAYMENT_PENDING" -> "পেমেন্ট যাচাই চলছে"
         "ACTIVE" -> "আনলকড (সক্রিয়)"
         "PAYMENT_REJECTED" -> "পেমেন্ট বাতিল"
-        "OVERDUE" -> "কিস্তি মেয়াদোত্তীর্ণ (লকড)"
+        "OVERDUE", "INSTALLMENT_OVERDUE" -> "কিস্তি মেয়াদোত্তীর্ণ (লকড)"
         "REVOKED" -> "লকড (Revoked)"
         else -> status ?: "অজ্ঞাত"
     }

@@ -15,6 +15,7 @@ import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
@@ -115,6 +116,10 @@ interface MaxBirdRepository {
         payload: ManualCourseAccessPayload
     ): Result<Unit>
 
+    suspend fun manageCourseTrial(
+        payload: ManageCourseTrialPayload
+    ): Result<Unit>
+
     suspend fun getCoursePaymentTransactions(): Result<List<CoursePaymentTransaction>>
 
     suspend fun reviewCoursePayment(
@@ -133,4 +138,5 @@ interface MaxBirdRepository {
         adminNote: String? = null
     ): Result<Unit>
 }
+
 
