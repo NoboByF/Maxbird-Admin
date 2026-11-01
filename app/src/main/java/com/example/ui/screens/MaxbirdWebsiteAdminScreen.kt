@@ -1622,56 +1622,151 @@ private fun EmbeddedFirebaseWebSdkPanel(
             }
         }
 
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.databaseEnabled = true
-                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    settings.userAgentString =
-                        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+        var popupWebView by remember { mutableStateOf<WebView?>(null) }
 
-                    addJavascriptInterface(
-                        object {
-                            @JavascriptInterface
-                            fun onFirebaseUserSignedIn(
-                                uid: String,
-                                email: String,
-                                displayName: String,
-                                photoUrl: String,
-                                idToken: String,
-                                refreshToken: String
-                            ) {
-                                post {
-                                    onAuthReceived(uid, email, displayName, photoUrl, idToken, refreshToken)
+        Box(modifier = Modifier.fillMaxSize()) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+                        android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.databaseEnabled = true
+                        settings.javaScriptCanOpenWindowsAutomatically = true
+                        settings.setSupportMultipleWindows(true)
+                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        settings.userAgentString =
+                            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+
+                        addJavascriptInterface(
+                            object {
+                                @JavascriptInterface
+                                fun onFirebaseUserSignedIn(
+                                    uid: String,
+                                    email: String,
+                                    displayName: String,
+                                    photoUrl: String,
+                                    idToken: String,
+                                    refreshToken: String
+                                ) {
+                                    post {
+                                        popupWebView?.destroy()
+                                        popupWebView = null
+                                        onAuthReceived(uid, email, displayName, photoUrl, idToken, refreshToken)
+                                    }
                                 }
+                            },
+                            "AndroidBridge"
+                        )
+
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onCreateWindow(
+                                view: WebView?,
+                                isDialog: Boolean,
+                                isUserGesture: Boolean,
+                                resultMsg: android.os.Message?
+                            ): Boolean {
+                                val newWebView = WebView(ctx).apply {
+                                    android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+                                    android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                                    settings.javaScriptEnabled = true
+                                    settings.domStorageEnabled = true
+                                    settings.databaseEnabled = true
+                                    settings.javaScriptCanOpenWindowsAutomatically = true
+                                    settings.setSupportMultipleWindows(true)
+                                    settings.userAgentString =
+                                        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                                    webViewClient = object : WebViewClient() {
+                                        override fun shouldOverrideUrlLoading(
+                                            view: WebView?,
+                                            request: WebResourceRequest?
+                                        ): Boolean = false
+                                    }
+                                    webChromeClient = object : WebChromeClient() {
+                                        override fun onCloseWindow(window: WebView?) {
+                                            popupWebView?.destroy()
+                                            popupWebView = null
+                                        }
+                                    }
+                                }
+                                popupWebView = newWebView
+                                val transport = resultMsg?.obj as? WebView.WebViewTransport
+                                transport?.webView = newWebView
+                                resultMsg?.sendToTarget()
+                                return true
                             }
-                        },
-                        "AndroidBridge"
-                    )
 
-                    webChromeClient = WebChromeClient()
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(
-                            view: WebView?,
-                            request: WebResourceRequest?
-                        ): Boolean {
-                            return false
+                            override fun onCloseWindow(window: WebView?) {
+                                popupWebView?.destroy()
+                                popupWebView = null
+                            }
                         }
-                    }
 
-                    loadDataWithBaseURL(
-                        "https://${MaxbirdPortalSettings.FIREBASE_AUTH_DOMAIN}/",
-                        htmlContent,
-                        "text/html",
-                        "UTF-8",
-                        null
-                    )
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView?,
+                                request: WebResourceRequest?
+                            ): Boolean {
+                                return false
+                            }
+                        }
+
+                        loadDataWithBaseURL(
+                            "https://${MaxbirdPortalSettings.FIREBASE_AUTH_DOMAIN}/",
+                            htmlContent,
+                            "text/html",
+                            "UTF-8",
+                            null
+                        )
+                    }
+                }
+            )
+
+            // Render OAuth Popup Window overlay when signInWithPopup opens a window
+            popupWebView?.let { activePopup ->
+                Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(12.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Slate900,
+                    border = BorderStroke(1.5.dp, NeonCyan)
+                ) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Slate950)
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "🔐 Google Admin Sign-In (${MaxbirdPortalSettings.ADMIN_EMAIL})",
+                                color = NeonCyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            TextButton(
+                                onClick = {
+                                    activePopup.destroy()
+                                    popupWebView = null
+                                }
+                            ) {
+                                Text("বন্ধ করুন ✕", color = CoralDanger, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { activePopup }
+                        )
+                    }
                 }
             }
-        )
+        }
     }
 }
 
@@ -1707,9 +1802,9 @@ private fun buildMaxbirdFirebaseWebDashboardHtml(): String = """
     <button id="btnGoogle" class="btn-blue">Google দিয়ে লগইন করুন (maiafahim1234@gmail.com)</button>
     <div class="row" style="margin-top:8px;">
       <div><input id="authEmail" value="maiafahim1234@gmail.com" placeholder="Admin Email" /></div>
-      <div><input id="authPass" type="password" placeholder="Password" /></div>
+      <div><input id="authPass" type="password" placeholder="Password (কমপক্ষে ৬ অক্ষর)" /></div>
     </div>
-    <button id="btnEmailLogin" class="btn-green">ইমেইল ও পাসওয়ার্ড দিয়ে লগইন (Sync Token to App)</button>
+    <button id="btnEmailLogin" class="btn-green">ইমেইল ও পাসওয়ার্ড দিয়ে লগইন / অটো সেটআপ (Sync Token to App)</button>
     <button id="btnSignOut" class="btn-red" style="display:none;">Sign Out</button>
     <div id="syncBanner" class="status"></div>
   </div>
@@ -1749,7 +1844,7 @@ private fun buildMaxbirdFirebaseWebDashboardHtml(): String = """
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
     import { getFirestore, doc, onSnapshot, getDoc, setDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
     const firebaseConfig = {
@@ -1819,25 +1914,35 @@ private fun buildMaxbirdFirebaseWebDashboardHtml(): String = """
     document.getElementById("btnGoogle").addEventListener("click", async () => {
       try {
         const provider = new GoogleAuthProvider();
-        provider.setCustomParameters({ login_hint: "maiafahim1234@gmail.com" });
+        provider.setCustomParameters({ login_hint: "maiafahim1234@gmail.com", prompt: "select_account" });
         await signInWithPopup(auth, provider);
-      } catch (e) {
-        try {
-          const provider = new GoogleAuthProvider();
-          await signInWithRedirect(auth, provider);
-        } catch (err) {
-          showBanner("Google Popup সীমাবদ্ধ থাকলে নিচের ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করুন: " + err.message);
-        }
+        showBanner("✅ Google লগইন সফল হয়েছে এবং অ্যাপের সাথে সিঙ্ক হয়েছে!");
+      } catch (err) {
+        showBanner("💡 Google Popup ব্লক হলে নিচের বক্সে পাসওয়ার্ড দিয়ে 'ইমেইল ও পাসওয়ার্ড দিয়ে লগইন' বাটনে চাপুন: " + err.message);
       }
     });
 
     document.getElementById("btnEmailLogin").addEventListener("click", async () => {
+      const email = document.getElementById("authEmail").value.trim();
+      const pass = document.getElementById("authPass").value;
+      if (!email || !pass || pass.length < 6) {
+        showBanner("⚠️ অনুগ্রহ করে ইমেইল এবং কমপক্ষে ৬ অক্ষরের পাসওয়ার্ড দিন।");
+        return;
+      }
       try {
-        const email = document.getElementById("authEmail").value.trim();
-        const pass = document.getElementById("authPass").value;
         await signInWithEmailAndPassword(auth, email, pass);
         showBanner("✅ সফলভাবে লগইন হয়েছে এবং নেটিভ অ্যাপের সাথে টোকেন সিঙ্ক হয়েছে!");
       } catch (e) {
+        if (email.toLowerCase() === "maiafahim1234@gmail.com" && (e.code === "auth/user-not-found" || e.code === "auth/invalid-credential")) {
+          try {
+            await createUserWithEmailAndPassword(auth, email, pass);
+            showBanner("✅ অ্যাডমিন পাসওয়ার্ড সেটআপ ও লগইন সফল হয়েছে!");
+            return;
+          } catch (signupErr) {
+            showBanner("⚠️ লগইন ত্রুটি: " + signupErr.message);
+            return;
+          }
+        }
         showBanner("⚠️ লগইন ত্রুটি: " + e.message);
       }
     });

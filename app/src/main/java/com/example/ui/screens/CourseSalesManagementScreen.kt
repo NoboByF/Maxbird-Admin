@@ -1725,16 +1725,16 @@ private fun ActiveInstallmentsSubTab(
             val statusMatch = when (selectedFilter) {
                 "DUE_AND_OVERDUE" ->
                     item.isOverdueStatus ||
-                        (item.status.equals("ACTIVE", ignoreCase = true) && item.dueAmount > 0) ||
-                        item.status.equals("PAYMENT_PENDING", ignoreCase = true) ||
+                        (item.effectiveStatus.equals("ACTIVE", ignoreCase = true) && item.dueAmount > 0) ||
+                        item.effectiveStatus.equals("PAYMENT_PENDING", ignoreCase = true) ||
                         item.isTrialActiveStatus ||
                         item.isTrialExpiredStatus
                 "OVERDUE" -> item.isOverdueStatus
                 "TRIAL_ACTIVE" -> item.isTrialActiveStatus
                 "TRIAL_EXPIRED" -> item.isTrialExpiredStatus
-                "ACTIVE_DUE" -> item.status.equals("ACTIVE", ignoreCase = true) && item.dueAmount > 0
-                "ALL_ACTIVE" -> item.status.equals("ACTIVE", ignoreCase = true) || item.isTrialActiveStatus
-                "REVOKED" -> item.status.equals("REVOKED", ignoreCase = true)
+                "ACTIVE_DUE" -> item.effectiveStatus.equals("ACTIVE", ignoreCase = true) && item.dueAmount > 0
+                "ALL_ACTIVE" -> item.effectiveStatus.equals("ACTIVE", ignoreCase = true) || item.isTrialActiveStatus
+                "REVOKED" -> item.effectiveStatus.equals("REVOKED", ignoreCase = true)
                 else -> !item.isAccessRequestedStatus
             }
             val query = searchQuery.trim().lowercase()
@@ -1887,7 +1887,7 @@ private fun ActiveInstallmentsSubTab(
                     onClick = { onFilterChange("ALL_ACTIVE") },
                     label = {
                         Text(
-                            "সকল সক্রিয় কোর্স (${enrollments.count { it.status.equals("ACTIVE", true) || it.isTrialActiveStatus }})",
+                            "সকল সক্রিয় কোর্স (${enrollments.count { it.effectiveStatus.equals("ACTIVE", true) || it.isTrialActiveStatus }})",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1904,7 +1904,7 @@ private fun ActiveInstallmentsSubTab(
                     onClick = { onFilterChange("REVOKED") },
                     label = {
                         Text(
-                            "লকড / বাতিল (${enrollments.count { it.status.equals("REVOKED", true) }})",
+                            "লকড / বাতিল (${enrollments.count { it.effectiveStatus.equals("REVOKED", true) }})",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1986,9 +1986,9 @@ private fun InstallmentLedgerCard(
     onCopyText: (String, String) -> Unit
 ) {
     val isOverdue = enrollment.isOverdueStatus
-    val isActive = enrollment.status.equals("ACTIVE", ignoreCase = true)
-    val statusColor = statusBadgeColor(enrollment.status)
-    val statusLabel = statusBadgeLabelBn(enrollment.status)
+    val isActive = enrollment.effectiveStatus.equals("ACTIVE", ignoreCase = true)
+    val statusColor = statusBadgeColor(enrollment.effectiveStatus)
+    val statusLabel = statusBadgeLabelBn(enrollment.effectiveStatus)
     val primaryPhone = enrollment.effectivePhone.takeIf { it.isNotBlank() }
         ?: enrollment.effectiveAccountKey.takeIf { it.isNotBlank() }
         ?: "মোবাইল নম্বর নেই"
@@ -2234,7 +2234,7 @@ private fun InstallmentLedgerCard(
                 )
                 SmallActionChip(
                     label = "REVOKED (বাতিল)",
-                    color = if (enrollment.status.equals("REVOKED", true)) CoralDanger else Slate400,
+                    color = if (enrollment.effectiveStatus.equals("REVOKED", true)) CoralDanger else Slate400,
                     onClick = { onSetStatus("REVOKED") }
                 )
             }

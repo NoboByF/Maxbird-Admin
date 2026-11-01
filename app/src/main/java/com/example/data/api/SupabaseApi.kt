@@ -21,6 +21,7 @@ import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpdateSupportLinkStatusPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
+import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.UpdateDeviceBanPayload
 import com.example.data.model.UserGeminiApiKey
 import retrofit2.Response
@@ -212,20 +213,30 @@ interface SupabaseApi {
     @PATCH("rest/v1/devices")
     suspend fun patchDevice(
         @Query("id") idQuery: String,
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<UserDevice>>
 
     @PATCH("rest/v1/devices")
     suspend fun patchDeviceByHash(
         @Query("device_hash") deviceHashQuery: String,
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<UserDevice>>
+
+    @PATCH("rest/v1/devices")
+    suspend fun patchDeviceByDeviceIdColumn(
+        @Query("device_id") deviceIdQuery: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<UserDevice>>
 
     @PATCH("rest/v1/devices")
     suspend fun patchDeviceByDisplayId(
         @Query("display_device_id") displayIdQuery: String,
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<UserDevice>>
 
     @DELETE("rest/v1/devices")
     suspend fun deleteDeviceRecord(
@@ -237,6 +248,11 @@ interface SupabaseApi {
         @Query("device_hash") deviceHashQuery: String
     ): Response<Unit>
 
+    @DELETE("rest/v1/devices")
+    suspend fun deleteDeviceRecordByDeviceIdColumn(
+        @Query("device_id") deviceIdQuery: String
+    ): Response<Unit>
+
     @POST("rest/v1/rpc/admin_approve_device_verification")
     suspend fun approveDeviceVerificationRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
@@ -246,6 +262,42 @@ interface SupabaseApi {
     suspend fun setDeviceBlockStatusRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
+
+    @POST("rest/v1/rpc/admin_toggle_device_ban")
+    suspend fun toggleDeviceBanRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/admin_set_device_course_permissions")
+    suspend fun setDeviceCoursePermissionsRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/admin_set_account_course_permissions")
+    suspend fun setAccountCoursePermissionsRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @GET("rest/v1/device_shikho_accounts")
+    suspend fun getDeviceShikhoAccounts(
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "last_seen_at.desc.nullslast,created_at.desc.nullslast"
+    ): List<DeviceShikhoAccount>
+
+    @GET("rest/v1/device_shikho_accounts")
+    suspend fun getDeviceShikhoAccountsByHash(
+        @Query("device_hash") deviceHashQuery: String,
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "last_seen_at.desc.nullslast"
+    ): List<DeviceShikhoAccount>
+
+    @PATCH("rest/v1/device_shikho_accounts")
+    suspend fun patchDeviceShikhoAccount(
+        @Query("device_hash") deviceHashQuery: String,
+        @Query("user_phone") userPhoneQuery: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<DeviceShikhoAccount>>
 
 
     // =========================================================================
@@ -344,47 +396,47 @@ interface SupabaseApi {
     @POST("rest/v1/rpc/admin_approve_course_access_request")
     suspend fun approveCourseAccessRequestRpc(
         @Body payload: ApproveCourseAccessRequestRpcPayload
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/admin_approve_course_access_request")
     suspend fun approveCourseAccessRequestRpcRaw(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/admin_approve_course_access_with_trial")
     suspend fun approveCourseAccessWithTrialRpcRaw(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/admin_manage_course_trial")
     suspend fun manageCourseTrialRpcRaw(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/admin_set_course_access_offer")
     suspend fun setCourseAccessOfferRpcRaw(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/admin_review_course_payment")
     suspend fun reviewCoursePaymentRpc(
         @Body payload: ReviewCoursePaymentRpcPayload
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/admin_review_course_payment")
     suspend fun reviewCoursePaymentRpcRaw(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/admin_verify_course_payment")
     suspend fun verifyCoursePaymentRpcRaw(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/enforce_overdue_course_installments")
     suspend fun enforceOverdueCourseInstallmentsRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?> = emptyMap()
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     // =========================================================================
     // OneSignal + FCM Admin Push & Student Notification Endpoints

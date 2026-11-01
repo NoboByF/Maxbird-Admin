@@ -83,6 +83,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CourseAccessEnrollment
 import com.example.data.model.CoursePaymentTransaction
+import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.UserDevice
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CoralDanger
@@ -116,6 +117,7 @@ fun DeviceManagementScreen(
     devices: List<UserDevice>,
     enrollments: List<CourseAccessEnrollment> = emptyList(),
     transactions: List<CoursePaymentTransaction> = emptyList(),
+    deviceShikhoAccounts: List<DeviceShikhoAccount> = emptyList(),
     searchQuery: String,
     filter: String,
     isLoading: Boolean,
@@ -130,6 +132,8 @@ fun DeviceManagementScreen(
     onToggleBan: (UserDevice, String?) -> Unit = { _, _ -> },
     onToggleCanViewProfiles: (UserDevice) -> Unit = {},
     onDeleteDevice: (UserDevice) -> Unit = {},
+    onSaveDeviceCoursePermissions: (UserDevice, Boolean, List<String>, List<String>, List<String>, List<String>) -> Unit = { _, _, _, _, _, _ -> },
+    onSaveAccountCoursePermissions: (String, String, Boolean, Boolean, List<String>, List<String>, List<String>, List<String>) -> Unit = { _, _, _, _, _, _, _, _ -> },
     onShowToast: (String) -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -163,6 +167,16 @@ fun DeviceManagementScreen(
 
     // Dialog state for deleting a device record
     var deviceToDelete by remember { mutableStateOf<UserDevice?>(null) }
+
+    // Dialog state for managing Device & Bound Shikho Account Course Permissions
+    var deviceForCoursePerms by remember { mutableStateOf<UserDevice?>(null) }
+    var permRestricted by remember { mutableStateOf(false) }
+    var permClassesText by remember { mutableStateOf("") }
+    var permGroupsText by remember { mutableStateOf("") }
+    var permBatchesText by remember { mutableStateOf("") }
+    var permProgramsText by remember { mutableStateOf("") }
+    var selectedBoundAccount by remember { mutableStateOf<DeviceShikhoAccount?>(null) }
+    var accountAccessGranted by remember { mutableStateOf(true) }
 
     // Sort devices by real parsed timestamp (most recently active / requested first)
     val pendingDevicesList = remember(devices) {
@@ -540,13 +554,21 @@ fun DeviceManagementScreen(
                         transactions = transactions
                     )
                 }
+                val boundAccountsForDevice = remember(device, deviceShikhoAccounts) {
+                    deviceShikhoAccounts.filter { acc ->
+                        acc.deviceHash.equals(device.deviceHash, ignoreCase = true) ||
+                            acc.deviceHash.equals(device.displayDeviceId, ignoreCase = true) ||
+                            acc.deviceHash.equals(device.id, ignoreCase = true)
+                    }
+                }
                 StudentVerificationDeviceCard(
                     device = device,
                     studentProfile = studentProfile,
+                    boundAccounts = boundAccountsForDevice,
                     nowMillis = nowMillis,
                     activeTab = activeTab,
                     onCopyId = {
-                        val toCopy = device.displayDeviceId.ifBlank { device.deviceHash }
+                        val toCopy = device.displayDeviceId.ifBlank { device.effectiveDeviceHash }
                         clipboardManager.setText(AnnotatedString(toCopy))
                         onShowToast("ডিভাইস আইডি কপি করা হয়েছে: $toCopy")
                     },
@@ -558,7 +580,7 @@ fun DeviceManagementScreen(
                         onApproveDevice(device, device.studentNote)
                     },
                     onBlockClick = {
-                        blockReasonInput = device.banReason?.takeIf { it.isNotBlank() }
+                        blockReasonInput = device.effectiveBanReason
                             ?: "অ্যাডমিন কর্তৃক ব্লক করা হয়েছে"
                         deviceToBlock = device
                     },
@@ -571,6 +593,26 @@ fun DeviceManagementScreen(
                     onEditNoteClick = {
                         studentNoteInput = device.studentNote.orEmpty()
                         deviceToEditNote = device
+                    },
+                    onOpenCoursePermissionsClick = {
+                        val firstAcc = boundAccountsForDevice.firstOrNull()
+                        selectedBoundAccount = firstAcc
+                        if (firstAcc != null) {
+                            accountAccessGranted = firstAcc.isAccessGranted
+                            permRestricted = firstAcc.isAccessRestricted
+                            permClassesText = firstAcc.allowedClasses.orEmpty().joinToString(", ")
+                            permGroupsText = firstAcc.allowedGroups.orEmpty().joinToString(", ")
+                            permBatchesText = firstAcc.allowedBatches.orEmpty().joinToString(", ")
+                            permProgramsText = firstAcc.allowedPrograms.orEmpty().joinToString(", ")
+                        } else {
+                            accountAccessGranted = true
+                            permRestricted = device.isAccessRestricted
+                            permClassesText = device.allowedClasses.orEmpty().joinToString(", ")
+                            permGroupsText = device.allowedGroups.orEmpty().joinToString(", ")
+                            permBatchesText = device.allowedBatches.orEmpty().joinToString(", ")
+                            permProgramsText = device.allowedPrograms.orEmpty().joinToString(", ")
+                        }
+                        deviceForCoursePerms = device
                     },
                     onToggleCanViewProfiles = {
                         onToggleCanViewProfiles(device)
@@ -932,6 +974,193 @@ fun DeviceManagementScreen(
             }
         )
     }
+
+    // =========================================================================
+    // Modal 4: Course & Shikho Account Permissions (`admin_set_device_course_permissions` / `admin_set_account_course_permissions`)
+    // =========================================================================
+    deviceForCoursePerms?.let { dev ->
+        val boundAccs = deviceShikhoAccounts.filter { acc ->
+            acc.deviceHash.equals(dev.deviceHash, ignoreCase = true) ||
+                acc.deviceHash.equals(dev.displayDeviceId, ignoreCase = true) ||
+                acc.deviceHash.equals(dev.id, ignoreCase = true)
+        }
+        AlertDialog(
+            onDismissRequest = { deviceForCoursePerms = null },
+            containerColor = Slate850Color,
+            titleContentColor = Color.White,
+            textContentColor = Slate400,
+            shape = RoundedCornerShape(20.dp),
+            title = {
+                Text(
+                    text = "কোর্স ও অ্যাকাউন্ট পারমিশন কন্ট্রোল",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "📱 ${dev.fullPhoneModel} (${dev.displayDeviceId.ifBlank { dev.deviceHash.take(14) }})",
+                        fontSize = 12.sp,
+                        color = NeonCyan,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    if (boundAccs.isNotEmpty()) {
+                        Text(
+                            text = "🔗 বাউন্ড শিখো অ্যাকাউন্ট (${boundAccs.size}টি):",
+                            fontSize = 11.sp,
+                            color = AmberWarning,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            boundAccs.forEach { acc ->
+                                val isSel = selectedBoundAccount?.id == acc.id
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSel) ElectricBlue.copy(alpha = 0.25f) else Slate900,
+                                    border = BorderStroke(1.dp, if (isSel) NeonCyan else Slate700),
+                                    modifier = Modifier.clickable {
+                                        selectedBoundAccount = acc
+                                        accountAccessGranted = acc.isAccessGranted
+                                        permRestricted = acc.isAccessRestricted
+                                        permClassesText = acc.allowedClasses.orEmpty().joinToString(", ")
+                                        permGroupsText = acc.allowedGroups.orEmpty().joinToString(", ")
+                                        permBatchesText = acc.allowedBatches.orEmpty().joinToString(", ")
+                                        permProgramsText = acc.allowedPrograms.orEmpty().joinToString(", ")
+                                    }
+                                ) {
+                                    Text(
+                                        text = "${acc.studentName?.takeIf { it.isNotBlank() } ?: "Account"} • ${acc.userPhone.ifBlank { acc.shikhoUserId.orEmpty() }}",
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                        fontSize = 11.sp,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+
+                        selectedBoundAccount?.let {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "অ্যাকাউন্ট এক্সেস অনুমোদিত (is_access_granted)",
+                                    fontSize = 12.sp,
+                                    color = Color.White,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Switch(
+                                    checked = accountAccessGranted,
+                                    onCheckedChange = { accountAccessGranted = it }
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "নির্দিষ্ট ক্লাস/কোর্সে সীমাবদ্ধ করুন (is_access_restricted)",
+                            fontSize = 12.sp,
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = permRestricted,
+                            onCheckedChange = { permRestricted = it }
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = permClassesText,
+                        onValueChange = { permClassesText = it },
+                        label = { Text("অনুমোদিত ক্লাস (allowed_classes, কমা দিয়ে)", fontSize = 11.sp) },
+                        placeholder = { Text("যেমন: 9, 10, 11, 12", fontSize = 11.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = permGroupsText,
+                        onValueChange = { permGroupsText = it },
+                        label = { Text("অনুমোদিত বিভাগ (allowed_groups)", fontSize = 11.sp) },
+                        placeholder = { Text("যেমন: science, humanities", fontSize = 11.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = permBatchesText,
+                        onValueChange = { permBatchesText = it },
+                        label = { Text("অনুমোদিত ব্যাচ (allowed_batches)", fontSize = 11.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = permProgramsText,
+                        onValueChange = { permProgramsText = it },
+                        label = { Text("অনুমোদিত প্রোগ্রাম আইডি (allowed_programs)", fontSize = 11.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val classesList = permClassesText.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                        val groupsList = permGroupsText.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                        val batchesList = permBatchesText.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                        val programsList = permProgramsText.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+
+                        onSaveDeviceCoursePermissions(
+                            dev,
+                            permRestricted,
+                            classesList,
+                            groupsList,
+                            batchesList,
+                            programsList
+                        )
+                        selectedBoundAccount?.let { acc ->
+                            onSaveAccountCoursePermissions(
+                                acc.deviceHash.ifBlank { dev.effectiveDeviceHash },
+                                acc.userPhone.ifBlank { acc.shikhoUserId.orEmpty() },
+                                accountAccessGranted,
+                                permRestricted,
+                                classesList,
+                                groupsList,
+                                batchesList,
+                                programsList
+                            )
+                        }
+                        deviceForCoursePerms = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("পারমিশন সেভ করুন", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { deviceForCoursePerms = null },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Slate400)
+                ) {
+                    Text("বাতিল")
+                }
+            }
+        )
+    }
 }
 
 private fun matchesDeviceQuery(
@@ -947,7 +1176,7 @@ private fun matchesDeviceQuery(
         (dev.deviceBrand?.contains(q, ignoreCase = true) == true) ||
         dev.fullPhoneModel.contains(q, ignoreCase = true) ||
         dev.displayDeviceId.contains(q, ignoreCase = true) ||
-        dev.deviceHash.contains(q, ignoreCase = true) ||
+        dev.effectiveDeviceHash.contains(q, ignoreCase = true) ||
         dev.extractedPhoneFromDevice.contains(q, ignoreCase = true)
     ) {
         return true
@@ -1115,6 +1344,7 @@ private fun EmptyDeviceTabState(
 private fun StudentVerificationDeviceCard(
     device: UserDevice,
     studentProfile: StudentDeviceMatcher.DeviceStudentProfile?,
+    boundAccounts: List<DeviceShikhoAccount> = emptyList(),
     nowMillis: Long,
     activeTab: String,
     onCopyId: () -> Unit,
@@ -1124,6 +1354,7 @@ private fun StudentVerificationDeviceCard(
     onUnblockAndApproveClick: () -> Unit,
     onRevokeToPendingClick: () -> Unit,
     onEditNoteClick: () -> Unit,
+    onOpenCoursePermissionsClick: () -> Unit = {},
     onToggleCanViewProfiles: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
@@ -1562,6 +1793,38 @@ private fun StudentVerificationDeviceCard(
                         )
                     }
                 }
+
+                // Course & Account Permissions Button (`admin_set_device_course_permissions` / `admin_set_account_course_permissions`)
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Slate950,
+                    border = BorderStroke(
+                        1.dp,
+                        if (device.isAccessRestricted || boundAccounts.any { it.isAccessRestricted }) AmberWarning else Slate700
+                    ),
+                    modifier = Modifier.clickable { onOpenCoursePermissionsClick() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.School,
+                            contentDescription = "Course Permissions",
+                            tint = if (device.isAccessRestricted) AmberWarning else EmeraldSuccess,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = "কোর্স পারমিশন",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            )
+                        )
+                    }
+                }
             }
 
             // Show saved student_note if present
@@ -1602,7 +1865,8 @@ private fun StudentVerificationDeviceCard(
             }
 
             // 5. If Blocked, show Ban Reason Banner
-            if (isBlocked && !device.banReason.isNullOrBlank()) {
+            val banReasonToShow = device.effectiveBanReason
+            if (isBlocked && !banReasonToShow.isNullOrBlank()) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = CoralDanger.copy(alpha = 0.14f),
@@ -1623,7 +1887,7 @@ private fun StudentVerificationDeviceCard(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "ব্লক করার কারণ: ${device.banReason}",
+                            text = "ব্লক করার কারণ: $banReasonToShow",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = Color.White,
                                 fontWeight = FontWeight.SemiBold,

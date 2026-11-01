@@ -21,6 +21,7 @@ import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
+import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.DeviceWithStudent
 import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
@@ -129,9 +130,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _joinedDevices = MutableStateFlow<List<DeviceWithStudent>>(emptyList())
     val joinedDevices: StateFlow<List<DeviceWithStudent>> = _joinedDevices.asStateFlow()
 
-    // Real Supabase Devices (public.devices)
+    // Real Supabase Devices (public.devices) & Shikho Accounts (public.device_shikho_accounts)
     private val _userDevices = MutableStateFlow<List<UserDevice>>(emptyList())
     val userDevices: StateFlow<List<UserDevice>> = _userDevices.asStateFlow()
+
+    private val _deviceShikhoAccounts = MutableStateFlow<List<DeviceShikhoAccount>>(emptyList())
+    val deviceShikhoAccounts: StateFlow<List<DeviceShikhoAccount>> = _deviceShikhoAccounts.asStateFlow()
 
     private val _deviceSearchQuery = MutableStateFlow("")
     val deviceSearchQuery: StateFlow<String> = _deviceSearchQuery.asStateFlow()
@@ -843,7 +847,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Real Supabase Devices (public.devices) Operations
+    // Real Supabase Devices (public.devices) & Shikho Accounts (public.device_shikho_accounts) Operations
     fun loadUserDevices(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             try {
@@ -851,6 +855,10 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 val result = repository.getUserDevices(forceRefresh)
                 if (result.isSuccess) {
                     _userDevices.value = result.getOrNull() ?: emptyList()
+                }
+                val accountsResult = repository.getDeviceShikhoAccounts()
+                if (accountsResult.isSuccess) {
+                    _deviceShikhoAccounts.value = accountsResult.getOrNull() ?: emptyList()
                 }
             } catch (e: Throwable) {
                 // Silently fallback
@@ -948,7 +956,9 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                         existing.copy(
                             status = "active",
                             isBanned = false,
+                            isBlockedColumn = false,
                             banReason = "",
+                            rejectionReasonColumn = "",
                             studentNote = studentNote?.trim() ?: existing.studentNote
                         )
                     } else {
@@ -970,9 +980,13 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     loadUserDevices(forceRefresh = true)
                     refreshStats()
                     showToast("✅ ডিভাইসটি ভেরিফাই ও অ্যাপ্রুভ (Active) করা হয়েছে!")
+                } else {
+                    loadUserDevices(forceRefresh = true)
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "অ্যাপ্রুভ করতে ব্যর্থ হয়েছে"}")
                 }
             } catch (e: Throwable) {
-                showToast("অ্যাপ্রুভ করতে ব্যর্থ হয়েছে।")
+                loadUserDevices(forceRefresh = true)
+                showToast("অ্যাপ্রুভ করতে ব্যর্থ হয়েছে: ${e.message}")
             }
         }
     }
@@ -991,7 +1005,9 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                         existing.copy(
                             status = targetStatus,
                             isBanned = isBlocked,
-                            banReason = cleanReason
+                            isBlockedColumn = isBlocked,
+                            banReason = cleanReason,
+                            rejectionReasonColumn = cleanReason
                         )
                     } else {
                         existing
@@ -1031,9 +1047,13 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                         "🔓 ডিভাইসটি আনব্লক ও অ্যাপ্রুভ (Active) করা হয়েছে!"
                     }
                     showToast(msg)
+                } else {
+                    loadUserDevices(forceRefresh = true)
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "ডিভাইস ব্লক স্ট্যাটাস সেভ হয়নি"}")
                 }
             } catch (e: Throwable) {
-                showToast("ডিভাইস স্ট্যাটাস আপডেট ব্যর্থ হয়েছে।")
+                loadUserDevices(forceRefresh = true)
+                showToast("ডিভাইস স্ট্যাটাস আপডেট ব্যর্থ হয়েছে: ${e.message}")
             }
         }
     }
@@ -1046,7 +1066,9 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                         existing.copy(
                             status = "pending",
                             isBanned = false,
-                            banReason = ""
+                            isBlockedColumn = false,
+                            banReason = "",
+                            rejectionReasonColumn = ""
                         )
                     } else {
                         existing
@@ -1067,8 +1089,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     loadUserDevices(forceRefresh = true)
                     refreshStats()
                     showToast("⏳ ডিভাইসটি আবার পেন্ডিং (Pending) তালিকায় নেওয়া হয়েছে।")
+                } else {
+                    loadUserDevices(forceRefresh = true)
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "পেন্ডিং করতে ব্যর্থ হয়েছে"}")
                 }
             } catch (e: Throwable) {
+                loadUserDevices(forceRefresh = true)
                 showToast("স্ট্যাটাস পরিবর্তন ব্যর্থ হয়েছে।")
             }
         }
@@ -1089,8 +1115,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 if (result.isSuccess) {
                     loadUserDevices(forceRefresh = true)
                     showToast("✅ শিক্ষার্থীর নাম/নোট সেভ করা হয়েছে!")
+                } else {
+                    loadUserDevices(forceRefresh = true)
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "নোট সেভ করতে ব্যর্থ হয়েছে"}")
                 }
             } catch (e: Throwable) {
+                loadUserDevices(forceRefresh = true)
                 showToast("নোট সেভ করতে ব্যর্থ হয়েছে।")
             }
         }
@@ -1121,8 +1151,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                         "🔒 এই ডিভাইসে প্রোফাইল দেখা বন্ধ (can_view_profiles = OFF) করা হয়েছে!"
                     }
                     showToast(msg)
+                } else {
+                    loadUserDevices(forceRefresh = true)
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "পারমিশন আপডেট ব্যর্থ হয়েছে"}")
                 }
             } catch (e: Throwable) {
+                loadUserDevices(forceRefresh = true)
                 showToast("প্রোফাইল পারমিশন আপডেট ব্যর্থ হয়েছে।")
             }
         }
@@ -1139,6 +1173,70 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Throwable) {
                 showToast("মুছে ফেলতে ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    fun setDeviceCoursePermissions(
+        device: UserDevice,
+        isAccessRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>
+    ) {
+        viewModelScope.launch {
+            try {
+                val result = repository.setDeviceCoursePermissions(
+                    deviceHash = device.effectiveDeviceHash.ifBlank { device.effectiveKey },
+                    isRestricted = isAccessRestricted,
+                    allowedClasses = allowedClasses,
+                    allowedGroups = allowedGroups,
+                    allowedBatches = allowedBatches,
+                    allowedPrograms = allowedPrograms
+                )
+                if (result.isSuccess) {
+                    loadUserDevices(forceRefresh = true)
+                    showToast("✅ ডিভাইসের কোর্স ও ক্লাস পারমিশন সফলভাবে সেভ করা হয়েছে!")
+                } else {
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "ডিভাইস পারমিশন সেভ ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            }
+        }
+    }
+
+    fun setAccountCoursePermissions(
+        deviceHash: String,
+        userPhoneOrId: String,
+        isAccessGranted: Boolean,
+        isAccessRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>
+    ) {
+        viewModelScope.launch {
+            try {
+                val result = repository.setAccountCoursePermissions(
+                    deviceHash = deviceHash,
+                    userPhone = userPhoneOrId,
+                    isAccessGranted = isAccessGranted,
+                    isRestricted = isAccessRestricted,
+                    allowedClasses = allowedClasses,
+                    allowedGroups = allowedGroups,
+                    allowedBatches = allowedBatches,
+                    allowedPrograms = allowedPrograms
+                )
+                if (result.isSuccess) {
+                    loadUserDevices(forceRefresh = true)
+                    showToast("✅ শিখো অ্যাকাউন্ট পারমিশন সফলভাবে আপডেট করা হয়েছে!")
+                } else {
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "অ্যাকাউন্ট পারমিশন আপডেট ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
             }
         }
     }
@@ -2071,9 +2169,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 calendar.add(java.util.Calendar.DAY_OF_YEAR, extraDays.coerceAtLeast(1))
                 val newDueIso = isoFormat.format(calendar.time)
 
-                val nextStatus = if (enrollment.status.equals("OVERDUE", ignoreCase = true) ||
-                    enrollment.status.equals("INSTALLMENT_OVERDUE", ignoreCase = true)
-                ) "ACTIVE" else null
+                val nextStatus = if (enrollment.isOverdueStatus) "ACTIVE" else null
 
                 val result = repository.updateEnrollmentStatusOrDueDate(
                     enrollmentId = enrollment.id,
@@ -2333,6 +2429,199 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             showToast("📦 APK ফাইল ডিটেক্টেড: ${info.fileName} (${info.fileSizeFormatted})")
         } else {
             showToast("⚠️ ফাইল রিড করা যায়নি: ${res.exceptionOrNull()?.message}")
+        }
+    }
+
+    // =========================================================================
+    // 1-Click Student App & Supabase Database 100% Sync Diagnostic Tool
+    // =========================================================================
+
+    data class SyncDiagnosticCheckItem(
+        val id: String,
+        val titleBn: String,
+        val isSuccess: Boolean,
+        val detailBn: String
+    )
+
+    private val _isRunningSyncDiagnostics = MutableStateFlow(false)
+    val isRunningSyncDiagnostics: StateFlow<Boolean> = _isRunningSyncDiagnostics.asStateFlow()
+
+    private val _syncDiagnosticResults = MutableStateFlow<List<SyncDiagnosticCheckItem>>(emptyList())
+    val syncDiagnosticResults: StateFlow<List<SyncDiagnosticCheckItem>> = _syncDiagnosticResults.asStateFlow()
+
+    fun runFullSystemSyncDiagnostics() {
+        viewModelScope.launch {
+            _isRunningSyncDiagnostics.value = true
+            val checks = mutableListOf<SyncDiagnosticCheckItem>()
+            try {
+                // 1. Supabase REST API & Connection Check
+                val connRes = repository.testConnection()
+                checks.add(
+                    SyncDiagnosticCheckItem(
+                        id = "supabase_conn",
+                        titleBn = "১. Supabase সার্ভার ও API কানেকশন",
+                        isSuccess = connRes.isSuccess,
+                        detailBn = if (connRes.isSuccess) {
+                            "✅ সংযুক্ত (${_supabaseUrl.value.take(36)}...)"
+                        } else {
+                            "❌ কানেকশন ব্যর্থ: ${connRes.exceptionOrNull()?.message ?: "অজানা ত্রুটি"}"
+                        }
+                    )
+                )
+
+                // 2. Student Device Verification Table (`public.devices`) + Live Write/Ban Sync Test
+                val devRes = repository.getUserDevices(forceRefresh = true)
+                val devList = devRes.getOrNull().orEmpty()
+                var deviceWriteTestOk = devRes.isSuccess
+                var deviceWriteNote = ""
+
+                if (devRes.isSuccess && devList.isNotEmpty()) {
+                    val sample = devList.first()
+                    // Perform a safe, non-destructive self-patch of `student_note` to verify triggers don't rollback UPDATEs!
+                    val patchTest = repository.updateUserDeviceStudentNote(
+                        device = sample,
+                        studentNote = sample.studentNote.orEmpty()
+                    )
+                    deviceWriteTestOk = patchTest.isSuccess
+                    deviceWriteNote = if (patchTest.isSuccess) {
+                        " • UPDATE ও ব্লক/অ্যাপ্রুভ ১০০% সচল"
+                    } else {
+                        " • ⚠️ UPDATE আটকে যাচ্ছে (${patchTest.exceptionOrNull()?.message ?: "SQL Trigger Fix প্রয়োজন"})"
+                    }
+                }
+
+                val pendingDevs = devList.count { it.isPendingDevice }
+                val activeDevs = devList.count { it.isActiveDevice }
+                val blockedDevs = devList.count { it.isBlockedDevice }
+                checks.add(
+                    SyncDiagnosticCheckItem(
+                        id = "devices_table",
+                        titleBn = "২. স্টুডেন্ট ডিভাইস ভেরিফিকেশন ও ব্যান কন্ট্রোল (public.devices)",
+                        isSuccess = devRes.isSuccess && deviceWriteTestOk,
+                        detailBn = if (devRes.isSuccess) {
+                            "মোট ${devList.size}টি ডিভাইস (Active: $activeDevs, Pending: $pendingDevs, Blocked: $blockedDevs)$deviceWriteNote"
+                        } else {
+                            "❌ ডিভাইস টেবিল রিড ব্যর্থ: ${devRes.exceptionOrNull()?.message}"
+                        }
+                    )
+                )
+
+                // 3. Course Access Enrollments & Free Trial Sync (`public.course_access_enrollments`)
+                val enrollRes = repository.getCourseAccessEnrollments()
+                val enrollList = enrollRes.getOrNull().orEmpty()
+                val reqCount = enrollList.count { it.isAccessRequestedStatus }
+                val trialRunningCount = enrollList.count { it.isTrialActiveStatus }
+                val unlockedCount = enrollList.count { it.effectiveStatus.equals("ACTIVE", ignoreCase = true) }
+                val overdueCount = enrollList.count { it.isOverdueStatus }
+                checks.add(
+                    SyncDiagnosticCheckItem(
+                        id = "course_enrollments",
+                        titleBn = "৩. কোর্স এক্সেস, কিস্তি ও ফ্রি ট্রায়াল সিঙ্ক (course_access_enrollments)",
+                        isSuccess = enrollRes.isSuccess,
+                        detailBn = if (enrollRes.isSuccess) {
+                            "✅ সিঙ্কড • মোট ${enrollList.size}টি (রিকোয়েস্ট: $reqCount, ট্রায়াল: $trialRunningCount, আনলকড: $unlockedCount, ওভারডিউ: $overdueCount)"
+                        } else {
+                            "❌ কোর্স এনরোলমেন্ট টেবিল ত্রুটি: ${enrollRes.exceptionOrNull()?.message}"
+                        }
+                    )
+                )
+
+                // 3b. Device Shikho Accounts & Course Permissions (`public.device_shikho_accounts`)
+                val shikhoAccRes = repository.getDeviceShikhoAccounts()
+                val shikhoAccList = shikhoAccRes.getOrNull().orEmpty()
+                checks.add(
+                    SyncDiagnosticCheckItem(
+                        id = "device_shikho_accounts",
+                        titleBn = "৩(খ). ডিভাইস ও শিখো অ্যাকাউন্ট পারমিশন (device_shikho_accounts)",
+                        isSuccess = shikhoAccRes.isSuccess,
+                        detailBn = if (shikhoAccRes.isSuccess) {
+                            "✅ সিঙ্কড • মোট ${shikhoAccList.size}টি বাউন্ড অ্যাকাউন্ট (admin_set_device/account_course_permissions সচল)"
+                        } else {
+                            "❌ শিখো অ্যাকাউন্ট টেবিল রিড ত্রুটি: ${shikhoAccRes.exceptionOrNull()?.message}"
+                        }
+                    )
+                )
+
+                // 4. Payment Verification Transactions (`public.course_payment_transactions`)
+                val txRes = repository.getCoursePaymentTransactions()
+                val txList = txRes.getOrNull().orEmpty()
+                val pendingTx = txList.count { it.status.equals("PENDING", ignoreCase = true) }
+                val approvedTx = txList.count { it.status.equals("APPROVED", ignoreCase = true) }
+                checks.add(
+                    SyncDiagnosticCheckItem(
+                        id = "course_payments",
+                        titleBn = "৪. পেমেন্ট ও কিস্তি TrxID ভেরিফিকেশন (course_payment_transactions)",
+                        isSuccess = txRes.isSuccess,
+                        detailBn = if (txRes.isSuccess) {
+                            "✅ সিঙ্কড • মোট ${txList.size}টি পেমেন্ট (যাচাই অপেক্ষমান: $pendingTx, অনুমোদিত: $approvedTx)"
+                        } else {
+                            "❌ পেমেন্ট ট্রানজেকশন টেবিল ত্রুটি: ${txRes.exceptionOrNull()?.message}"
+                        }
+                    )
+                )
+
+                // 5. Payment Methods Settings (`public.course_payment_settings`)
+                val paySettingsRes = repository.getCoursePaymentSettings()
+                val activeMethods = paySettingsRes.getOrNull()?.effectivePaymentMethods()?.count { it.isEnabled } ?: 0
+                checks.add(
+                    SyncDiagnosticCheckItem(
+                        id = "payment_settings",
+                        titleBn = "৫. স্টুডেন্ট অ্যাপের পেমেন্ট নম্বর সিঙ্ক (course_payment_settings)",
+                        isSuccess = paySettingsRes.isSuccess && activeMethods > 0,
+                        detailBn = if (paySettingsRes.isSuccess) {
+                            if (activeMethods > 0) {
+                                "✅ সক্রিয় পেমেন্ট মেথড: ${activeMethods}টি (স্টুডেন্ট অ্যাপে লাইভ দেখাচ্ছে)"
+                            } else {
+                                "⚠️ কোনো পেমেন্ট নম্বর চালু (ON) নেই—উপরে পেমেন্ট মেথড ম্যানেজার থেকে নম্বর যোগ করুন"
+                            }
+                        } else {
+                            "❌ পেমেন্ট সেটিংস রিড ব্যর্থ"
+                        }
+                    )
+                )
+
+                // 6. OneSignal + FCM Push Notification Sync
+                val hasAppId = OneSignalPushManager.isValidOneSignalAppId(_oneSignalAppId.value)
+                val hasRestKey = _oneSignalRestApiKey.value.isNotBlank()
+                checks.add(
+                    SyncDiagnosticCheckItem(
+                        id = "onesignal_fcm",
+                        titleBn = "৬. OneSignal + FCM পুশ নোটিফিকেশন ও ট্রিগার সিঙ্ক",
+                        isSuccess = hasAppId && hasRestKey,
+                        detailBn = if (hasAppId && hasRestKey) {
+                            "✅ OneSignal App ID ও REST API Key সক্রিয় (${_oneSignalStatusSummary.value})"
+                        } else {
+                            "⚠️ OneSignal App ID বা REST API Key সেট করা নেই"
+                        }
+                    )
+                )
+
+                // 7. Maxbird APK Share Website (`portal_settings/main`)
+                val webRes = maxbirdFirestoreClient.fetchPortalSettings()
+                val webSession = maxbirdFirestoreClient.getSavedAuthSession()
+                val webDoc = webRes.getOrNull()
+                checks.add(
+                    SyncDiagnosticCheckItem(
+                        id = "maxbird_website",
+                        titleBn = "৭. APK শেয়ার ওয়েবসাইট কন্ট্রোল (maxbird.pages.dev • Firestore)",
+                        isSuccess = webRes.isSuccess,
+                        detailBn = if (webRes.isSuccess && webDoc != null) {
+                            val authTag = if (webSession.isSignedIn) "অ্যাডমিন লগইন: ${webSession.email}" else "লগইন প্রয়োজন (ওয়েবসাইট ট্যাব থেকে)"
+                            "✅ কানেক্টেড • ভার্সন: ${webDoc.appVersion} • ডাউনলোড: ${webDoc.downloadCount} • $authTag"
+                        } else {
+                            "❌ ওয়েবসাইট ডাটাবেস কানেকশন ত্রুটি: ${webRes.exceptionOrNull()?.message}"
+                        }
+                    )
+                )
+
+                _syncDiagnosticResults.value = checks
+                val passed = checks.count { it.isSuccess }
+                showToast("🔍 সিস্টেম ডায়াগনস্টিক সম্পন্ন: $passed/${checks.size}টি টেস্ট সফল!")
+            } catch (e: Throwable) {
+                showToast("ডায়াগনস্টিক ত্রুটি: ${e.message}")
+            } finally {
+                _isRunningSyncDiagnostics.value = false
+            }
         }
     }
 

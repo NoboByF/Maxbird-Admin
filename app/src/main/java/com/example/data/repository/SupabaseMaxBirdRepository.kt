@@ -14,6 +14,7 @@ import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
+import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.DeviceWithStudent
 import com.example.data.model.DynamicPaymentMethodItem
 import com.example.data.model.ManageCourseTrialPayload
@@ -1033,43 +1034,102 @@ class SupabaseMaxBirdRepository(
 
     private suspend fun patchPublicDeviceRecord(
         device: UserDevice,
-        fullPayload: Map<String, Any?>,
-        minimalPayload: Map<String, Any?> = fullPayload
-    ): Boolean {
+        candidatePayloads: List<Map<String, Any?>>
+    ): Result<UserDevice?> {
         val api = supabaseClient.getApi()
-        var patched = false
+        var lastErrorMsg = ""
 
-        suspend fun attemptPatch(payloadToUse: Map<String, Any?>): Boolean {
-            var ok = false
-            if (device.deviceHash.isNotBlank()) {
+        val cleanPayloads = candidatePayloads.map { map ->
+            map.filterValues { it != null }
+        }.filter { it.isNotEmpty() }.distinct()
+
+        val hashToUse = device.effectiveDeviceHash
+        val rawHash = device.deviceHash
+        val rawDeviceIdCol = device.deviceIdColumn
+        val rowId = device.id
+        val displayId = device.displayDeviceId
+
+        for (payload in cleanPayloads) {
+            // 1. Try by device_hash
+            val hashCandidates = listOf(rawHash, hashToUse).filter { it.isNotBlank() }.distinct()
+            for (h in hashCandidates) {
                 try {
-                    val res = api.patchDeviceByHash("eq.${device.deviceHash}", payloadToUse)
-                    if (res.isSuccessful) ok = true
-                } catch (_: Exception) {
+                    val res = api.patchDeviceByHash("eq.$h", payload)
+                    if (res.isSuccessful && !res.body().isNullOrEmpty()) {
+                        return Result.success(res.body()?.firstOrNull())
+                    } else if (!res.isSuccessful) {
+                        val err = res.errorBody()?.string().orEmpty()
+                        if (err.isNotBlank()) lastErrorMsg = err
+                    }
+                } catch (e: Exception) {
+                    if (lastErrorMsg.isBlank()) lastErrorMsg = e.message.orEmpty()
                 }
             }
-            if (!ok && device.id.isNotBlank()) {
+
+            // 2. Try by id (UUID or primary key)
+            if (rowId.isNotBlank()) {
                 try {
-                    val res = api.patchDevice("eq.${device.id}", payloadToUse)
-                    if (res.isSuccessful) ok = true
-                } catch (_: Exception) {
+                    val res = api.patchDevice("eq.$rowId", payload)
+                    if (res.isSuccessful && !res.body().isNullOrEmpty()) {
+                        return Result.success(res.body()?.firstOrNull())
+                    } else if (!res.isSuccessful) {
+                        val err = res.errorBody()?.string().orEmpty()
+                        if (err.isNotBlank()) lastErrorMsg = err
+                    }
+                } catch (e: Exception) {
+                    if (lastErrorMsg.isBlank()) lastErrorMsg = e.message.orEmpty()
                 }
             }
-            if (!ok && device.displayDeviceId.isNotBlank()) {
+
+            // 3. Try by device_id column (if schema uses device_id)
+            val deviceIdCandidates = listOf(rawDeviceIdCol, hashToUse).filter { it.isNotBlank() }.distinct()
+            for (dId in deviceIdCandidates) {
                 try {
-                    val res = api.patchDeviceByDisplayId("eq.${device.displayDeviceId}", payloadToUse)
-                    if (res.isSuccessful) ok = true
-                } catch (_: Exception) {
+                    val res = api.patchDeviceByDeviceIdColumn("eq.$dId", payload)
+                    if (res.isSuccessful && !res.body().isNullOrEmpty()) {
+                        return Result.success(res.body()?.firstOrNull())
+                    } else if (!res.isSuccessful) {
+                        val err = res.errorBody()?.string().orEmpty()
+                        if (err.isNotBlank()) lastErrorMsg = err
+                    }
+                } catch (e: Exception) {
+                    if (lastErrorMsg.isBlank()) lastErrorMsg = e.message.orEmpty()
                 }
             }
-            return ok
+
+            // 4. Try by display_device_id
+            if (displayId.isNotBlank()) {
+                try {
+                    val res = api.patchDeviceByDisplayId("eq.$displayId", payload)
+                    if (res.isSuccessful && !res.body().isNullOrEmpty()) {
+                        return Result.success(res.body()?.firstOrNull())
+                    } else if (!res.isSuccessful) {
+                        val err = res.errorBody()?.string().orEmpty()
+                        if (err.isNotBlank()) lastErrorMsg = err
+                    }
+                } catch (e: Exception) {
+                    if (lastErrorMsg.isBlank()) lastErrorMsg = e.message.orEmpty()
+                }
+            }
         }
 
-        patched = attemptPatch(fullPayload)
-        if (!patched && minimalPayload != fullPayload) {
-            patched = attemptPatch(minimalPayload)
-        }
-        return patched
+        return Result.failure(
+            Exception(
+                if (lastErrorMsg.isNotBlank()) {
+                    "ডাটাবেস আপডেট ত্রুটি: $lastErrorMsg"
+                } else {
+                    "ডিভাইসটি ডাটাবেসে আপডেট করা যায়নি (0 rows matched)"
+                }
+            )
+        )
+    }
+
+    private fun matchesCachedDevice(item: UserDevice, target: UserDevice): Boolean {
+        if (target.effectiveKey.isNotBlank() && item.effectiveKey == target.effectiveKey) return true
+        if (target.effectiveDeviceHash.isNotBlank() && item.effectiveDeviceHash == target.effectiveDeviceHash) return true
+        if (target.id.isNotBlank() && item.id == target.id) return true
+        if (target.displayDeviceId.isNotBlank() && item.displayDeviceId == target.displayDeviceId) return true
+        return false
     }
 
     override suspend fun approveUserDeviceVerification(
@@ -1079,18 +1139,15 @@ class SupabaseMaxBirdRepository(
         val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
         val resolvedNote = studentNote?.trim() ?: device.studentNote
 
-        // Update local cache optimistically
-        val idx = cachedUserDevices.indexOfFirst {
-            (device.deviceHash.isNotBlank() && it.deviceHash == device.deviceHash) ||
-                (device.id.isNotBlank() && it.id == device.id) ||
-                (device.displayDeviceId.isNotBlank() && it.displayDeviceId == device.displayDeviceId)
-        }
+        val idx = cachedUserDevices.indexOfFirst { matchesCachedDevice(it, device) }
         if (idx != -1) {
             val old = cachedUserDevices[idx]
             cachedUserDevices[idx] = old.copy(
                 status = "active",
                 isBanned = false,
+                isBlockedColumn = false,
                 banReason = "",
+                rejectionReasonColumn = "",
                 studentNote = resolvedNote ?: old.studentNote,
                 approvedAt = nowIso,
                 updatedAt = nowIso
@@ -1099,37 +1156,67 @@ class SupabaseMaxBirdRepository(
 
         try {
             val api = supabaseClient.getApi()
+            val effectiveHash = device.effectiveDeviceHash
+            var rpcOk = false
+
             // 1. Call official RPC `admin_approve_device_verification(p_device_hash)`
-            if (device.deviceHash.isNotBlank()) {
+            if (effectiveHash.isNotBlank()) {
                 try {
-                    api.approveDeviceVerificationRpc(
-                        mapOf("p_device_hash" to device.deviceHash)
+                    val rpcRes = api.approveDeviceVerificationRpc(
+                        mapOf("p_device_hash" to effectiveHash)
                     )
+                    if (rpcRes.isSuccessful) rpcOk = true
                 } catch (_: Exception) {
                 }
             }
 
-            // 2. Also ensure `public.devices` row has `status = 'active', is_banned = false, ban_reason = '', approved_at = now()`
-            val fullMap = mutableMapOf<String, Any?>(
+            // 2. Patch `public.devices` across all possible schema variants
+            val dualSchemaMap = mutableMapOf<String, Any?>(
+                "status" to "active",
+                "is_banned" to false,
+                "is_blocked" to false,
+                "ban_reason" to "",
+                "rejection_reason" to "",
+                "approved_at" to nowIso,
+                "updated_at" to nowIso
+            )
+            val standardSchemaMap = mutableMapOf<String, Any?>(
                 "status" to "active",
                 "is_banned" to false,
                 "ban_reason" to "",
                 "approved_at" to nowIso,
                 "updated_at" to nowIso
             )
+            val triggerSchemaMap = mutableMapOf<String, Any?>(
+                "status" to "approved",
+                "is_blocked" to false,
+                "rejection_reason" to "",
+                "approved_at" to nowIso,
+                "updated_at" to nowIso
+            )
             val minimalMap = mutableMapOf<String, Any?>(
                 "status" to "active",
-                "is_banned" to false,
-                "ban_reason" to ""
+                "is_banned" to false
             )
             if (studentNote != null) {
-                fullMap["student_note"] = studentNote.trim()
-                minimalMap["student_note"] = studentNote.trim()
+                val cleanNote = studentNote.trim()
+                dualSchemaMap["student_note"] = cleanNote
+                standardSchemaMap["student_note"] = cleanNote
+                triggerSchemaMap["student_note"] = cleanNote
+                minimalMap["student_note"] = cleanNote
             }
-            patchPublicDeviceRecord(device, fullMap, minimalMap)
-            Result.success(Unit)
+
+            val patchResult = patchPublicDeviceRecord(
+                device = device,
+                candidatePayloads = listOf(dualSchemaMap, standardSchemaMap, triggerSchemaMap, minimalMap)
+            )
+            if (patchResult.isSuccess || rpcOk) {
+                Result.success(Unit)
+            } else {
+                Result.failure(patchResult.exceptionOrNull() ?: Exception("অ্যাপ্রুভ ব্যর্থ হয়েছে"))
+            }
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
@@ -1146,17 +1233,15 @@ class SupabaseMaxBirdRepository(
             ""
         }
 
-        val idx = cachedUserDevices.indexOfFirst {
-            (device.deviceHash.isNotBlank() && it.deviceHash == device.deviceHash) ||
-                (device.id.isNotBlank() && it.id == device.id) ||
-                (device.displayDeviceId.isNotBlank() && it.displayDeviceId == device.displayDeviceId)
-        }
+        val idx = cachedUserDevices.indexOfFirst { matchesCachedDevice(it, device) }
         if (idx != -1) {
             val old = cachedUserDevices[idx]
             cachedUserDevices[idx] = old.copy(
                 status = targetStatus,
                 isBanned = isBlocked,
+                isBlockedColumn = isBlocked,
                 banReason = cleanReason,
+                rejectionReasonColumn = cleanReason,
                 approvedAt = if (!isBlocked) nowIso else old.approvedAt,
                 updatedAt = nowIso
             )
@@ -1164,106 +1249,171 @@ class SupabaseMaxBirdRepository(
 
         try {
             val api = supabaseClient.getApi()
-            // 1. Call official RPC `admin_set_device_block_status(p_device_hash, p_is_banned, p_reason)`
-            if (device.deviceHash.isNotBlank()) {
+            val effectiveHash = device.effectiveDeviceHash
+            var rpcOk = false
+
+            // 1. Call official RPC `admin_set_device_block_status(p_device_hash, p_is_banned, p_reason)` -> RETURNS void
+            if (effectiveHash.isNotBlank()) {
                 try {
                     val res = api.setDeviceBlockStatusRpc(
                         mapOf(
-                            "p_device_hash" to device.deviceHash,
+                            "p_device_hash" to effectiveHash,
                             "p_is_banned" to isBlocked,
                             "p_reason" to cleanReason
                         )
                     )
-                    if (!res.isSuccessful) {
-                        api.setDeviceBlockStatusRpc(
+                    if (res.isSuccessful) {
+                        rpcOk = true
+                    } else {
+                        val toggleRes = api.toggleDeviceBanRpc(
                             mapOf(
-                                "p_device_hash" to device.deviceHash,
-                                "p_is_blocked" to isBlocked,
+                                "p_device_hash" to effectiveHash,
+                                "p_is_banned" to isBlocked,
                                 "p_reason" to cleanReason
                             )
                         )
+                        if (isJsonRpcSuccess(toggleRes)) rpcOk = true
                     }
                 } catch (_: Exception) {
                 }
 
-                // If unblocking & approving, also call approve RPC so device becomes active immediately
                 if (!isBlocked) {
                     try {
-                        api.approveDeviceVerificationRpc(
-                            mapOf("p_device_hash" to device.deviceHash)
+                        val appRes = api.approveDeviceVerificationRpc(
+                            mapOf("p_device_hash" to effectiveHash)
                         )
+                        if (appRes.isSuccessful) rpcOk = true
                     } catch (_: Exception) {
                     }
                 }
             }
 
-            // 2. Patch `public.devices` directly as well (including `banned_at` column from SQL schema)
-            val fullMap = mutableMapOf<String, Any?>(
+            // 2. Patch `public.devices` directly across all schema variations (no null values in Map!)
+            val dualSchemaMap = mutableMapOf<String, Any?>(
+                "status" to targetStatus,
+                "is_banned" to isBlocked,
+                "is_blocked" to isBlocked,
+                "ban_reason" to cleanReason,
+                "rejection_reason" to cleanReason,
+                "updated_at" to nowIso
+            )
+            val standardSchemaMap = mutableMapOf<String, Any?>(
                 "status" to targetStatus,
                 "is_banned" to isBlocked,
                 "ban_reason" to cleanReason,
-                "banned_at" to if (isBlocked) nowIso else null,
                 "updated_at" to nowIso
             )
-            if (!isBlocked) {
-                fullMap["approved_at"] = nowIso
-            }
-            val minimalMap = mapOf<String, Any?>(
+            val triggerSchemaMap = mutableMapOf<String, Any?>(
+                "status" to if (isBlocked) "blocked" else "approved",
+                "is_blocked" to isBlocked,
+                "rejection_reason" to cleanReason,
+                "updated_at" to nowIso
+            )
+            val minimalBannedMap = mapOf<String, Any?>(
                 "status" to targetStatus,
                 "is_banned" to isBlocked,
                 "ban_reason" to cleanReason
             )
-            patchPublicDeviceRecord(device, fullMap, minimalMap)
+            val minimalBlockedMap = mapOf<String, Any?>(
+                "status" to targetStatus,
+                "is_blocked" to isBlocked
+            )
 
-            // 3. Also sync `is_blocked` in `public.activated_devices` if present for this `device_hash`
-            if (device.deviceHash.isNotBlank()) {
+            if (isBlocked) {
+                dualSchemaMap["banned_at"] = nowIso
+                standardSchemaMap["banned_at"] = nowIso
+            } else {
+                dualSchemaMap["approved_at"] = nowIso
+                standardSchemaMap["approved_at"] = nowIso
+                triggerSchemaMap["approved_at"] = nowIso
+            }
+
+            val patchResult = patchPublicDeviceRecord(
+                device = device,
+                candidatePayloads = listOf(
+                    dualSchemaMap,
+                    standardSchemaMap,
+                    triggerSchemaMap,
+                    minimalBannedMap,
+                    minimalBlockedMap
+                )
+            )
+
+            // 3. Also sync `is_blocked` in `public.activated_devices` if present
+            if (effectiveHash.isNotBlank()) {
                 try {
                     api.patchActivatedDeviceByHash(
-                        deviceHashQuery = "eq.${device.deviceHash}",
+                        deviceHashQuery = "eq.$effectiveHash",
                         payload = mapOf("is_blocked" to isBlocked)
                     )
                 } catch (_: Exception) {
                 }
             }
-            Result.success(Unit)
+
+            if (patchResult.isSuccess || rpcOk) {
+                Result.success(Unit)
+            } else {
+                Result.failure(
+                    patchResult.exceptionOrNull()
+                        ?: Exception("ডিভাইস ব্লক স্ট্যাটাস ডাটাবেসে সেভ হয়নি")
+                )
+            }
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
     override suspend fun revokeUserDeviceToPending(device: UserDevice): Result<Unit> = withContext(Dispatchers.IO) {
         val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-        val idx = cachedUserDevices.indexOfFirst {
-            (device.deviceHash.isNotBlank() && it.deviceHash == device.deviceHash) ||
-                (device.id.isNotBlank() && it.id == device.id) ||
-                (device.displayDeviceId.isNotBlank() && it.displayDeviceId == device.displayDeviceId)
-        }
+        val idx = cachedUserDevices.indexOfFirst { matchesCachedDevice(it, device) }
         if (idx != -1) {
             val old = cachedUserDevices[idx]
             cachedUserDevices[idx] = old.copy(
                 status = "pending",
                 isBanned = false,
+                isBlockedColumn = false,
                 banReason = "",
+                rejectionReasonColumn = "",
                 updatedAt = nowIso
             )
         }
 
         try {
-            val fullMap = mapOf<String, Any?>(
+            val dualMap = mapOf<String, Any?>(
+                "status" to "pending",
+                "is_banned" to false,
+                "is_blocked" to false,
+                "ban_reason" to "",
+                "rejection_reason" to "",
+                "updated_at" to nowIso
+            )
+            val standardMap = mapOf<String, Any?>(
                 "status" to "pending",
                 "is_banned" to false,
                 "ban_reason" to "",
                 "updated_at" to nowIso
             )
+            val triggerMap = mapOf<String, Any?>(
+                "status" to "pending",
+                "is_blocked" to false,
+                "rejection_reason" to "",
+                "updated_at" to nowIso
+            )
             val minimalMap = mapOf<String, Any?>(
                 "status" to "pending",
-                "is_banned" to false,
-                "ban_reason" to ""
+                "is_banned" to false
             )
-            patchPublicDeviceRecord(device, fullMap, minimalMap)
-            Result.success(Unit)
+            val patchResult = patchPublicDeviceRecord(
+                device = device,
+                candidatePayloads = listOf(dualMap, standardMap, triggerMap, minimalMap)
+            )
+            if (patchResult.isSuccess) {
+                Result.success(Unit)
+            } else {
+                Result.failure(patchResult.exceptionOrNull() ?: Exception("পেন্ডিং করতে ব্যর্থ হয়েছে"))
+            }
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
@@ -1273,11 +1423,7 @@ class SupabaseMaxBirdRepository(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
         val trimmedNote = studentNote.trim()
-        val idx = cachedUserDevices.indexOfFirst {
-            (device.deviceHash.isNotBlank() && it.deviceHash == device.deviceHash) ||
-                (device.id.isNotBlank() && it.id == device.id) ||
-                (device.displayDeviceId.isNotBlank() && it.displayDeviceId == device.displayDeviceId)
-        }
+        val idx = cachedUserDevices.indexOfFirst { matchesCachedDevice(it, device) }
         if (idx != -1) {
             cachedUserDevices[idx] = cachedUserDevices[idx].copy(
                 studentNote = trimmedNote,
@@ -1286,70 +1432,87 @@ class SupabaseMaxBirdRepository(
         }
 
         try {
-            val fullMap = mapOf<String, Any?>(
+            val dualMap = mapOf<String, Any?>(
+                "student_note" to trimmedNote,
+                "student_name" to trimmedNote,
+                "updated_at" to nowIso
+            )
+            val standardMap = mapOf<String, Any?>(
                 "student_note" to trimmedNote,
                 "updated_at" to nowIso
             )
             val minimalMap = mapOf<String, Any?>(
                 "student_note" to trimmedNote
             )
-            patchPublicDeviceRecord(device, fullMap, minimalMap)
-            Result.success(Unit)
+            val patchResult = patchPublicDeviceRecord(
+                device = device,
+                candidatePayloads = listOf(dualMap, standardMap, minimalMap)
+            )
+            if (patchResult.isSuccess) {
+                Result.success(Unit)
+            } else {
+                Result.failure(patchResult.exceptionOrNull() ?: Exception("নোট সেভ করতে ব্যর্থ হয়েছে"))
+            }
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
     override suspend fun toggleUserDeviceBan(deviceId: String, isBanned: Boolean, banReason: String?): Result<Unit> = withContext(Dispatchers.IO) {
         val targetDevice = cachedUserDevices.firstOrNull {
-            it.id == deviceId || it.deviceHash == deviceId || it.displayDeviceId == deviceId
-        } ?: UserDevice(id = deviceId, deviceHash = deviceId)
+            it.id == deviceId || it.effectiveDeviceHash == deviceId || it.displayDeviceId == deviceId
+        } ?: UserDevice(id = deviceId, deviceHash = deviceId, deviceIdColumn = deviceId)
         setUserDeviceBlockStatus(targetDevice, isBlocked = isBanned, banReason = banReason)
     }
 
     override suspend fun toggleDeviceCanViewProfiles(deviceId: String, canViewProfiles: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
         val idx = cachedUserDevices.indexOfFirst {
-            it.id == deviceId || it.deviceHash == deviceId || it.displayDeviceId == deviceId
+            it.id == deviceId || it.effectiveDeviceHash == deviceId || it.displayDeviceId == deviceId
         }
         val targetDevice = if (idx != -1) {
             val updated = cachedUserDevices[idx].copy(canViewProfiles = canViewProfiles)
             cachedUserDevices[idx] = updated
             updated
         } else {
-            UserDevice(id = deviceId, deviceHash = deviceId, canViewProfiles = canViewProfiles)
+            UserDevice(id = deviceId, deviceHash = deviceId, deviceIdColumn = deviceId, canViewProfiles = canViewProfiles)
         }
 
         try {
-            patchPublicDeviceRecord(
+            val patchResult = patchPublicDeviceRecord(
                 device = targetDevice,
-                fullPayload = mapOf("can_view_profiles" to canViewProfiles)
+                candidatePayloads = listOf(mapOf("can_view_profiles" to canViewProfiles))
             )
-            if (targetDevice.deviceHash.isNotBlank()) {
+            val effectiveHash = targetDevice.effectiveDeviceHash
+            if (effectiveHash.isNotBlank()) {
                 try {
                     supabaseClient.getApi().patchActivatedDeviceByHash(
-                        deviceHashQuery = "eq.${targetDevice.deviceHash}",
+                        deviceHashQuery = "eq.$effectiveHash",
                         payload = mapOf("can_view_profiles" to canViewProfiles)
                     )
                 } catch (_: Exception) {
                 }
             }
-            Result.success(Unit)
+            if (patchResult.isSuccess) {
+                Result.success(Unit)
+            } else {
+                Result.failure(patchResult.exceptionOrNull() ?: Exception("পারমিশন আপডেট ব্যর্থ হয়েছে"))
+            }
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
     override suspend fun deleteUserDevice(deviceId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val target = cachedUserDevices.firstOrNull {
-            it.id == deviceId || it.deviceHash == deviceId || it.displayDeviceId == deviceId
+            it.id == deviceId || it.effectiveDeviceHash == deviceId || it.displayDeviceId == deviceId
         }
         cachedUserDevices.removeAll {
-            it.id == deviceId || it.deviceHash == deviceId || it.displayDeviceId == deviceId
+            it.id == deviceId || it.effectiveDeviceHash == deviceId || it.displayDeviceId == deviceId
         }
 
         try {
             val api = supabaseClient.getApi()
-            val hashToUse = target?.deviceHash?.takeIf { it.isNotBlank() }
+            val hashToUse = target?.effectiveDeviceHash?.takeIf { it.isNotBlank() }
             val idToUse = target?.id?.takeIf { it.isNotBlank() }
             var deleted = false
             if (hashToUse != null) {
@@ -1358,13 +1521,22 @@ class SupabaseMaxBirdRepository(
                     if (res.isSuccessful) deleted = true
                 } catch (_: Exception) {
                 }
+                if (!deleted) {
+                    try {
+                        val res = api.deleteDeviceRecordByDeviceIdColumn("eq.$hashToUse")
+                        if (res.isSuccessful) deleted = true
+                    } catch (_: Exception) {
+                    }
+                }
             }
-            if (!deleted && idToUse != null) {
+            if (idToUse != null) {
                 try {
-                    api.deleteDeviceRecord("eq.$idToUse")
+                    val res = api.deleteDeviceRecord("eq.$idToUse")
+                    if (res.isSuccessful) deleted = true
                 } catch (_: Exception) {
                 }
-            } else if (!deleted) {
+            }
+            if (!deleted) {
                 try {
                     api.deleteDeviceRecordByHash("eq.$deviceId")
                 } catch (_: Exception) {
@@ -1373,7 +1545,162 @@ class SupabaseMaxBirdRepository(
             }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun getDeviceShikhoAccounts(deviceHash: String?): Result<List<DeviceShikhoAccount>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val api = supabaseClient.getApi()
+                val cleanHash = deviceHash?.trim().orEmpty()
+                val list = if (cleanHash.isNotBlank()) {
+                    api.getDeviceShikhoAccountsByHash(deviceHashQuery = "eq.$cleanHash")
+                } else {
+                    api.getDeviceShikhoAccounts()
+                }
+                Result.success(list)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    override suspend fun setDeviceCoursePermissions(
+        deviceHash: String,
+        isRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val cleanHash = deviceHash.trim()
+        if (cleanHash.isBlank()) {
+            return@withContext Result.failure(Exception("ডিভাইস হ্যাশ (device_hash) খালি রাখা যাবে না"))
+        }
+        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val idx = cachedUserDevices.indexOfFirst { it.effectiveDeviceHash == cleanHash || it.id == cleanHash }
+        if (idx != -1) {
+            cachedUserDevices[idx] = cachedUserDevices[idx].copy(
+                isAccessRestricted = isRestricted,
+                allowedClasses = allowedClasses,
+                allowedGroups = allowedGroups,
+                allowedBatches = allowedBatches,
+                allowedPrograms = allowedPrograms,
+                updatedAt = nowIso
+            )
+        }
+
+        try {
+            val api = supabaseClient.getApi()
+            val rpcPayload = mapOf<String, Any?>(
+                "p_device_hash" to cleanHash,
+                "p_is_restricted" to isRestricted,
+                "p_allowed_classes" to allowedClasses,
+                "p_allowed_groups" to allowedGroups,
+                "p_allowed_batches" to allowedBatches,
+                "p_allowed_programs" to allowedPrograms
+            )
+            val rpcRes = api.setDeviceCoursePermissionsRpc(rpcPayload)
+            if (rpcRes.isSuccessful) {
+                return@withContext Result.success(Unit)
+            }
+
+            val patchRes = api.patchDeviceByHash(
+                deviceHashQuery = "eq.$cleanHash",
+                payload = mapOf(
+                    "is_access_restricted" to isRestricted,
+                    "allowed_classes" to allowedClasses,
+                    "allowed_groups" to allowedGroups,
+                    "allowed_batches" to allowedBatches,
+                    "allowed_programs" to allowedPrograms,
+                    "updated_at" to nowIso
+                )
+            )
+            if (patchRes.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                val err = try { rpcRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("কোর্স পারমিশন সেভ ব্যর্থ: $err"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun setAccountCoursePermissions(
+        deviceHash: String,
+        userPhone: String,
+        isAccessGranted: Boolean,
+        isRestricted: Boolean,
+        allowedClasses: List<String>,
+        allowedGroups: List<String>,
+        allowedBatches: List<String>,
+        allowedPrograms: List<String>,
+        adminNote: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val cleanHash = deviceHash.trim()
+        val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(userPhone).ifBlank { userPhone.trim() }
+        if (cleanHash.isBlank() || cleanPhone.isBlank()) {
+            return@withContext Result.failure(Exception("ডিভাইস হ্যাশ এবং ইউজার ফোন নম্বর আবশ্যক"))
+        }
+        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+
+        try {
+            val api = supabaseClient.getApi()
+            val rpcPayload = mapOf<String, Any?>(
+                "p_device_hash" to cleanHash,
+                "p_user_phone" to cleanPhone,
+                "p_is_access_granted" to isAccessGranted,
+                "p_is_restricted" to isRestricted,
+                "p_allowed_classes" to allowedClasses,
+                "p_allowed_groups" to allowedGroups,
+                "p_allowed_batches" to allowedBatches,
+                "p_allowed_programs" to allowedPrograms,
+                "p_admin_note" to adminNote.trim()
+            )
+            val rpcRes = api.setAccountCoursePermissionsRpc(rpcPayload)
+            if (rpcRes.isSuccessful) {
+                return@withContext Result.success(Unit)
+            }
+
+            val patchRes = api.patchDeviceShikhoAccount(
+                deviceHashQuery = "eq.$cleanHash",
+                userPhoneQuery = "eq.$cleanPhone",
+                payload = mapOf(
+                    "is_access_granted" to isAccessGranted,
+                    "is_access_restricted" to isRestricted,
+                    "allowed_classes" to allowedClasses,
+                    "allowed_groups" to allowedGroups,
+                    "allowed_batches" to allowedBatches,
+                    "allowed_programs" to allowedPrograms,
+                    "admin_note" to adminNote.trim(),
+                    "updated_at" to nowIso
+                )
+            )
+            if (patchRes.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                val err = try { rpcRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("অ্যাকাউন্ট পারমিশন সেভ ব্যর্থ: $err"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun isJsonRpcSuccess(response: retrofit2.Response<okhttp3.ResponseBody>): Boolean {
+        if (!response.isSuccessful) return false
+        val bodyStr = try {
+            response.body()?.string()?.trim().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        if (bodyStr.isEmpty() || !bodyStr.startsWith("{")) return true
+        return try {
+            val json = org.json.JSONObject(bodyStr)
+            if (json.has("success")) json.optBoolean("success", false) else true
+        } catch (_: Exception) {
+            true
         }
     }
 
@@ -1718,10 +2045,26 @@ class SupabaseMaxBirdRepository(
                 .ifBlank { cleanPhone }
             val cleanProgramId = payload.programId?.trim().orEmpty()
 
+            // 1. If instant free unlock is requested and we have an enrollment ID, try `admin_approve_course_access_request` with `p_instant_free_unlock = true`
+            var rpcSucceeded = false
+            if (payload.instantFreeUnlock && payload.enrollmentId > 0L) {
+                try {
+                    val rpcRes = api.approveCourseAccessRequestRpc(payload)
+                    rpcSucceeded = isJsonRpcSuccess(rpcRes)
+                } catch (_: Exception) {
+                    rpcSucceeded = false
+                }
+                if (rpcSucceeded) {
+                    return@withContext Result.success(Unit)
+                }
+            }
+
             if (payload.instantFreeUnlock) {
                 val freeUnlockPatch = mutableMapOf<String, Any?>(
                     "status" to "ACTIVE",
+                    "access_status" to "ACTIVE",
                     "total_price" to 0,
+                    "total_fee" to 0,
                     "due_amount" to 0,
                     "installment_enabled" to false,
                     "allow_installments" to false,
@@ -1733,6 +2076,7 @@ class SupabaseMaxBirdRepository(
                     "completed_installments" to 1,
                     "next_installment_amount" to 0,
                     "installment_plans_json" to emptyList<Any>(),
+                    "installment_plans" to emptyList<Any>(),
                     "trial_enabled" to false,
                     "trial_days" to 0,
                     "trial_hours" to 0,
@@ -1745,6 +2089,7 @@ class SupabaseMaxBirdRepository(
                     freeUnlockPatch["student_phone"] = cleanPhone
                     freeUnlockPatch["user_phone"] = cleanPhone
                     freeUnlockPatch["shikho_account_key"] = cleanAccountKey.ifBlank { cleanPhone }
+                    freeUnlockPatch["student_key"] = cleanAccountKey.ifBlank { cleanPhone }
                 }
                 val patchRes = patchEnrollmentByIdOrAccount(
                     enrollmentId = payload.enrollmentId,
@@ -1768,62 +2113,56 @@ class SupabaseMaxBirdRepository(
                 null
             }
 
-            var rpcSucceeded = false
+            // 2. Call `admin_approve_course_access_with_trial` with the EXACT 10 parameters defined in PostgreSQL:
+            // (p_student_key, p_program_id, p_total_price, p_allow_installments, p_installment_plans,
+            //  p_trial_enabled, p_trial_days, p_trial_hours, p_start_trial_immediately, p_admin_note)
+            val studentKeyCandidates = listOf(
+                if (payload.enrollmentId > 0L) payload.enrollmentId.toString() else "",
+                cleanAccountKey,
+                cleanPhone
+            ).filter { it.isNotBlank() }.distinct()
 
-            // 1. Try `admin_approve_course_access_with_trial` RPC first
-            try {
-                val withTrialRpcMap = mutableMapOf<String, Any?>(
-                    "p_enrollment_id" to payload.enrollmentId,
-                    "p_student_phone" to cleanPhone,
-                    "p_shikho_account_key" to cleanAccountKey,
-                    "p_program_id" to cleanProgramId,
-                    "p_total_price" to payload.totalPrice,
-                    "p_installment_enabled" to payload.installmentEnabled,
-                    "p_allow_installments" to payload.installmentEnabled,
-                    "p_installment_plans_json" to payload.installmentPlansJson,
-                    "p_admin_note" to payload.adminNote,
-                    "p_trial_enabled" to payload.trialEnabled,
-                    "p_trial_days" to safeTrialDays,
-                    "p_trial_hours" to safeTrialHours,
-                    "p_start_trial_immediately" to shouldStartTrialNow
-                )
-                val trialRpcRes = api.approveCourseAccessWithTrialRpcRaw(withTrialRpcMap)
-                rpcSucceeded = trialRpcRes.isSuccessful
-            } catch (_: Exception) {
-                rpcSucceeded = false
+            if (cleanProgramId.isNotBlank()) {
+                for (candidateKey in studentKeyCandidates) {
+                    try {
+                        val withTrialRpcMap = mapOf<String, Any?>(
+                            "p_student_key" to candidateKey,
+                            "p_program_id" to cleanProgramId,
+                            "p_total_price" to payload.totalPrice,
+                            "p_allow_installments" to payload.installmentEnabled,
+                            "p_installment_plans" to payload.installmentPlansJson,
+                            "p_trial_enabled" to payload.trialEnabled,
+                            "p_trial_days" to safeTrialDays,
+                            "p_trial_hours" to safeTrialHours,
+                            "p_start_trial_immediately" to shouldStartTrialNow,
+                            "p_admin_note" to payload.adminNote
+                        )
+                        val trialRpcRes = api.approveCourseAccessWithTrialRpcRaw(withTrialRpcMap)
+                        if (isJsonRpcSuccess(trialRpcRes)) {
+                            rpcSucceeded = true
+                            break
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
             }
 
-            // 2. Fallback to `admin_approve_course_access_request`
-            if (!rpcSucceeded && payload.enrollmentId > 0L) {
+            // 3. Fallback to `admin_approve_course_access_request` (when trial is not enabled or if with_trial failed)
+            if (!rpcSucceeded && !payload.trialEnabled && payload.enrollmentId > 0L) {
                 try {
                     val rpcRes = api.approveCourseAccessRequestRpc(payload)
-                    rpcSucceeded = rpcRes.isSuccessful
+                    rpcSucceeded = isJsonRpcSuccess(rpcRes)
                 } catch (_: Exception) {
                     rpcSucceeded = false
                 }
             }
 
-            // 3. Fallback to `admin_set_course_access_offer`
-            if (!rpcSucceeded) {
-                try {
-                    val offerRpcMap = mutableMapOf<String, Any?>(
-                        "p_enrollment_id" to payload.enrollmentId,
-                        "p_student_phone" to cleanPhone,
-                        "p_shikho_account_key" to cleanAccountKey,
-                        "p_program_id" to cleanProgramId,
-                        "p_total_price" to payload.totalPrice,
-                        "p_installment_enabled" to payload.installmentEnabled,
-                        "p_installment_plans_json" to payload.installmentPlansJson,
-                        "p_admin_note" to payload.adminNote
-                    )
-                    val offerRes = api.setCourseAccessOfferRpcRaw(offerRpcMap)
-                    rpcSucceeded = offerRes.isSuccessful
-                } catch (_: Exception) {
-                    rpcSucceeded = false
-                }
+            // 4. If RPC succeeded and no extra phone normalization is needed, return success;
+            // otherwise sync via table PATCH so all Free Trial columns & status are guaranteed 100% synced
+            if (rpcSucceeded && !CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
+                return@withContext Result.success(Unit)
             }
 
-            // 4. Direct table patch on `public.course_access_enrollments` so all Free Trial columns & status are guaranteed 100% synced
             val firstPlan = payload.installmentPlansJson.firstOrNull()
             val resolvedPlanId = firstPlan?.planId?.takeIf { it.isNotBlank() } ?: "FULL"
             val resolvedPlanTitle = firstPlan?.effectiveTitle?.takeIf { it.isNotBlank() } ?: "এককালীন সম্পূর্ণ পেমেন্ট"
@@ -1835,7 +2174,9 @@ class SupabaseMaxBirdRepository(
 
             val patchMap = mutableMapOf<String, Any?>(
                 "status" to targetStatus,
+                "access_status" to targetStatus,
                 "total_price" to payload.totalPrice,
+                "total_fee" to payload.totalPrice,
                 "due_amount" to payload.totalPrice,
                 "installment_enabled" to payload.installmentEnabled,
                 "allow_installments" to payload.installmentEnabled,
@@ -1845,14 +2186,18 @@ class SupabaseMaxBirdRepository(
                 "active_plan_title" to resolvedPlanTitle,
                 "total_installments" to (firstPlan?.effectiveInstallmentsCount ?: 1),
                 "installment_plans_json" to payload.installmentPlansJson,
+                "installment_plans" to payload.installmentPlansJson,
                 "next_installment_amount" to (firstPlan?.effectiveAmountPerInstallment ?: payload.totalPrice),
                 "installment_interval_days" to (firstPlan?.intervalDays ?: 7),
                 "trial_enabled" to payload.trialEnabled,
                 "trial_days" to safeTrialDays,
+                "trial_days_granted" to safeTrialDays,
                 "trial_hours" to safeTrialHours,
                 "trial_started_at" to if (shouldStartTrialNow) nowIso else null,
                 "trial_ends_at" to trialEndsIso,
+                "trial_expires_at" to trialEndsIso,
                 "is_trial_used" to shouldStartTrialNow,
+                "trial_used" to shouldStartTrialNow,
                 "admin_note" to payload.adminNote,
                 "rejection_reason" to "",
                 "approved_at" to nowIso,
@@ -1865,6 +2210,7 @@ class SupabaseMaxBirdRepository(
                 patchMap["student_phone"] = cleanPhone
                 patchMap["user_phone"] = cleanPhone
                 patchMap["shikho_account_key"] = cleanAccountKey.ifBlank { cleanPhone }
+                patchMap["student_key"] = cleanAccountKey.ifBlank { cleanPhone }
             }
 
             val patchResponse = patchEnrollmentByIdOrAccount(
@@ -2094,26 +2440,39 @@ class SupabaseMaxBirdRepository(
             val safeHours = payload.hours.coerceAtLeast(0)
             val deltaHours = ((safeDays * 24) + safeHours)
 
-            // 1. Try calling `admin_manage_course_trial` RPC
+            // 1. Call `admin_manage_course_trial(p_student_key, p_program_id, p_action, p_days, p_hours)`
             var rpcSucceeded = false
-            try {
-                val rpcMap = mutableMapOf<String, Any?>(
-                    "p_enrollment_id" to payload.enrollmentId,
-                    "p_action" to actionUpper,
-                    "p_days" to safeDays,
-                    "p_hours" to safeHours,
-                    "p_total_hours" to deltaHours,
-                    "p_student_phone" to cleanPhone,
-                    "p_shikho_account_key" to cleanAccountKey,
-                    "p_program_id" to cleanProgramId
-                )
-                val rpcRes = api.manageCourseTrialRpcRaw(rpcMap)
-                rpcSucceeded = rpcRes.isSuccessful
-            } catch (_: Exception) {
-                rpcSucceeded = false
+            val studentKeyCandidates = listOf(
+                if (payload.enrollmentId > 0L) payload.enrollmentId.toString() else "",
+                cleanAccountKey,
+                cleanPhone
+            ).filter { it.isNotBlank() }.distinct()
+
+            if (cleanProgramId.isNotBlank()) {
+                for (candidateKey in studentKeyCandidates) {
+                    try {
+                        val rpcMap = mapOf<String, Any?>(
+                            "p_student_key" to candidateKey,
+                            "p_program_id" to cleanProgramId,
+                            "p_action" to actionUpper,
+                            "p_days" to safeDays,
+                            "p_hours" to safeHours
+                        )
+                        val rpcRes = api.manageCourseTrialRpcRaw(rpcMap)
+                        if (isJsonRpcSuccess(rpcRes)) {
+                            rpcSucceeded = true
+                            break
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
             }
 
-            // 2. Build direct table update map for `public.course_access_enrollments`
+            if (rpcSucceeded) {
+                return@withContext Result.success(Unit)
+            }
+
+            // 2. Fallback: Build direct table update map for `public.course_access_enrollments`
             val currentEndsMillis = CourseAccessEnrollment.parseIsoTimestampToMillis(payload.currentTrialEndsAt)
             val patchMap = mutableMapOf<String, Any?>(
                 "updated_at" to nowIso
@@ -2132,11 +2491,15 @@ class SupabaseMaxBirdRepository(
                     val startedIso = payload.currentTrialStartedAt?.takeIf { it.isNotBlank() } ?: nowIso
 
                     patchMap["status"] = "TRIAL_ACTIVE"
+                    patchMap["access_status"] = "TRIAL_ACTIVE"
                     patchMap["trial_enabled"] = true
                     patchMap["is_trial_used"] = true
+                    patchMap["trial_used"] = true
                     patchMap["trial_started_at"] = startedIso
                     patchMap["trial_ends_at"] = newEndsIso
+                    patchMap["trial_expires_at"] = newEndsIso
                     patchMap["trial_days"] = (payload.currentTrialDays.coerceAtLeast(0) + safeDays)
+                    patchMap["trial_days_granted"] = (payload.currentTrialDays.coerceAtLeast(0) + safeDays)
                     patchMap["trial_hours"] = (payload.currentTrialHours.coerceAtLeast(0) + safeHours)
                     patchMap["unlocked_at"] = nowIso
                 }
@@ -2149,9 +2512,12 @@ class SupabaseMaxBirdRepository(
                     val newStatus = if (newEndsMillis <= nowMillis) "TRIAL_EXPIRED" else "TRIAL_ACTIVE"
 
                     patchMap["status"] = newStatus
+                    patchMap["access_status"] = newStatus
                     patchMap["trial_enabled"] = true
                     patchMap["is_trial_used"] = true
+                    patchMap["trial_used"] = true
                     patchMap["trial_ends_at"] = newEndsIso
+                    patchMap["trial_expires_at"] = newEndsIso
                 }
 
                 "SET_DURATION" -> {
@@ -2160,20 +2526,27 @@ class SupabaseMaxBirdRepository(
                     val newEndsIso = formatUtcIso(newEndsMillis)
 
                     patchMap["status"] = "TRIAL_ACTIVE"
+                    patchMap["access_status"] = "TRIAL_ACTIVE"
                     patchMap["trial_enabled"] = true
                     patchMap["trial_days"] = safeDays
+                    patchMap["trial_days_granted"] = safeDays
                     patchMap["trial_hours"] = safeHours
                     patchMap["trial_started_at"] = nowIso
                     patchMap["trial_ends_at"] = newEndsIso
+                    patchMap["trial_expires_at"] = newEndsIso
                     patchMap["is_trial_used"] = true
+                    patchMap["trial_used"] = true
                     patchMap["unlocked_at"] = nowIso
                 }
 
                 "END_TRIAL_NOW" -> {
                     val endedIso = formatUtcIso(nowMillis - 60_000L) // now() - interval '1 minute'
                     patchMap["status"] = "APPROVED_TO_BUY"
+                    patchMap["access_status"] = "APPROVED_TO_BUY"
                     patchMap["trial_ends_at"] = endedIso
+                    patchMap["trial_expires_at"] = endedIso
                     patchMap["is_trial_used"] = true
+                    patchMap["trial_used"] = true
                 }
 
                 "RESET_TRIAL" -> {
@@ -2191,11 +2564,15 @@ class SupabaseMaxBirdRepository(
                     }
 
                     patchMap["status"] = "APPROVED_TO_BUY"
+                    patchMap["access_status"] = "APPROVED_TO_BUY"
                     patchMap["trial_enabled"] = true
                     patchMap["is_trial_used"] = false
+                    patchMap["trial_used"] = false
                     patchMap["trial_started_at"] = null
                     patchMap["trial_ends_at"] = null
+                    patchMap["trial_expires_at"] = null
                     patchMap["trial_days"] = resetDays
+                    patchMap["trial_days_granted"] = resetDays
                     patchMap["trial_hours"] = resetHours
                 }
             }
@@ -2204,6 +2581,7 @@ class SupabaseMaxBirdRepository(
                 patchMap["student_phone"] = cleanPhone
                 patchMap["user_phone"] = cleanPhone
                 patchMap["shikho_account_key"] = cleanAccountKey.ifBlank { cleanPhone }
+                patchMap["student_key"] = cleanAccountKey.ifBlank { cleanPhone }
             }
 
             val patchRes = patchEnrollmentByIdOrAccount(
@@ -2214,7 +2592,7 @@ class SupabaseMaxBirdRepository(
                 patchMap = patchMap
             )
 
-            if (rpcSucceeded || patchRes?.isSuccessful == true) {
+            if (patchRes?.isSuccessful == true) {
                 Result.success(Unit)
             } else {
                 val errBody = try {
@@ -2250,185 +2628,172 @@ class SupabaseMaxBirdRepository(
             val api = supabaseClient.getApi()
             val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
 
-            // 1. Primary: Call RPC `admin_review_course_payment`
+            // 1. Primary: Call official RPC `admin_review_course_payment(p_transaction_id, p_approve, p_rejection_reason, p_custom_next_due_days)`
             var rpcSucceeded = false
             try {
                 val primaryResponse = api.reviewCoursePaymentRpc(payload)
-                rpcSucceeded = primaryResponse.isSuccessful
+                rpcSucceeded = isJsonRpcSuccess(primaryResponse)
             } catch (_: Exception) {
                 rpcSucceeded = false
             }
 
-            // 2. Secondary fallback: Try `admin_verify_course_payment` or `p_transaction_id`
-            if (!rpcSucceeded) {
-                try {
-                    val verifyMap = mutableMapOf<String, Any?>(
-                        "p_transaction_row_id" to payload.transactionId,
-                        "p_transaction_id" to payload.transactionId,
-                        "p_approve" to payload.approve,
-                        "p_rejection_reason" to payload.rejectionReason
-                    )
-                    if (payload.customNextDueDays != null) {
-                        verifyMap["p_custom_next_due_days"] = payload.customNextDueDays
-                    }
-                    val verifyResponse = api.verifyCoursePaymentRpcRaw(verifyMap)
-                    rpcSucceeded = verifyResponse.isSuccessful
-                } catch (_: Exception) {
-                    rpcSucceeded = false
-                }
-            }
-
+            // 2. Secondary fallback: raw map with exact 4 parameters
             if (!rpcSucceeded) {
                 try {
                     val altMap = mutableMapOf<String, Any?>(
                         "p_transaction_id" to payload.transactionId,
                         "p_approve" to payload.approve,
-                        "p_rejection_reason" to payload.rejectionReason
+                        "p_rejection_reason" to payload.rejectionReason,
+                        "p_custom_next_due_days" to payload.customNextDueDays
                     )
-                    if (payload.customNextDueDays != null) {
-                        altMap["p_custom_next_due_days"] = payload.customNextDueDays
-                    }
                     val altResponse = api.reviewCoursePaymentRpcRaw(altMap)
-                    rpcSucceeded = altResponse.isSuccessful
+                    rpcSucceeded = isJsonRpcSuccess(altResponse)
                 } catch (_: Exception) {
                     rpcSucceeded = false
                 }
             }
 
-            // 3. Direct table sync by primary `id` or (`shikho_account_key` / `student_phone` + `program_id`)
-            // Never depends on hardware `device_id`.
-            if (!rpcSucceeded || (payload.approve && payload.customNextDueDays != null)) {
-                val allTxs = try {
-                    api.getCoursePaymentTransactions()
-                } catch (_: Exception) {
-                    emptyList()
-                }
-                val targetTx = allTxs.firstOrNull { it.id == payload.transactionId }
+            // When `admin_review_course_payment` succeeds, the database function has already updated
+            // both `course_payment_transactions` and `course_access_enrollments` (including installment math and next_due_date).
+            if (rpcSucceeded) {
+                return@withContext Result.success(Unit)
+            }
 
-                if (!rpcSucceeded) {
-                    api.patchCoursePaymentTransaction(
-                        idQuery = "eq.${payload.transactionId}",
-                        payload = mapOf(
-                            "status" to if (payload.approve) "APPROVED" else "REJECTED",
-                            "rejection_reason" to if (payload.approve) "" else payload.rejectionReason,
-                            "reviewed_at" to nowIso
+            // 3. Fallback direct table sync ONLY if the RPC failed
+            val allTxs = try {
+                api.getCoursePaymentTransactions()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            val targetTx = allTxs.firstOrNull { it.id == payload.transactionId }
+
+            api.patchCoursePaymentTransaction(
+                idQuery = "eq.${payload.transactionId}",
+                payload = mapOf(
+                    "status" to if (payload.approve) "APPROVED" else "REJECTED",
+                    "rejection_reason" to if (payload.approve) "" else payload.rejectionReason,
+                    "reviewed_at" to nowIso
+                )
+            )
+
+            val enrollmentId = targetTx?.enrollmentId?.takeIf { it > 0L }
+                ?: payload.enrollmentId?.takeIf { it > 0L }
+                ?: 0L
+            val txPhone = CourseAccessEnrollment.normalizeBdPhone(
+                targetTx?.effectiveStudentPhone?.ifBlank { payload.studentPhone }
+            )
+            val txAccountKey = CourseAccessEnrollment.normalizeBdPhone(
+                targetTx?.effectiveAccountKey?.ifBlank { payload.shikhoAccountKey }
+            ).ifBlank { txPhone }
+            val txProgramId = targetTx?.programId?.takeIf { it.isNotBlank() }
+                ?: payload.programId.orEmpty()
+
+            val enrollments = try {
+                api.getCourseAccessEnrollments()
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            val enrollment = enrollments.firstOrNull { it.id == enrollmentId && enrollmentId > 0L }
+                ?: enrollments.firstOrNull { item ->
+                    txProgramId.isNotBlank() &&
+                        item.programId.equals(txProgramId, ignoreCase = true) && (
+                        (txPhone.isNotBlank() && CourseAccessEnrollment.normalizeBdPhone(item.effectivePhone) == txPhone) ||
+                            (txAccountKey.isNotBlank() && CourseAccessEnrollment.normalizeBdPhone(item.effectiveAccountKey) == txAccountKey)
                         )
+                }
+
+            if (enrollment != null) {
+                if (payload.approve) {
+                    val newPaid = enrollment.paidAmount + (targetTx?.amount ?: 0)
+                    val newDue = (enrollment.totalPrice - newPaid).coerceAtLeast(0)
+                    val newCompleted = enrollment.completedInstallments + 1
+                    val totalInst = targetTx?.totalInstallments?.takeIf { it > 0 } ?: enrollment.totalInstallments.coerceAtLeast(1)
+                    val intervalDays = payload.customNextDueDays
+                        ?: targetTx?.intervalDays?.takeIf { it > 0 }
+                        ?: enrollment.installmentIntervalDays.takeIf { it > 0 }
+                        ?: 7
+
+                    val nextDueIso = if (newDue > 0) {
+                        val cal = Calendar.getInstance()
+                        cal.add(Calendar.DAY_OF_YEAR, intervalDays)
+                        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
+                    } else {
+                        null
+                    }
+
+                    val resolvedPlanId = targetTx?.planId?.takeIf { it.isNotBlank() }
+                        ?: targetTx?.selectedPlanId?.takeIf { it.isNotBlank() }
+                        ?: enrollment.selectedPlanId?.takeIf { it.isNotBlank() }
+                        ?: "FULL"
+                    val resolvedPlanTitle = targetTx?.effectivePlanTitle?.takeIf { it.isNotBlank() }
+                        ?: enrollment.selectedPlanTitle?.takeIf { it.isNotBlank() }
+                        ?: "এককালীন সম্পূর্ণ পেমেন্ট"
+
+                    val enrollPatch = mutableMapOf<String, Any?>(
+                        "status" to "ACTIVE",
+                        "access_status" to "ACTIVE",
+                        "paid_amount" to newPaid,
+                        "due_amount" to newDue,
+                        "completed_installments" to newCompleted,
+                        "total_installments" to totalInst,
+                        "selected_plan_id" to resolvedPlanId,
+                        "selected_plan_title" to resolvedPlanTitle,
+                        "active_plan_id" to resolvedPlanId,
+                        "active_plan_title" to resolvedPlanTitle,
+                        "next_due_date" to nextDueIso,
+                        "next_installment_due_at" to nextDueIso,
+                        "pending_installment_tx_id" to "",
+                        "pending_installment_amount" to 0,
+                        "rejection_reason" to "",
+                        "unlocked_at" to (enrollment.unlockedAt?.takeIf { it.isNotBlank() } ?: nowIso),
+                        "updated_at" to nowIso
+                    )
+                    if (targetTx != null) {
+                        enrollPatch["last_transaction_id"] = targetTx.transactionId ?: ""
+                        enrollPatch["last_payment_amount"] = targetTx.amount
+                        enrollPatch["last_sender_mobile"] = targetTx.senderMobile ?: ""
+                        enrollPatch["last_payment_method"] = targetTx.paymentMethod ?: "bKash"
+                    }
+                    val validPhone = CourseAccessEnrollment.normalizeBdPhone(enrollment.effectivePhone)
+                        .takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
+                        ?: txPhone.takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
+                    if (!validPhone.isNullOrBlank()) {
+                        enrollPatch["student_phone"] = validPhone
+                        enrollPatch["user_phone"] = validPhone
+                        enrollPatch["shikho_account_key"] = validPhone
+                        enrollPatch["student_key"] = validPhone
+                    }
+
+                    patchEnrollmentByIdOrAccount(
+                        enrollmentId = enrollment.id,
+                        studentPhone = enrollment.effectivePhone.ifBlank { txPhone },
+                        shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { txAccountKey },
+                        programId = enrollment.programId ?: txProgramId,
+                        patchMap = enrollPatch
+                    )
+                } else {
+                    val rejectStatus = when {
+                        enrollment.completedInstallments > 0 -> "ACTIVE"
+                        enrollment.isTrialActiveStatus && enrollment.remainingTrialMillis() > 0L -> "TRIAL_ACTIVE"
+                        else -> "PAYMENT_REJECTED"
+                    }
+                    val rejectPatch = mapOf<String, Any?>(
+                        "status" to rejectStatus,
+                        "access_status" to rejectStatus,
+                        "rejection_reason" to payload.rejectionReason,
+                        "pending_installment_tx_id" to "",
+                        "pending_installment_amount" to 0,
+                        "updated_at" to nowIso
+                    )
+                    patchEnrollmentByIdOrAccount(
+                        enrollmentId = enrollment.id,
+                        studentPhone = enrollment.effectivePhone.ifBlank { txPhone },
+                        shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { txAccountKey },
+                        programId = enrollment.programId ?: txProgramId,
+                        patchMap = rejectPatch
                     )
                 }
-
-                val enrollmentId = targetTx?.enrollmentId?.takeIf { it > 0L }
-                    ?: payload.enrollmentId?.takeIf { it > 0L }
-                    ?: 0L
-                val txPhone = CourseAccessEnrollment.normalizeBdPhone(
-                    targetTx?.effectiveStudentPhone?.ifBlank { payload.studentPhone }
-                )
-                val txAccountKey = CourseAccessEnrollment.normalizeBdPhone(
-                    targetTx?.effectiveAccountKey?.ifBlank { payload.shikhoAccountKey }
-                ).ifBlank { txPhone }
-                val txProgramId = targetTx?.programId?.takeIf { it.isNotBlank() }
-                    ?: payload.programId.orEmpty()
-
-                val enrollments = try {
-                    api.getCourseAccessEnrollments()
-                } catch (_: Exception) {
-                    emptyList()
-                }
-
-                // Match by primary `id` first, then by (`student_phone` / `shikho_account_key` + `program_id`)
-                val enrollment = enrollments.firstOrNull { it.id == enrollmentId && enrollmentId > 0L }
-                    ?: enrollments.firstOrNull { item ->
-                        txProgramId.isNotBlank() &&
-                            item.programId.equals(txProgramId, ignoreCase = true) && (
-                            (txPhone.isNotBlank() && CourseAccessEnrollment.normalizeBdPhone(item.effectivePhone) == txPhone) ||
-                                (txAccountKey.isNotBlank() && CourseAccessEnrollment.normalizeBdPhone(item.effectiveAccountKey) == txAccountKey)
-                            )
-                    }
-
-                if (enrollment != null) {
-                    if (payload.approve) {
-                        val newPaid = if (rpcSucceeded) enrollment.paidAmount else (enrollment.paidAmount + (targetTx?.amount ?: 0))
-                        val newDue = if (rpcSucceeded) enrollment.dueAmount else (enrollment.totalPrice - newPaid).coerceAtLeast(0)
-                        val newCompleted = if (rpcSucceeded) enrollment.completedInstallments else (enrollment.completedInstallments + 1)
-                        val totalInst = targetTx?.totalInstallments?.takeIf { it > 0 } ?: enrollment.totalInstallments.coerceAtLeast(1)
-                        val intervalDays = payload.customNextDueDays
-                            ?: targetTx?.intervalDays?.takeIf { it > 0 }
-                            ?: enrollment.installmentIntervalDays.takeIf { it > 0 }
-                            ?: 7
-
-                        val nextDueIso = if (newDue > 0) {
-                            val cal = Calendar.getInstance()
-                            cal.add(Calendar.DAY_OF_YEAR, intervalDays)
-                            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
-                        } else {
-                            null
-                        }
-
-                        val resolvedPlanId = targetTx?.planId?.takeIf { it.isNotBlank() }
-                            ?: targetTx?.selectedPlanId?.takeIf { it.isNotBlank() }
-                            ?: enrollment.selectedPlanId?.takeIf { it.isNotBlank() }
-                            ?: "FULL"
-                        val resolvedPlanTitle = targetTx?.effectivePlanTitle?.takeIf { it.isNotBlank() }
-                            ?: enrollment.selectedPlanTitle?.takeIf { it.isNotBlank() }
-                            ?: "এককালীন সম্পূর্ণ পেমেন্ট"
-
-                        val enrollPatch = mutableMapOf<String, Any?>(
-                            "status" to "ACTIVE",
-                            "paid_amount" to newPaid,
-                            "due_amount" to newDue,
-                            "completed_installments" to newCompleted,
-                            "total_installments" to totalInst,
-                            "selected_plan_id" to resolvedPlanId,
-                            "selected_plan_title" to resolvedPlanTitle,
-                            "active_plan_id" to resolvedPlanId,
-                            "active_plan_title" to resolvedPlanTitle,
-                            "next_due_date" to nextDueIso,
-                            "pending_installment_tx_id" to "",
-                            "pending_installment_amount" to 0,
-                            "rejection_reason" to "",
-                            "unlocked_at" to (enrollment.unlockedAt?.takeIf { it.isNotBlank() } ?: nowIso),
-                            "updated_at" to nowIso
-                        )
-                        if (targetTx != null) {
-                            enrollPatch["last_transaction_id"] = targetTx.transactionId ?: ""
-                            enrollPatch["last_payment_amount"] = targetTx.amount
-                            enrollPatch["last_sender_mobile"] = targetTx.senderMobile ?: ""
-                            enrollPatch["last_payment_method"] = targetTx.paymentMethod ?: "bKash"
-                        }
-                        val validPhone = CourseAccessEnrollment.normalizeBdPhone(enrollment.effectivePhone)
-                            .takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
-                            ?: txPhone.takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
-                        if (!validPhone.isNullOrBlank()) {
-                            enrollPatch["student_phone"] = validPhone
-                            enrollPatch["user_phone"] = validPhone
-                            enrollPatch["shikho_account_key"] = validPhone
-                        }
-
-                        patchEnrollmentByIdOrAccount(
-                            enrollmentId = enrollment.id,
-                            studentPhone = enrollment.effectivePhone.ifBlank { txPhone },
-                            shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { txAccountKey },
-                            programId = enrollment.programId ?: txProgramId,
-                            patchMap = enrollPatch
-                        )
-                    } else if (!rpcSucceeded) {
-                        val rejectStatus = if (enrollment.completedInstallments > 0) "ACTIVE" else "PAYMENT_REJECTED"
-                        val rejectPatch = mapOf<String, Any?>(
-                            "status" to rejectStatus,
-                            "rejection_reason" to payload.rejectionReason,
-                            "pending_installment_tx_id" to "",
-                            "pending_installment_amount" to 0,
-                            "updated_at" to nowIso
-                        )
-                        patchEnrollmentByIdOrAccount(
-                            enrollmentId = enrollment.id,
-                            studentPhone = enrollment.effectivePhone.ifBlank { txPhone },
-                            shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { txAccountKey },
-                            programId = enrollment.programId ?: txProgramId,
-                            patchMap = rejectPatch
-                        )
-                    }
-                }
-                return@withContext Result.success(Unit)
             }
 
             Result.success(Unit)
@@ -2441,7 +2806,7 @@ class SupabaseMaxBirdRepository(
         try {
             val api = supabaseClient.getApi()
             val response = api.enforceOverdueCourseInstallmentsRpc()
-            if (response.isSuccessful) {
+            if (isJsonRpcSuccess(response)) {
                 Result.success(Unit)
             } else {
                 Result.success(Unit)
@@ -2467,12 +2832,14 @@ class SupabaseMaxBirdRepository(
             )
             if (!newStatus.isNullOrBlank()) {
                 patchMap["status"] = newStatus
+                patchMap["access_status"] = newStatus
                 if (newStatus.equals("ACTIVE", ignoreCase = true)) {
                     patchMap["unlocked_at"] = nowIso
                 }
             }
             if (!newNextDueDateIso.isNullOrBlank()) {
                 patchMap["next_due_date"] = newNextDueDateIso
+                patchMap["next_installment_due_at"] = newNextDueDateIso
             }
             if (adminNote != null) {
                 patchMap["admin_note"] = adminNote
@@ -2483,6 +2850,7 @@ class SupabaseMaxBirdRepository(
                 patchMap["student_phone"] = cleanPhone
                 patchMap["user_phone"] = cleanPhone
                 patchMap["shikho_account_key"] = CourseAccessEnrollment.normalizeBdPhone(shikhoAccountKey).ifBlank { cleanPhone }
+                patchMap["student_key"] = CourseAccessEnrollment.normalizeBdPhone(shikhoAccountKey).ifBlank { cleanPhone }
             }
 
             val response = patchEnrollmentByIdOrAccount(

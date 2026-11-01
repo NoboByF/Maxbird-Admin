@@ -77,6 +77,82 @@ import com.example.ui.theme.Slate850
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 
+private const val SAFE_DATABASE_SYNC_FIX_SQL = """-- ============================================================================
+-- SAFE FIX: 100% SYNC COLUMNS & ERROR-PROOF ONESIGNAL TRIGGERS
+-- Run this once in Supabase Dashboard -> SQL Editor
+-- ============================================================================
+
+ALTER TABLE public.devices
+    ADD COLUMN IF NOT EXISTS device_id TEXT,
+    ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS rejection_reason TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS student_name TEXT,
+    ADD COLUMN IF NOT EXISTS student_phone TEXT,
+    ADD COLUMN IF NOT EXISTS onesignal_player_id TEXT,
+    ADD COLUMN IF NOT EXISTS fcm_token TEXT;
+
+UPDATE public.devices
+SET
+    device_id = COALESCE(NULLIF(device_id, ''), device_hash),
+    is_blocked = COALESCE(is_banned, is_blocked, false),
+    is_banned = COALESCE(is_banned, is_blocked, false),
+    rejection_reason = COALESCE(NULLIF(rejection_reason, ''), ban_reason, '')
+WHERE device_id IS NULL OR is_blocked IS DISTINCT FROM is_banned;
+
+CREATE OR REPLACE FUNCTION public.admin_set_device_block_status(
+    p_device_hash TEXT,
+    p_is_banned BOOLEAN DEFAULT true,
+    p_reason TEXT DEFAULT 'অ্যাডমিন কর্তৃক ব্লক করা হয়েছে'
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    UPDATE public.devices
+    SET
+        status = CASE WHEN p_is_banned THEN 'blocked' ELSE 'active' END,
+        is_banned = p_is_banned,
+        is_blocked = p_is_banned,
+        ban_reason = CASE WHEN p_is_banned THEN COALESCE(p_reason, '') ELSE '' END,
+        rejection_reason = CASE WHEN p_is_banned THEN COALESCE(p_reason, '') ELSE '' END,
+        banned_at = CASE WHEN p_is_banned THEN now() ELSE NULL END,
+        approved_at = CASE WHEN NOT p_is_banned THEN now() ELSE approved_at END,
+        updated_at = now()
+    WHERE device_hash = p_device_hash
+       OR device_id = p_device_hash
+       OR display_device_id = p_device_hash
+       OR id::text = p_device_hash;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.admin_approve_device_verification(
+    p_device_hash TEXT
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    UPDATE public.devices
+    SET
+        status = 'active',
+        is_banned = false,
+        is_blocked = false,
+        ban_reason = '',
+        rejection_reason = '',
+        approved_at = now(),
+        updated_at = now()
+    WHERE device_hash = p_device_hash
+       OR device_id = p_device_hash
+       OR display_device_id = p_device_hash
+       OR id::text = p_device_hash;
+END;
+$$;
+"""
+
 private const val SUPABASE_SCHEMA_SQL = """-- MaxBird Supabase Setup SQL Script
 -- Run this in your Supabase Dashboard -> SQL Editor
 
@@ -222,7 +298,10 @@ fun SettingsScreen(
     oneSignalStatusSummary: String = "",
     isSendingOneSignalTest: Boolean = false,
     onSaveOneSignalConfig: (String, String) -> Unit = { _, _ -> },
-    onTestPushNotification: () -> Unit = {}
+    onTestPushNotification: () -> Unit = {},
+    isRunningSyncDiagnostics: Boolean = false,
+    syncDiagnosticResults: List<com.example.ui.viewmodel.AdminViewModel.SyncDiagnosticCheckItem> = emptyList(),
+    onRunSyncDiagnostics: () -> Unit = {}
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
     var appIdDraft by remember(oneSignalAppId) { mutableStateOf(oneSignalAppId) }
@@ -235,6 +314,140 @@ fun SettingsScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // 0. 1-Click Student App & Database 100% Live Sync Diagnostic Tester Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.2.dp,
+                        Brush.horizontalGradient(listOf(NeonCyan, EmeraldSuccess)),
+                        RoundedCornerShape(20.dp)
+                    )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "🔍 স্টুডেন্ট অ্যাপ ও ডাটাবেজ ১০০% সিঙ্ক পরীক্ষক",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White,
+                                    fontSize = 15.sp
+                                )
+                            )
+                            Text(
+                                text = "১-ক্লিকে ডিভাইস ব্যান, কোর্স, ফ্রি ট্রায়াল, পেমেন্ট, OneSignal ও ওয়েবসাইট চেক করুন",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = NeonCyan,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = onRunSyncDiagnostics,
+                            enabled = !isRunningSyncDiagnostics,
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("btn_run_full_sync_diagnostics")
+                        ) {
+                            if (isRunningSyncDiagnostics) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = Slate950,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("পরীক্ষা চলছে...", color = Slate950, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                            } else {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Slate950, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("এখনই ১০০% সিঙ্ক পরীক্ষা করুন", color = Slate950, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(SAFE_DATABASE_SYNC_FIX_SQL))
+                                onShowToast("✅ ডাটাবেজ অটো-ফিক্স ও ট্রিগার সিঙ্ক SQL কপি হয়েছে! Supabase SQL Editor-এ Run করুন।")
+                            },
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.testTag("btn_copy_safe_sync_sql")
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Fix SQL কপি", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+
+                    if (syncDiagnosticResults.isNotEmpty()) {
+                        val passedCount = syncDiagnosticResults.count { it.isSuccess }
+                        Surface(
+                            color = Slate900,
+                            shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (passedCount == syncDiagnosticResults.size) EmeraldSuccess.copy(alpha = 0.6f) else AmberWarning.copy(alpha = 0.6f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "📊 লাইভ টেস্ট রিপোর্ট: $passedCount/${syncDiagnosticResults.size} টি মডিউল ১০০% সিঙ্কড",
+                                    color = if (passedCount == syncDiagnosticResults.size) EmeraldSuccess else AmberWarning,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 12.sp
+                                )
+                                syncDiagnosticResults.forEach { item ->
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Slate950)
+                                            .padding(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            text = "${if (item.isSuccess) "✅" else "⚠️"} ${item.titleBn}",
+                                            color = if (item.isSuccess) EmeraldSuccess else CoralDanger,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
+                                        Text(
+                                            text = item.detailBn,
+                                            color = Slate200,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 1. Dynamic Payment Methods Manager (Top Priority in Settings!)
         item {
             DynamicPaymentMethodsManagerSection(

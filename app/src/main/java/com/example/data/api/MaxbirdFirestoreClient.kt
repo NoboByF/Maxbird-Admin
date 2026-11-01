@@ -109,6 +109,17 @@ class MaxbirdFirestoreClient(private val context: Context) {
             httpClient.newCall(request).execute().use { response ->
                 val bodyStr = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
+                    // If the authorized admin email hasn't set up a password account yet, automatically sign up!
+                    if (cleanEmail.equals(MaxbirdPortalSettings.ADMIN_EMAIL, ignoreCase = true) &&
+                        (bodyStr.contains("EMAIL_NOT_FOUND", ignoreCase = true) ||
+                            bodyStr.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
+                            bodyStr.contains("USER_NOT_FOUND", ignoreCase = true))
+                    ) {
+                        val signUpFallback = createAdminAccountWithEmailPassword(cleanEmail, password)
+                        if (signUpFallback.isSuccess) {
+                            return@withContext signUpFallback
+                        }
+                    }
                     val errMsg = parseFirebaseError(bodyStr)
                     return@withContext Result.failure(Exception(errMsg))
                 }
@@ -424,75 +435,115 @@ class MaxbirdFirestoreClient(private val context: Context) {
                 return@withContext Result.failure(Exception(validationError))
             }
 
-            // Build the exact 17 fields in the document
-            val fieldsObj = JSONObject().apply {
-                put("appName", stringValue(sanitized.appName))
-                put("apkDownloadUrl", stringValue(sanitized.apkDownloadUrl))
-                put("r2BucketPublicDomain", stringValue(sanitized.r2BucketPublicDomain))
-                put("r2ObjectKey", stringValue(sanitized.r2ObjectKey))
-                put("appVersion", stringValue(sanitized.appVersion))
-                put("fileSize", stringValue(sanitized.fileSize))
-                put("telegramHandle", stringValue(sanitized.telegramHandle))
-                put("telegramUrl", stringValue(sanitized.telegramUrl))
-                put("noticeText", stringValue(sanitized.noticeText))
-                put("releaseNotes", stringValue(sanitized.releaseNotes))
-                put("downloadCount", integerValue(sanitized.downloadCount))
-                put("minAndroidVersion", stringValue(sanitized.minAndroidVersion))
-                put("lastUpdated", stringValue(sanitized.lastUpdated))
-                put("sha256Short", stringValue(sanitized.sha256Short))
-                put("ownerId", stringValue(sanitized.ownerId))
-                // If document already exists and has a createdAt timestamp, keep the exact timestampValue
-                if (docExists && !preservedCreatedAtIso.isNullOrBlank()) {
-                    put("createdAt", timestampValue(preservedCreatedAtIso))
-                }
-            }
+            val hasServerCreatedAt = docExists && !preservedCreatedAtIso.isNullOrBlank()
 
-            val fieldTransforms = JSONArray().apply {
-                // If creating for the first time (or createdAt was missing), set createdAt to serverTimestamp()
-                if (!docExists || preservedCreatedAtIso.isNullOrBlank()) {
+            // Helper to execute a commit write operation
+            fun executeCommit(useUpdateMaskPreserveCreatedAt: Boolean): Pair<Boolean, String> {
+                val fieldsObj = JSONObject().apply {
+                    put("appName", stringValue(sanitized.appName))
+                    put("apkDownloadUrl", stringValue(sanitized.apkDownloadUrl))
+                    put("r2BucketPublicDomain", stringValue(sanitized.r2BucketPublicDomain))
+                    put("r2ObjectKey", stringValue(sanitized.r2ObjectKey))
+                    put("appVersion", stringValue(sanitized.appVersion))
+                    put("fileSize", stringValue(sanitized.fileSize))
+                    put("telegramHandle", stringValue(sanitized.telegramHandle))
+                    put("telegramUrl", stringValue(sanitized.telegramUrl))
+                    put("noticeText", stringValue(sanitized.noticeText))
+                    put("releaseNotes", stringValue(sanitized.releaseNotes))
+                    put("downloadCount", integerValue(sanitized.downloadCount))
+                    put("minAndroidVersion", stringValue(sanitized.minAndroidVersion))
+                    put("lastUpdated", stringValue(sanitized.lastUpdated))
+                    put("sha256Short", stringValue(sanitized.sha256Short))
+                    put("ownerId", stringValue(sanitized.ownerId))
+                    if (!useUpdateMaskPreserveCreatedAt && hasServerCreatedAt) {
+                        put("createdAt", timestampValue(preservedCreatedAtIso!!))
+                    }
+                }
+
+                val fieldTransforms = JSONArray().apply {
+                    if (!useUpdateMaskPreserveCreatedAt && !hasServerCreatedAt) {
+                        put(
+                            JSONObject().apply {
+                                put("fieldPath", "createdAt")
+                                put("setToServerValue", "REQUEST_TIME")
+                            }
+                        )
+                    }
                     put(
                         JSONObject().apply {
-                            put("fieldPath", "createdAt")
+                            put("fieldPath", "updatedAt")
                             put("setToServerValue", "REQUEST_TIME")
                         }
                     )
                 }
-                // Always set updatedAt to serverTimestamp()
-                put(
-                    JSONObject().apply {
-                        put("fieldPath", "updatedAt")
-                        put("setToServerValue", "REQUEST_TIME")
+
+                val writeOperation = JSONObject().apply {
+                    put(
+                        "update",
+                        JSONObject().apply {
+                            put("name", documentResourceName)
+                            put("fields", fieldsObj)
+                        }
+                    )
+                    if (useUpdateMaskPreserveCreatedAt) {
+                        // Partial update via updateMask so existing server `createdAt` is preserved bit-for-bit!
+                        put(
+                            "updateMask",
+                            JSONObject().apply {
+                                put(
+                                    "fieldPaths",
+                                    JSONArray().apply {
+                                        put("appName")
+                                        put("apkDownloadUrl")
+                                        put("r2BucketPublicDomain")
+                                        put("r2ObjectKey")
+                                        put("appVersion")
+                                        put("fileSize")
+                                        put("telegramHandle")
+                                        put("telegramUrl")
+                                        put("noticeText")
+                                        put("releaseNotes")
+                                        put("downloadCount")
+                                        put("minAndroidVersion")
+                                        put("lastUpdated")
+                                        put("sha256Short")
+                                        put("ownerId")
+                                    }
+                                )
+                            }
+                        )
                     }
-                )
-            }
-
-            val writeOperation = JSONObject().apply {
-                put(
-                    "update",
-                    JSONObject().apply {
-                        put("name", documentResourceName)
-                        put("fields", fieldsObj)
-                    }
-                )
-                put("updateTransforms", fieldTransforms)
-            }
-
-            val commitPayload = JSONObject().apply {
-                put("writes", JSONArray().put(writeOperation))
-            }
-
-            val request = Request.Builder()
-                .url(commitUrl)
-                .header("Authorization", "Bearer $token")
-                .post(commitPayload.toString().toRequestBody(jsonMediaType))
-                .build()
-
-            httpClient.newCall(request).execute().use { response ->
-                val bodyStr = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    val errMsg = parseFirebaseError(bodyStr)
-                    return@withContext Result.failure(Exception(errMsg))
+                    put("updateTransforms", fieldTransforms)
                 }
+
+                val commitPayload = JSONObject().apply {
+                    put("writes", JSONArray().put(writeOperation))
+                }
+
+                val request = Request.Builder()
+                    .url(commitUrl)
+                    .header("Authorization", "Bearer $token")
+                    .post(commitPayload.toString().toRequestBody(jsonMediaType))
+                    .build()
+
+                httpClient.newCall(request).execute().use { response ->
+                    val bodyStr = response.body?.string().orEmpty()
+                    return Pair(response.isSuccessful, bodyStr)
+                }
+            }
+
+            // 1. If document exists, first update using updateMask so server `createdAt` stays untouched
+            var (ok, errBody) = executeCommit(useUpdateMaskPreserveCreatedAt = hasServerCreatedAt)
+            if (!ok && hasServerCreatedAt) {
+                // 2. Fallback to full document write if updateMask was rejected
+                val retry = executeCommit(useUpdateMaskPreserveCreatedAt = false)
+                ok = retry.first
+                errBody = retry.second
+            }
+
+            if (!ok) {
+                val errMsg = parseFirebaseError(errBody)
+                return@withContext Result.failure(Exception(errMsg))
             }
 
             // Re-fetch to return the fresh live state from Firestore

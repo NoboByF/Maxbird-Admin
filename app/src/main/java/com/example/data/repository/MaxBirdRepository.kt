@@ -15,6 +15,7 @@ import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
+import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
@@ -97,6 +98,30 @@ interface MaxBirdRepository {
     suspend fun toggleDeviceCanViewProfiles(deviceId: String, canViewProfiles: Boolean): Result<Unit>
 
     suspend fun deleteUserDevice(deviceId: String): Result<Unit>
+
+    suspend fun getDeviceShikhoAccounts(deviceHash: String? = null): Result<List<DeviceShikhoAccount>> =
+        Result.success(emptyList())
+
+    suspend fun setDeviceCoursePermissions(
+        deviceHash: String,
+        isRestricted: Boolean,
+        allowedClasses: List<String> = emptyList(),
+        allowedGroups: List<String> = emptyList(),
+        allowedBatches: List<String> = emptyList(),
+        allowedPrograms: List<String> = emptyList()
+    ): Result<Unit> = Result.success(Unit)
+
+    suspend fun setAccountCoursePermissions(
+        deviceHash: String,
+        userPhone: String,
+        isAccessGranted: Boolean = true,
+        isRestricted: Boolean = false,
+        allowedClasses: List<String> = emptyList(),
+        allowedGroups: List<String> = emptyList(),
+        allowedBatches: List<String> = emptyList(),
+        allowedPrograms: List<String> = emptyList(),
+        adminNote: String = ""
+    ): Result<Unit> = Result.success(Unit)
 
 
     // Course Sales, Installment Plans & Payment Verification

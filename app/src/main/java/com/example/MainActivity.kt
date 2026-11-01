@@ -415,6 +415,7 @@ class MainActivity : ComponentActivity() {
                                 val userDevices by viewModel.userDevices.collectAsStateWithLifecycle()
                                 val enrollments by viewModel.courseAccessEnrollments.collectAsStateWithLifecycle()
                                 val transactions by viewModel.coursePaymentTransactions.collectAsStateWithLifecycle()
+                                val deviceShikhoAccounts by viewModel.deviceShikhoAccounts.collectAsStateWithLifecycle()
                                 val searchQuery by viewModel.deviceSearchQuery.collectAsStateWithLifecycle()
                                 val filter by viewModel.deviceFilter.collectAsStateWithLifecycle()
                                 val isLoadingDevices by viewModel.isLoadingDevices.collectAsStateWithLifecycle()
@@ -423,6 +424,7 @@ class MainActivity : ComponentActivity() {
                                     devices = userDevices,
                                     enrollments = enrollments,
                                     transactions = transactions,
+                                    deviceShikhoAccounts = deviceShikhoAccounts,
                                     searchQuery = searchQuery,
                                     filter = filter,
                                     isLoading = isLoadingDevices,
@@ -450,6 +452,12 @@ class MainActivity : ComponentActivity() {
                                     onToggleBan = { device, reason -> viewModel.toggleUserDeviceBan(device, reason) },
                                     onToggleCanViewProfiles = { device -> viewModel.toggleDeviceCanViewProfiles(device) },
                                     onDeleteDevice = { device -> viewModel.deleteUserDevice(device) },
+                                    onSaveDeviceCoursePermissions = { device, restricted, classes, groups, batches, programs ->
+                                        viewModel.setDeviceCoursePermissions(device, restricted, classes, groups, batches, programs)
+                                    },
+                                    onSaveAccountCoursePermissions = { devHash, userId, granted, restricted, classes, groups, batches, programs ->
+                                        viewModel.setAccountCoursePermissions(devHash, userId, granted, restricted, classes, groups, batches, programs)
+                                    },
                                     onShowToast = { msg -> viewModel.showToast(msg) }
                                 )
                             }
@@ -641,6 +649,8 @@ class MainActivity : ComponentActivity() {
                                 val oneSignalRestApiKey by viewModel.oneSignalRestApiKey.collectAsStateWithLifecycle()
                                 val oneSignalStatusSummary by viewModel.oneSignalStatusSummary.collectAsStateWithLifecycle()
                                 val isSendingOneSignalTest by viewModel.isSendingOneSignalTest.collectAsStateWithLifecycle()
+                                val isRunningSyncDiagnostics by viewModel.isRunningSyncDiagnostics.collectAsStateWithLifecycle()
+                                val syncDiagnosticResults by viewModel.syncDiagnosticResults.collectAsStateWithLifecycle()
 
                                 SettingsScreen(
                                     supabaseUrl = supabaseUrl,
@@ -667,6 +677,11 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onTestPushNotification = {
                                         viewModel.sendTestPushNotification()
+                                    },
+                                    isRunningSyncDiagnostics = isRunningSyncDiagnostics,
+                                    syncDiagnosticResults = syncDiagnosticResults,
+                                    onRunSyncDiagnostics = {
+                                        viewModel.runFullSystemSyncDiagnostics()
                                     }
                                 )
                             }

@@ -512,6 +512,9 @@ data class CourseAccessEnrollment(
     @Json(name = "shikho_account_key")
     val shikhoAccountKey: String? = null,
 
+    @Json(name = "student_key")
+    val studentKey: String? = null,
+
     @Json(name = "student_name")
     val studentName: String? = null,
 
@@ -527,8 +530,14 @@ data class CourseAccessEnrollment(
     @Json(name = "program_id")
     val programId: String? = null,
 
+    @Json(name = "course_id")
+    val courseId: String? = null,
+
     @Json(name = "program_title")
     val programTitle: String? = null,
+
+    @Json(name = "course_title")
+    val courseTitle: String? = null,
 
     @Json(name = "class_code")
     val classCode: String? = null,
@@ -545,8 +554,14 @@ data class CourseAccessEnrollment(
     @Json(name = "status")
     val status: String? = "REQUESTED",
 
+    @Json(name = "access_status")
+    val accessStatus: String? = null,
+
     @Json(name = "total_price")
     val totalPrice: Int = 1000,
+
+    @Json(name = "total_fee")
+    val totalFee: Double? = null,
 
     @Json(name = "paid_amount")
     val paidAmount: Int = 0,
@@ -587,14 +602,20 @@ data class CourseAccessEnrollment(
     @Json(name = "next_due_date")
     val nextDueDate: String? = null,
 
+    @Json(name = "next_installment_due_at")
+    val nextInstallmentDueAt: String? = null,
+
     @Json(name = "installment_plans_json")
     val installmentPlansJson: List<InstallmentPlanItem>? = emptyList(),
+
+    @Json(name = "installment_plans")
+    val installmentPlans: List<InstallmentPlanItem>? = null,
 
     @Json(name = "last_transaction_id")
     val lastTransactionId: String? = null,
 
     @Json(name = "last_payment_amount")
-    val lastPaymentAmount: Int? = 0,
+    val lastPaymentAmount: Double? = 0.0,
 
     @Json(name = "last_sender_mobile")
     val lastSenderMobile: String? = null,
@@ -606,7 +627,7 @@ data class CourseAccessEnrollment(
     val pendingInstallmentTxId: String? = null,
 
     @Json(name = "pending_installment_amount")
-    val pendingInstallmentAmount: Int? = 0,
+    val pendingInstallmentAmount: Double? = 0.0,
 
     @Json(name = "rejection_reason")
     val rejectionReason: String? = null,
@@ -644,6 +665,9 @@ data class CourseAccessEnrollment(
     @Json(name = "trial_days")
     val trialDays: Int = 0,
 
+    @Json(name = "trial_days_granted")
+    val trialDaysGranted: Int? = null,
+
     @Json(name = "trial_hours")
     val trialHours: Int = 0,
 
@@ -653,8 +677,14 @@ data class CourseAccessEnrollment(
     @Json(name = "trial_ends_at")
     val trialEndsAt: String? = null,
 
+    @Json(name = "trial_expires_at")
+    val trialExpiresAt: String? = null,
+
     @Json(name = "is_trial_used")
     val isTrialUsed: Boolean = false,
+
+    @Json(name = "trial_used")
+    val trialUsed: Boolean? = null,
 
     @Json(name = "onesignal_player_id")
     val onesignalPlayerId: String? = null,
@@ -662,12 +692,19 @@ data class CourseAccessEnrollment(
     @Json(name = "fcm_token")
     val fcmToken: String? = null
 ) {
-    fun parsedInstallmentPlans(): List<InstallmentPlanItem> = installmentPlansJson.orEmpty()
+    fun parsedInstallmentPlans(): List<InstallmentPlanItem> =
+        installmentPlansJson?.takeIf { it.isNotEmpty() } ?: installmentPlans.orEmpty()
+
+    val effectiveStatus: String
+        get() = status?.takeIf { it.isNotBlank() }
+            ?: accessStatus?.takeIf { it.isNotBlank() }
+            ?: "REQUESTED"
 
     val effectivePhone: String
         get() = studentPhone?.takeIf { it.isNotBlank() }
             ?: userPhone?.takeIf { it.isNotBlank() }
             ?: shikhoAccountKey?.takeIf { it.isNotBlank() }
+            ?: studentKey?.takeIf { isValidBdPhone(it) }
             ?: deviceId?.takeIf { isValidBdPhone(it) }
             ?: ""
 
@@ -689,6 +726,7 @@ data class CourseAccessEnrollment(
 
     val effectiveAccountKey: String
         get() = shikhoAccountKey?.takeIf { it.isNotBlank() }
+            ?: studentKey?.takeIf { it.isNotBlank() }
             ?: studentPhone?.takeIf { it.isNotBlank() }
             ?: userPhone?.takeIf { it.isNotBlank() }
             ?: shikhoUserId?.takeIf { it.isNotBlank() }
@@ -702,20 +740,21 @@ data class CourseAccessEnrollment(
         get() = installmentEnabled && (allowInstallments ?: true)
 
     val isAccessRequestedStatus: Boolean
-        get() = status.equals("ACCESS_REQUESTED", ignoreCase = true) ||
-            status.equals("REQUESTED", ignoreCase = true)
+        get() = effectiveStatus.equals("ACCESS_REQUESTED", ignoreCase = true) ||
+            effectiveStatus.equals("REQUESTED", ignoreCase = true)
 
     val isOverdueStatus: Boolean
-        get() = status.equals("INSTALLMENT_OVERDUE", ignoreCase = true) ||
-            status.equals("OVERDUE", ignoreCase = true)
+        get() = effectiveStatus.equals("INSTALLMENT_OVERDUE", ignoreCase = true) ||
+            effectiveStatus.equals("OVERDUE", ignoreCase = true)
 
     val isTrialActiveStatus: Boolean
-        get() = status.equals("TRIAL_ACTIVE", ignoreCase = true)
+        get() = effectiveStatus.equals("TRIAL_ACTIVE", ignoreCase = true)
 
     val isTrialExpiredStatus: Boolean
-        get() = status.equals("TRIAL_EXPIRED", ignoreCase = true)
+        get() = effectiveStatus.equals("TRIAL_EXPIRED", ignoreCase = true)
 
-    fun parseTrialEndsAtMillis(): Long? = parseIsoTimestampToMillis(trialEndsAt)
+    fun parseTrialEndsAtMillis(): Long? =
+        parseIsoTimestampToMillis(trialEndsAt?.takeIf { it.isNotBlank() } ?: trialExpiresAt)
 
     fun parseTrialStartedAtMillis(): Long? = parseIsoTimestampToMillis(trialStartedAt)
 
@@ -731,7 +770,7 @@ data class CourseAccessEnrollment(
     }
 
     fun formatConfiguredTrialDurationBn(): String {
-        val d = trialDays.coerceAtLeast(0)
+        val d = trialDays.takeIf { it > 0 } ?: (trialDaysGranted ?: 0).coerceAtLeast(0)
         val h = trialHours.coerceAtLeast(0)
         return when {
             d > 0 && h > 0 -> "${d} দিন ${h} ঘণ্টা"
@@ -762,11 +801,12 @@ data class CourseAccessEnrollment(
                 return "⌛ ট্রায়ালের মেয়াদ শেষ (Expired)"
             }
         }
+        val effectiveUsed = isTrialUsed || (trialUsed == true)
         return when {
             isTrialActiveStatus -> "⏳ ট্রায়াল চলমান (${formatConfiguredTrialDurationBn()})"
             isTrialExpiredStatus -> "⌛ ট্রায়ালের মেয়াদ শেষ (Expired)"
-            trialEnabled && !isTrialUsed -> "🎁 ট্রায়াল অনুমোদিত: ${formatConfiguredTrialDurationBn()} (এখনো শুরু করেনি)"
-            trialEnabled && isTrialUsed -> "⌛ ট্রায়াল ব্যবহৃত হয়েছে (${formatConfiguredTrialDurationBn()})"
+            trialEnabled && !effectiveUsed -> "🎁 ট্রায়াল অনুমোদিত: ${formatConfiguredTrialDurationBn()} (এখনো শুরু করেনি)"
+            trialEnabled && effectiveUsed -> "⌛ ট্রায়াল ব্যবহৃত হয়েছে (${formatConfiguredTrialDurationBn()})"
             else -> "ফ্রি ট্রায়াল চালু নেই"
         }
     }
@@ -810,6 +850,9 @@ data class CoursePaymentTransaction(
     @Json(name = "shikho_account_key")
     val shikhoAccountKey: String? = null,
 
+    @Json(name = "student_key")
+    val studentKey: String? = null,
+
     @Json(name = "student_phone")
     val studentPhone: String? = null,
 
@@ -819,8 +862,14 @@ data class CoursePaymentTransaction(
     @Json(name = "program_id")
     val programId: String? = null,
 
+    @Json(name = "course_id")
+    val courseId: String? = null,
+
     @Json(name = "program_title")
     val programTitle: String? = null,
+
+    @Json(name = "course_title")
+    val courseTitle: String? = null,
 
     @Json(name = "payment_type")
     val paymentType: String? = "FULL",
@@ -853,7 +902,7 @@ data class CoursePaymentTransaction(
     val senderMobile: String? = null,
 
     @Json(name = "amount")
-    val amount: Int = 0,
+    val amountNumeric: Double = 0.0,
 
     @Json(name = "transaction_id")
     val transactionId: String? = null,
@@ -885,9 +934,13 @@ data class CoursePaymentTransaction(
     @Json(name = "user_phone")
     val userPhone: String? = null
 ) {
+    val amount: Int
+        get() = amountNumeric.toInt()
+
     val effectiveStudentPhone: String
         get() = userPhone?.takeIf { it.isNotBlank() }
             ?: shikhoAccountKey?.takeIf { it.isNotBlank() }
+            ?: studentKey?.takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
             ?: studentPhone?.takeIf { it.isNotBlank() }
             ?: deviceId?.takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
             ?: senderMobile?.takeIf { it.isNotBlank() }
@@ -895,6 +948,7 @@ data class CoursePaymentTransaction(
 
     val effectiveAccountKey: String
         get() = shikhoAccountKey?.takeIf { it.isNotBlank() }
+            ?: studentKey?.takeIf { it.isNotBlank() }
             ?: userPhone?.takeIf { it.isNotBlank() }
             ?: studentPhone?.takeIf { it.isNotBlank() }
             ?: deviceId?.takeIf { CourseAccessEnrollment.isValidBdPhone(it) }
@@ -913,7 +967,8 @@ data class CoursePaymentTransaction(
 
 /**
  * RPC Payload for `POST /rest/v1/rpc/admin_approve_course_access_request`
- * and `POST /rest/v1/rpc/admin_approve_course_access_with_trial`
+ * Matches live DB signature:
+ * `admin_approve_course_access_request(p_enrollment_id bigint, p_total_price integer, p_installment_enabled boolean DEFAULT true, p_installment_plans_json jsonb DEFAULT NULL::jsonb, p_admin_note text DEFAULT ''::text, p_instant_free_unlock boolean DEFAULT false)`
  */
 @JsonClass(generateAdapter = true)
 data class ApproveCourseAccessRequestRpcPayload(
@@ -932,6 +987,9 @@ data class ApproveCourseAccessRequestRpcPayload(
     @Json(name = "p_admin_note")
     val adminNote: String,
 
+    @Json(name = "p_instant_free_unlock")
+    val instantFreeUnlock: Boolean = false,
+
     @Transient
     val trialEnabled: Boolean = false,
 
@@ -943,9 +1001,6 @@ data class ApproveCourseAccessRequestRpcPayload(
 
     @Transient
     val startTrialImmediately: Boolean = false,
-
-    @Transient
-    val instantFreeUnlock: Boolean = false,
 
     @Transient
     val studentPhone: String? = null,
@@ -1012,11 +1067,12 @@ data class ManageCourseTrialPayload(
 
 /**
  * RPC Payload for `POST /rest/v1/rpc/admin_review_course_payment`
- * Matches live signature: `rpc('admin_review_course_payment', { p_transaction_row_id: tx.id, p_approve: true, p_rejection_reason: '' })`
+ * Matches live DB signature:
+ * `admin_review_course_payment(p_transaction_id bigint, p_approve boolean, p_rejection_reason text DEFAULT ''::text, p_custom_next_due_days integer DEFAULT NULL::integer)`
  */
 @JsonClass(generateAdapter = true)
 data class ReviewCoursePaymentRpcPayload(
-    @Json(name = "p_transaction_row_id")
+    @Json(name = "p_transaction_id")
     val transactionId: Long,
 
     @Json(name = "p_approve")
@@ -1025,7 +1081,7 @@ data class ReviewCoursePaymentRpcPayload(
     @Json(name = "p_rejection_reason")
     val rejectionReason: String = "",
 
-    @Transient
+    @Json(name = "p_custom_next_due_days")
     val customNextDueDays: Int? = null,
 
     @Transient

@@ -262,6 +262,7 @@ data class UpdateSupportLinkStatusPayload(
 data class UserDevice(
     @Json(name = "id") val id: String = "",
     @Json(name = "device_hash") val deviceHash: String = "",
+    @Json(name = "device_id") val deviceIdColumn: String = "",
     @Json(name = "display_device_id") val displayDeviceId: String = "",
     @Json(name = "student_note") val studentNote: String? = null,
     @Json(name = "device_model") val deviceModel: String = "Unknown Device",
@@ -273,7 +274,9 @@ data class UserDevice(
     @Json(name = "applied_code") val appliedCode: String? = null,
     @Json(name = "status") val status: String = "pending",
     @Json(name = "is_banned") val isBanned: Boolean = false,
+    @Json(name = "is_blocked") val isBlockedColumn: Boolean = false,
     @Json(name = "ban_reason") val banReason: String? = null,
+    @Json(name = "rejection_reason") val rejectionReasonColumn: String? = null,
     @Json(name = "banned_at") val bannedAt: String? = null,
     @Json(name = "session_token") val sessionToken: String? = null,
     @Json(name = "requested_at") val requestedAt: String? = null,
@@ -288,18 +291,38 @@ data class UserDevice(
     @Json(name = "student_name") val studentName: String? = null,
     @Json(name = "onesignal_player_id") val onesignalPlayerId: String? = null,
     @Json(name = "fcm_token") val fcmToken: String? = null,
-    @Json(name = "can_view_profiles") val canViewProfiles: Boolean = false
+    @Json(name = "can_view_profiles") val canViewProfiles: Boolean = false,
+    @Json(name = "bound_shikho_user_id") val boundShikhoUserId: String? = null,
+    @Json(name = "bound_user_phone") val boundUserPhone: String? = null,
+    @Json(name = "is_access_restricted") val isAccessRestricted: Boolean = false,
+    @Json(name = "allowed_classes") val allowedClasses: List<String>? = emptyList(),
+    @Json(name = "allowed_groups") val allowedGroups: List<String>? = emptyList(),
+    @Json(name = "allowed_batches") val allowedBatches: List<String>? = emptyList(),
+    @Json(name = "allowed_programs") val allowedPrograms: List<String>? = emptyList()
 ) {
+    val effectiveDeviceHash: String
+        get() = deviceHash.ifBlank { deviceIdColumn }
+
+    val effectiveBanReason: String?
+        get() = banReason?.takeIf { it.isNotBlank() }
+            ?: rejectionReasonColumn?.takeIf { it.isNotBlank() }
+
     val isBlockedDevice: Boolean
         get() = isBanned ||
+            isBlockedColumn ||
             status.equals("blocked", ignoreCase = true) ||
-            status.equals("banned", ignoreCase = true)
+            status.equals("banned", ignoreCase = true) ||
+            status.equals("rejected", ignoreCase = true)
 
     val isPendingDevice: Boolean
         get() = !isBlockedDevice && status.equals("pending", ignoreCase = true)
 
     val isActiveDevice: Boolean
-        get() = !isBlockedDevice && (status.equals("active", ignoreCase = true) || status.isBlank())
+        get() = !isBlockedDevice && (
+            status.equals("active", ignoreCase = true) ||
+                status.equals("approved", ignoreCase = true) ||
+                status.isBlank()
+            )
 
     val displayStudentName: String
         get() = studentNote?.trim()?.takeIf { it.isNotEmpty() }
@@ -310,6 +333,7 @@ data class UserDevice(
         get() {
             val direct = studentPhone?.trim()?.takeIf { it.isNotEmpty() }
                 ?: userPhone?.trim()?.takeIf { it.isNotEmpty() }
+                ?: boundUserPhone?.trim()?.takeIf { it.isNotEmpty() }
                 ?: shikhoAccountKey?.trim()?.takeIf { it.isNotEmpty() }
             if (!direct.isNullOrBlank()) return CourseAccessEnrollment.normalizeBdPhone(direct)
             val noteText = studentNote.orEmpty()
@@ -331,8 +355,34 @@ data class UserDevice(
         }
 
     val effectiveKey: String
-        get() = deviceHash.ifBlank { id.ifBlank { displayDeviceId } }
+        get() = effectiveDeviceHash.ifBlank { id.ifBlank { displayDeviceId } }
 }
+
+/**
+ * Row model for `public.device_shikho_accounts`.
+ * Matches live Supabase schema 100%.
+ */
+@JsonClass(generateAdapter = true)
+data class DeviceShikhoAccount(
+    @Json(name = "id") val id: Long = 0L,
+    @Json(name = "device_hash") val deviceHash: String = "",
+    @Json(name = "shikho_user_id") val shikhoUserId: String? = "",
+    @Json(name = "user_phone") val userPhone: String = "",
+    @Json(name = "student_name") val studentName: String? = "",
+    @Json(name = "student_class") val studentClass: String? = "",
+    @Json(name = "student_group") val studentGroup: String? = "",
+    @Json(name = "is_access_granted") val isAccessGranted: Boolean = true,
+    @Json(name = "is_access_restricted") val isAccessRestricted: Boolean = false,
+    @Json(name = "allowed_classes") val allowedClasses: List<String>? = emptyList(),
+    @Json(name = "allowed_groups") val allowedGroups: List<String>? = emptyList(),
+    @Json(name = "allowed_batches") val allowedBatches: List<String>? = emptyList(),
+    @Json(name = "allowed_programs") val allowedPrograms: List<String>? = emptyList(),
+    @Json(name = "admin_note") val adminNote: String? = "",
+    @Json(name = "first_login_at") val firstLoginAt: String? = null,
+    @Json(name = "last_seen_at") val lastSeenAt: String? = null,
+    @Json(name = "created_at") val createdAt: String? = null,
+    @Json(name = "updated_at") val updatedAt: String? = null
+)
 
 /**
  * Request payload to update device ban/block status in `public.devices`.
