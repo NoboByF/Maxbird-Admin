@@ -140,13 +140,21 @@ class AdminPreferences(context: Context) {
         if (saved.isNotEmpty() && !saved.contains("your-onesignal")) {
             return saved
         }
-        return try {
+        val fromBuildConfig = try {
             val field = BuildConfig::class.java.getField("ONESIGNAL_APP_ID")
             val value = (field.get(null) as? String)?.trim().orEmpty()
             if (value.isNotEmpty() && !value.contains("your-onesignal")) value else ""
         } catch (_: Exception) {
             ""
         }
+        if (fromBuildConfig.isNotEmpty()) return fromBuildConfig
+
+        val fromEnv = try {
+            System.getenv("ONESIGNAL_APP_ID")?.trim().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        return if (fromEnv.isNotEmpty() && !fromEnv.contains("your-onesignal")) fromEnv else ""
     }
 
     fun setOneSignalAppId(appId: String) {
@@ -158,16 +166,62 @@ class AdminPreferences(context: Context) {
         if (saved.isNotEmpty() && !saved.contains("your-onesignal")) {
             return saved
         }
-        return try {
+        val fromBuildConfig = try {
             val field = BuildConfig::class.java.getField("ONESIGNAL_REST_API_KEY")
             val value = (field.get(null) as? String)?.trim().orEmpty()
             if (value.isNotEmpty() && !value.contains("your-onesignal")) value else ""
         } catch (_: Exception) {
             ""
         }
+        if (fromBuildConfig.isNotEmpty()) return fromBuildConfig
+
+        val fromEnv = try {
+            System.getenv("ONESIGNAL_REST_API_KEY")?.trim().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        return if (fromEnv.isNotEmpty() && !fromEnv.contains("your-onesignal")) fromEnv else ""
     }
 
     fun setOneSignalRestApiKey(apiKey: String) {
         prefs.edit().putString("onesignal_rest_api_key", apiKey.trim()).apply()
     }
+
+    fun getSavedFcmToken(): String {
+        return prefs.getString("admin_fcm_token", "")?.trim().orEmpty()
+    }
+
+    fun setSavedFcmToken(token: String) {
+        prefs.edit().putString("admin_fcm_token", token.trim()).apply()
+    }
+
+    fun getSavedOneSignalPlayerId(): String {
+        return prefs.getString("admin_onesignal_player_id", "")?.trim().orEmpty()
+    }
+
+    fun setSavedOneSignalPlayerId(playerId: String) {
+        prefs.edit().putString("admin_onesignal_player_id", playerId.trim()).apply()
+    }
+
+    fun getAdminAndroidDeviceId(context: Context): String {
+        val existing = prefs.getString("admin_android_device_id", "")?.trim().orEmpty()
+        if (existing.isNotEmpty()) return existing
+
+        val hwId = try {
+            android.provider.Settings.Secure.getString(
+                context.contentResolver,
+                android.provider.Settings.Secure.ANDROID_ID
+            )?.trim().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        val resolved = if (hwId.isNotEmpty() && hwId != "9774d56d682e549c") {
+            "admin_$hwId"
+        } else {
+            "admin_${java.util.UUID.randomUUID().toString().replace("-", "").take(16)}"
+        }
+        prefs.edit().putString("admin_android_device_id", resolved).apply()
+        return resolved
+    }
 }
+

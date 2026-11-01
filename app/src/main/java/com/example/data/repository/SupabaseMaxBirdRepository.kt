@@ -2510,4 +2510,123 @@ class SupabaseMaxBirdRepository(
             Result.failure(e)
         }
     }
+
+    override suspend fun fetchOneSignalPublicAppId(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val response = api.getOneSignalPublicAppIdRpc()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(
+                    Exception("get_onesignal_public_app_id failed with HTTP ${response.code()}")
+                )
+            }
+            val raw = response.body()?.string()?.trim().orEmpty()
+            if (raw.isEmpty() || raw.equals("null", ignoreCase = true)) {
+                return@withContext Result.failure(Exception("Empty OneSignal App ID from RPC"))
+            }
+
+            // Can be a quoted string `"uuid"`, a JSON object `{"onesignal_app_id": "uuid"}`, or an array `[{"onesignal_app_id": "uuid"}]`
+            val extracted = when {
+                raw.startsWith("\"") && raw.endsWith("\"") -> raw.removeSurrounding("\"").trim()
+                raw.startsWith("{") -> {
+                    val obj = org.json.JSONObject(raw)
+                    obj.optString("onesignal_app_id")
+                        .ifBlank { obj.optString("app_id") }
+                        .ifBlank { obj.optString("value") }
+                        .trim()
+                }
+                raw.startsWith("[") -> {
+                    val arr = org.json.JSONArray(raw)
+                    if (arr.length() > 0) {
+                        val first = arr.opt(0)
+                        when (first) {
+                            is org.json.JSONObject -> first.optString("onesignal_app_id")
+                                .ifBlank { first.optString("app_id") }
+                                .ifBlank { first.optString("value") }
+                                .trim()
+                            is String -> first.trim()
+                            else -> ""
+                        }
+                    } else {
+                        ""
+                    }
+                }
+                else -> raw.removeSurrounding("\"").trim()
+            }
+
+            if (extracted.isNotBlank()) {
+                adminPreferences.setOneSignalAppId(extracted)
+                Result.success(extracted)
+            } else {
+                Result.failure(Exception("OneSignal App ID not found in RPC response"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun upsertAdminPushDevice(
+        adminDeviceId: String,
+        oneSignalPlayerId: String,
+        fcmToken: String,
+        adminLabel: String,
+        isActive: Boolean
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val payload = mutableMapOf<String, Any?>(
+                "admin_device_id" to adminDeviceId.trim(),
+                "onesignal_player_id" to oneSignalPlayerId.trim(),
+                "fcm_token" to fcmToken.trim(),
+                "admin_label" to adminLabel.trim().ifBlank { "Admin Android Device" },
+                "is_active" to isActive
+            )
+            val response = api.upsertAdminPushDevice(
+                onConflict = "admin_device_id",
+                payload = payload,
+                prefer = "resolution=merge-duplicates,return=representation"
+            )
+            if (response.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                val err = try { response.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("HTTP ${response.code()}: $err"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun notifyStudentViaOneSignal(
+        oneSignalPlayerId: String,
+        deviceHash: String,
+        studentPhone: String,
+        title: String,
+        message: String,
+        eventType: String,
+        extraData: Map<String, Any?>
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val payload = mapOf<String, Any?>(
+                "p_onesignal_player_id" to oneSignalPlayerId.trim(),
+                "p_device_hash" to deviceHash.trim(),
+                "p_student_phone" to CourseAccessEnrollment.normalizeBdPhone(studentPhone).ifBlank { studentPhone.trim() },
+                "p_title" to title.trim(),
+                "p_message" to message.trim(),
+                "p_event_type" to eventType.trim(),
+                "p_extra_data" to extraData
+            )
+            val response = api.notifyStudentViaOneSignalRpc(payload)
+            if (response.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                val err = try { response.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("notify_student_via_onesignal HTTP ${response.code()}: $err"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
+

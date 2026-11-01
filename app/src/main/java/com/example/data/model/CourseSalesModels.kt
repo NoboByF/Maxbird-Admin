@@ -654,7 +654,13 @@ data class CourseAccessEnrollment(
     val trialEndsAt: String? = null,
 
     @Json(name = "is_trial_used")
-    val isTrialUsed: Boolean = false
+    val isTrialUsed: Boolean = false,
+
+    @Json(name = "onesignal_player_id")
+    val onesignalPlayerId: String? = null,
+
+    @Json(name = "fcm_token")
+    val fcmToken: String? = null
 ) {
     fun parsedInstallmentPlans(): List<InstallmentPlanItem> = installmentPlansJson.orEmpty()
 

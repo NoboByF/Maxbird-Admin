@@ -90,6 +90,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SERVICE_ROLE: ${{ secrets.SERVICE_ROLE }}
+          ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
+          ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
         run: |
           set -euo pipefail
           umask 077
@@ -100,8 +102,10 @@ jobs:
             # Client-side apps must use the public anon/publishable key.
             # Do not embed a Supabase service-role/secret key in an APK.
             printf 'SUPABASE_KEY=%s\n' "${SUPABASE_ANON_KEY:-your-supabase-key}"
+            printf 'ONESIGNAL_APP_ID=%s\n' "${ONESIGNAL_APP_ID:-}"
+            printf 'ONESIGNAL_REST_API_KEY=%s\n' "${ONESIGNAL_REST_API_KEY:-}"
           } > .env
-          echo "Supabase client configuration prepared."
+          echo "Supabase and OneSignal client configuration prepared."
 
       - name: Build Release APK
         shell: bash
@@ -110,6 +114,8 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEYSTORE_PATH: ${{ github.workspace }}/upload-keystore.jks
+          ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
+          ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
         run: |
           set -euo pipefail
           if [[ -z "${KEYSTORE_PASSWORD:-}" || -z "${KEY_ALIAS:-}" || -z "${KEY_PASSWORD:-}" ]]; then

@@ -385,6 +385,28 @@ interface SupabaseApi {
     suspend fun enforceOverdueCourseInstallmentsRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?> = emptyMap()
     ): Response<Unit>
+
+    // =========================================================================
+    // OneSignal + FCM Admin Push & Student Notification Endpoints
+    // =========================================================================
+
+    @POST("rest/v1/rpc/get_onesignal_public_app_id")
+    suspend fun getOneSignalPublicAppIdRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?> = emptyMap()
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/admin_push_devices")
+    suspend fun upsertAdminPushDevice(
+        @Query("on_conflict") onConflict: String = "admin_device_id",
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "resolution=merge-duplicates,return=representation"
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/notify_student_via_onesignal")
+    suspend fun notifyStudentViaOneSignalRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
 }
+
 
 

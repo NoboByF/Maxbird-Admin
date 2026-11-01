@@ -130,10 +130,12 @@ class MainActivity : ComponentActivity() {
                 ) { isGranted ->
                     if (isGranted) {
                         AdminRealtimeMonitorService.startIfEnabled(context)
+                        OneSignalPushManager.syncAdminPushRegistration(context)
                     }
                 }
 
                 LaunchedEffect(Unit) {
+                    OneSignalPushManager.syncAdminPushRegistration(context)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         val granted = ContextCompat.checkSelfPermission(
                             context,

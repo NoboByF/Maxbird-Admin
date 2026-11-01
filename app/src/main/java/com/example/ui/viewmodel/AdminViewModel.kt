@@ -340,19 +340,31 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     val isSendingOneSignalTest: StateFlow<Boolean> = _isSendingOneSignalTest.asStateFlow()
 
     init {
-        OneSignalPushManager.initializeIfConfigured(application)
-        _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(application)
+        val app = getApplication<Application>()
+        OneSignalPushManager.initializeIfConfigured(app)
+        OneSignalPushManager.syncAdminPushRegistration(app) {
+            _oneSignalAppId.value = adminPreferences.getOneSignalAppId()
+            _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
+        }
+        _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
         loadAllData()
         loadMaxbirdPortalSettings()
         startInAppRealtimeMonitorLoop()
-        AdminRealtimeMonitorService.startIfEnabled(application)
+        AdminRealtimeMonitorService.startIfEnabled(app)
     }
 
     private fun startInAppRealtimeMonitorLoop() {
         viewModelScope.launch {
             while (isActive) {
                 delay(15_000L)
-                _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(getApplication())
+                val app = getApplication<Application>()
+                if (_oneSignalAppId.value.isBlank()) {
+                    val savedAppId = adminPreferences.getOneSignalAppId()
+                    if (savedAppId.isNotBlank()) {
+                        _oneSignalAppId.value = savedAppId
+                    }
+                }
+                _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
                 if (_isLiveNotificationMonitorEnabled.value) {
                     try {
                         val devicesRes = repository.getUserDevices()
@@ -400,11 +412,15 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         adminPreferences.setOneSignalRestApiKey(cleanRestKey)
         val app = getApplication<Application>()
         val initialized = OneSignalPushManager.initializeIfConfigured(app, cleanAppId)
+        OneSignalPushManager.syncAdminPushRegistration(app, explicitAppId = cleanAppId) {
+            _oneSignalAppId.value = adminPreferences.getOneSignalAppId()
+            _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
+        }
         _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
         if (initialized) {
             showToast("✅ OneSignal App ID সংরক্ষিত ও সক্রিয় করা হয়েছে!")
         } else if (cleanAppId.isBlank()) {
-            showToast("ℹ️ OneSignal App ID মুছে ফেলা হয়েছে।")
+            showToast("ℹ️ OneSignal App ID ডাটাবেজ থেকে অটো-সিঙ্ক করা হচ্ছে...")
         } else {
             showToast("✅ OneSignal কনফিগারেশন সেভ হয়েছে!")
         }
@@ -417,8 +433,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         if (enabled) {
             AdminRealtimeMonitorService.startIfEnabled(app)
             OneSignalPushManager.initializeIfConfigured(app)
+            OneSignalPushManager.syncAdminPushRegistration(app) {
+                _oneSignalAppId.value = adminPreferences.getOneSignalAppId()
+                _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
+            }
             _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
-            showToast("🔔 24/7 লাইভ ও OneSignal পুশ নোটিফিকেশন চালু করা হয়েছে!")
+            showToast("🔔 24/7 লাইভ ও OneSignal + FCM পুশ নোটিফিকেশন চালু করা হয়েছে!")
         } else {
             AdminRealtimeMonitorService.stop(app)
             showToast("🔕 লাইভ নোটিফিকেশন মনিটর বন্ধ করা হয়েছে।")
@@ -840,6 +860,85 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun dispatchStudentPushForDevice(
+        device: UserDevice,
+        title: String,
+        message: String,
+        eventType: String,
+        extraData: Map<String, Any?> = emptyMap()
+    ) {
+        viewModelScope.launch {
+            try {
+                val profile = com.example.util.StudentDeviceMatcher.resolveStudentProfileForDevice(
+                    device = device,
+                    enrollments = _courseAccessEnrollments.value,
+                    transactions = _coursePaymentTransactions.value
+                )
+                val phone = device.extractedPhoneFromDevice.ifBlank { profile?.studentPhone.orEmpty() }
+                repository.notifyStudentViaOneSignal(
+                    oneSignalPlayerId = device.onesignalPlayerId.orEmpty(),
+                    deviceHash = device.deviceHash.ifBlank { device.displayDeviceId.ifBlank { device.id } },
+                    studentPhone = phone,
+                    title = title,
+                    message = message,
+                    eventType = eventType,
+                    extraData = extraData
+                )
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    private fun dispatchStudentPushForPhoneOrDevice(
+        studentPhone: String,
+        deviceIdOrHash: String = "",
+        title: String,
+        message: String,
+        eventType: String,
+        extraData: Map<String, Any?> = emptyMap()
+    ) {
+        viewModelScope.launch {
+            try {
+                val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(studentPhone)
+                val matchedEnrollment = _courseAccessEnrollments.value.firstOrNull { enr ->
+                    (cleanPhone.isNotBlank() && CourseAccessEnrollment.normalizeBdPhone(enr.effectivePhone) == cleanPhone) ||
+                        (deviceIdOrHash.isNotBlank() && (
+                            enr.deviceHash.equals(deviceIdOrHash, ignoreCase = true) ||
+                                enr.displayDeviceId.equals(deviceIdOrHash, ignoreCase = true) ||
+                                enr.deviceId.equals(deviceIdOrHash, ignoreCase = true)
+                            ))
+                }
+                val matchedDevice = _userDevices.value.firstOrNull { dev ->
+                    (deviceIdOrHash.isNotBlank() && (
+                        dev.deviceHash.equals(deviceIdOrHash, ignoreCase = true) ||
+                            dev.displayDeviceId.equals(deviceIdOrHash, ignoreCase = true) ||
+                            dev.id.equals(deviceIdOrHash, ignoreCase = true)
+                        )) ||
+                        (cleanPhone.isNotBlank() && dev.extractedPhoneFromDevice == cleanPhone)
+                }
+                val playerId = matchedEnrollment?.onesignalPlayerId?.takeIf { it.isNotBlank() }
+                    ?: matchedDevice?.onesignalPlayerId.orEmpty()
+                val resolvedHash = matchedDevice?.deviceHash?.takeIf { it.isNotBlank() }
+                    ?: matchedEnrollment?.deviceHash?.takeIf { it.isNotBlank() }
+                    ?: deviceIdOrHash.ifBlank {
+                        matchedDevice?.displayDeviceId?.takeIf { it.isNotBlank() }
+                            ?: matchedEnrollment?.effectiveDeviceId.orEmpty()
+                    }
+
+                repository.notifyStudentViaOneSignal(
+                    oneSignalPlayerId = playerId,
+                    deviceHash = resolvedHash,
+                    studentPhone = cleanPhone.ifBlank { studentPhone.trim() },
+                    title = title,
+                    message = message,
+                    eventType = eventType,
+                    extraData = extraData
+                )
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
     fun approveUserDeviceVerification(device: UserDevice, studentNote: String? = null) {
         viewModelScope.launch {
             try {
@@ -858,6 +957,16 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val result = repository.approveUserDeviceVerification(device, studentNote)
                 if (result.isSuccess) {
+                    dispatchStudentPushForDevice(
+                        device = device,
+                        title = "✅ আপনার ডিভাইস অনুমোদিত হয়েছে!",
+                        message = "অভিনন্দন! আপনার ডিভাইস ভেরিফিকেশন সফলভাবে অনুমোদন করা হয়েছে। এখন আপনি অ্যাপ ব্যবহার করতে পারবেন।",
+                        eventType = "DEVICE_APPROVED",
+                        extraData = mapOf(
+                            "status" to "active",
+                            "display_device_id" to device.displayDeviceId
+                        )
+                    )
                     loadUserDevices(forceRefresh = true)
                     refreshStats()
                     showToast("✅ ডিভাইসটি ভেরিফাই ও অ্যাপ্রুভ (Active) করা হয়েছে!")
@@ -890,6 +999,30 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val result = repository.setUserDeviceBlockStatus(device, isBlocked, cleanReason)
                 if (result.isSuccess) {
+                    if (isBlocked) {
+                        dispatchStudentPushForDevice(
+                            device = device,
+                            title = "🚫 আপনার ডিভাইস ব্লক করা হয়েছে",
+                            message = "কারণ: $cleanReason। বিস্তারিত জানতে অ্যাডমিন সাপোর্টে যোগাযোগ করুন।",
+                            eventType = "DEVICE_BLOCKED",
+                            extraData = mapOf(
+                                "status" to "blocked",
+                                "ban_reason" to cleanReason,
+                                "display_device_id" to device.displayDeviceId
+                            )
+                        )
+                    } else {
+                        dispatchStudentPushForDevice(
+                            device = device,
+                            title = "🔓 আপনার ডিভাইস আনব্লক করা হয়েছে!",
+                            message = "আপনার ডিভাইসটি পুনরায় সক্রিয় (Active) করা হয়েছে। এখন আপনি ক্লাস চালিয়ে যেতে পারবেন।",
+                            eventType = "DEVICE_UNBLOCKED",
+                            extraData = mapOf(
+                                "status" to "active",
+                                "display_device_id" to device.displayDeviceId
+                            )
+                        )
+                    }
                     loadUserDevices(forceRefresh = true)
                     refreshStats()
                     val msg = if (isBlocked) {
@@ -921,6 +1054,16 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val result = repository.revokeUserDeviceToPending(device)
                 if (result.isSuccess) {
+                    dispatchStudentPushForDevice(
+                        device = device,
+                        title = "⏳ ডিভাইস ভেরিফিকেশন পেন্ডিং করা হয়েছে",
+                        message = "আপনার ডিভাইসের এক্সেস সাময়িকভাবে পেন্ডিং (Pending) তালিকায় নেওয়া হয়েছে।",
+                        eventType = "DEVICE_REVOKED_TO_PENDING",
+                        extraData = mapOf(
+                            "status" to "pending",
+                            "display_device_id" to device.displayDeviceId
+                        )
+                    )
                     loadUserDevices(forceRefresh = true)
                     refreshStats()
                     showToast("⏳ ডিভাইসটি আবার পেন্ডিং (Pending) তালিকায় নেওয়া হয়েছে।")
@@ -1610,8 +1753,60 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _isProcessingCourseSalesAction.value = true
+                val reqPhone = payload.studentPhone.orEmpty()
+                val existingEnrollment = _courseAccessEnrollments.value.firstOrNull {
+                    it.id == payload.enrollmentId ||
+                        (reqPhone.isNotBlank() && it.effectivePhone == CourseAccessEnrollment.normalizeBdPhone(reqPhone) &&
+                            it.programId == payload.programId)
+                }
                 val result = repository.approveCourseAccessRequest(payload)
                 if (result.isSuccess) {
+                    val targetPhone = reqPhone.ifBlank {
+                        payload.shikhoAccountKey.orEmpty().ifBlank { existingEnrollment?.effectivePhone.orEmpty() }
+                    }
+                    val targetDevice = existingEnrollment?.deviceId.orEmpty()
+                        .ifBlank { existingEnrollment?.displayDeviceId.orEmpty() }
+                    val courseTitle = existingEnrollment?.programTitle?.takeIf { it.isNotBlank() } ?: "কোর্স"
+
+                    val (pushTitle, pushBody, eventType) = when {
+                        payload.instantFreeUnlock -> Triple(
+                            "🎉 আপনার কোর্স ফ্রি আনলক হয়েছে!",
+                            "'$courseTitle' কোর্সটি অ্যাডমিন সম্পূর্ণ ফ্রি আনলক (ACTIVE) করে দিয়েছেন। এখনই ক্লাস শুরু করুন!",
+                            "COURSE_FREE_UNLOCKED"
+                        )
+                        payload.trialEnabled && payload.startTrialImmediately -> Triple(
+                            "🎁 আপনার ফ্রি ট্রায়াল চালু হয়েছে!",
+                            "'$courseTitle' কোর্সে আপনার জন্য ${payload.trialDays} দিন ${payload.trialHours} ঘণ্টার ফ্রি ট্রায়াল চালু করা হয়েছে!",
+                            "COURSE_TRIAL_STARTED"
+                        )
+                        payload.trialEnabled -> Triple(
+                            "✅ কোর্স অনুমোদন ও ফ্রি ট্রায়াল অফার!",
+                            "'$courseTitle' কোর্সের দাম ৳${payload.totalPrice} এবং ${payload.trialDays} দিন ${payload.trialHours} ঘণ্টার ফ্রি ট্রায়াল অনুমোদন দেওয়া হয়েছে।",
+                            "COURSE_ACCESS_APPROVED"
+                        )
+                        else -> Triple(
+                            "✅ আপনার কোর্স রিকোয়েস্ট অনুমোদিত হয়েছে!",
+                            "'$courseTitle' কোর্সের দাম (৳${payload.totalPrice}) ও কিস্তি প্ল্যান নির্ধারণ করা হয়েছে। এখন পেমেন্ট করে কোর্স আনলক করুন।",
+                            "COURSE_ACCESS_APPROVED"
+                        )
+                    }
+
+                    dispatchStudentPushForPhoneOrDevice(
+                        studentPhone = targetPhone,
+                        deviceIdOrHash = targetDevice,
+                        title = pushTitle,
+                        message = pushBody,
+                        eventType = eventType,
+                        extraData = mapOf(
+                            "enrollment_id" to payload.enrollmentId,
+                            "program_id" to payload.programId,
+                            "total_price" to payload.totalPrice,
+                            "trial_enabled" to payload.trialEnabled,
+                            "trial_days" to payload.trialDays,
+                            "trial_hours" to payload.trialHours
+                        )
+                    )
+
                     loadCourseSalesData()
                     val msg = when {
                         payload.instantFreeUnlock -> {
@@ -1649,8 +1844,39 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 _isProcessingCourseSalesAction.value = true
                 val result = repository.grantManualCourseAccess(payload)
                 if (result.isSuccess) {
-                    loadCourseSalesData()
                     val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(payload.studentPhone)
+                    val courseTitle = payload.programTitle.ifBlank { "কোর্স" }
+                    val (pushTitle, pushBody, eventType) = when {
+                        payload.status.equals("TRIAL_ACTIVE", ignoreCase = true) ||
+                            (payload.trialEnabled && payload.startTrialImmediately) -> Triple(
+                            "🎁 ফ্রি ট্রায়াল চালু হয়েছে!",
+                            "'$courseTitle' কোর্সে আপনার জন্য ${payload.trialDays} দিন ${payload.trialHours} ঘণ্টার ফ্রি ট্রায়াল সরাসরি চালু করা হয়েছে!",
+                            "COURSE_TRIAL_STARTED"
+                        )
+                        payload.status.equals("ACTIVE", ignoreCase = true) -> Triple(
+                            "🎉 আপনার কোর্স আনলক হয়েছে!",
+                            "'$courseTitle' কোর্সটি আপনার নম্বরে ($cleanPhone) সরাসরি আনলক (ACTIVE) করে দেওয়া হয়েছে!",
+                            "COURSE_MANUAL_UNLOCKED"
+                        )
+                        else -> Triple(
+                            "✅ কোর্স ও কিস্তি প্ল্যান যুক্ত হয়েছে!",
+                            "'$courseTitle' কোর্সের দাম (৳${payload.totalPrice}) ও কিস্তি প্ল্যান আপনার নম্বরে সেট করা হয়েছে।",
+                            "COURSE_MANUAL_ASSIGNED"
+                        )
+                    }
+                    dispatchStudentPushForPhoneOrDevice(
+                        studentPhone = cleanPhone,
+                        title = pushTitle,
+                        message = pushBody,
+                        eventType = eventType,
+                        extraData = mapOf(
+                            "program_id" to payload.programId,
+                            "program_title" to courseTitle,
+                            "status" to payload.status
+                        )
+                    )
+
+                    loadCourseSalesData()
                     val msg = when {
                         payload.status.equals("TRIAL_ACTIVE", ignoreCase = true) ||
                             (payload.trialEnabled && payload.startTrialImmediately) -> {
@@ -1683,8 +1909,38 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _isProcessingCourseSalesAction.value = true
+                val existingEnrollment = _courseAccessEnrollments.value.firstOrNull { it.id == payload.enrollmentId }
                 val result = repository.manageCourseTrial(payload)
                 if (result.isSuccess) {
+                    val courseTitle = existingEnrollment?.programTitle?.takeIf { it.isNotBlank() } ?: "কোর্স"
+                    val targetPhone = payload.studentPhone.orEmpty().ifBlank {
+                        payload.shikhoAccountKey.orEmpty().ifBlank { existingEnrollment?.effectivePhone.orEmpty() }
+                    }
+                    val targetDevice = existingEnrollment?.deviceId.orEmpty()
+                        .ifBlank { existingEnrollment?.displayDeviceId.orEmpty() }
+
+                    val (pushTitle, pushBody) = when (payload.action.uppercase()) {
+                        "ADD_HOURS" -> "🎁 ফ্রি ট্রায়ালের সময় বাড়ানো হয়েছে!" to "'$courseTitle' কোর্সে আপনার ফ্রি ট্রায়ালের মেয়াদ বাড়ানো হয়েছে এবং কোর্সটি আনলক করা হয়েছে।"
+                        "REDUCE_HOURS" -> "⏱️ ফ্রি ট্রায়ালের সময় আপডেট হয়েছে" to "'$courseTitle' কোর্সে আপনার ফ্রি ট্রায়ালের সময় সমন্বয় করা হয়েছে।"
+                        "SET_DURATION" -> "🎁 ফ্রি ট্রায়ালের নতুন মেয়াদ চালু হয়েছে!" to "'$courseTitle' কোর্সে ${payload.days} দিন ${payload.hours} ঘণ্টার ফ্রি ট্রায়াল চালু করা হয়েছে।"
+                        "END_TRIAL_NOW" -> "⏰ ফ্রি ট্রায়াল সমাপ্ত হয়েছে" to "'$courseTitle' কোর্সের ফ্রি ট্রায়াল শেষ হয়েছে। ক্লাস চালিয়ে যেতে এখন কোর্সটি কিনুন।"
+                        "RESET_TRIAL" -> "🔄 ফ্রি ট্রায়াল রিসেট করা হয়েছে!" to "'$courseTitle' কোর্সে আপনি আবার নতুন করে ফ্রি ট্রায়াল শুরু করতে পারবেন।"
+                        else -> "🎁 ফ্রি ট্রায়াল আপডেট" to "'$courseTitle' কোর্সের ফ্রি ট্রায়াল স্ট্যাটাস আপডেট করা হয়েছে।"
+                    }
+
+                    dispatchStudentPushForPhoneOrDevice(
+                        studentPhone = targetPhone,
+                        deviceIdOrHash = targetDevice,
+                        title = pushTitle,
+                        message = pushBody,
+                        eventType = "COURSE_TRIAL_${payload.action.uppercase()}",
+                        extraData = mapOf(
+                            "enrollment_id" to payload.enrollmentId,
+                            "program_id" to payload.programId,
+                            "action" to payload.action
+                        )
+                    )
+
                     loadCourseSalesData()
                     val msg = when (payload.action.uppercase()) {
                         "ADD_HOURS" -> "➕ ফ্রি ট্রায়ালের মেয়াদ বাড়ানো হয়েছে এবং কোর্স আনলক (TRIAL_ACTIVE) করা হয়েছে!"
@@ -1714,8 +1970,47 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _isProcessingCourseSalesAction.value = true
+                val tx = _coursePaymentTransactions.value.firstOrNull { it.id == payload.transactionId }
                 val result = repository.reviewCoursePayment(payload)
                 if (result.isSuccess) {
+                    val targetPhone = tx?.effectiveStudentPhone.orEmpty().ifBlank { payload.studentPhone.orEmpty() }
+                    val targetDevice = tx?.deviceId.orEmpty().ifBlank { tx?.displayDeviceId.orEmpty() }
+                    val courseTitle = tx?.programTitle?.takeIf { it.isNotBlank() } ?: "কোর্স"
+                    val amount = tx?.amount ?: 0
+                    val trxId = tx?.transactionId.orEmpty()
+
+                    if (payload.approve) {
+                        dispatchStudentPushForPhoneOrDevice(
+                            studentPhone = targetPhone,
+                            deviceIdOrHash = targetDevice,
+                            title = "✅ পেমেন্ট সফলভাবে ভেরিফাই হয়েছে!",
+                            message = "'$courseTitle' কোর্সের জন্য আপনার ৳$amount পেমেন্ট (TrxID: $trxId) অনুমোদিত হয়েছে এবং কোর্স আনলক (ACTIVE) করা হয়েছে!",
+                            eventType = "PAYMENT_APPROVED",
+                            extraData = mapOf(
+                                "payment_id" to payload.transactionId,
+                                "transaction_id" to trxId,
+                                "amount" to amount,
+                                "status" to "APPROVED"
+                            )
+                        )
+                    } else {
+                        val reason = payload.rejectionReason.ifBlank { "সঠিক TrxID বা তথ্য পাওয়া যায়নি" }
+                        dispatchStudentPushForPhoneOrDevice(
+                            studentPhone = targetPhone,
+                            deviceIdOrHash = targetDevice,
+                            title = "🚫 পেমেন্ট ভেরিফিকেশন বাতিল হয়েছে",
+                            message = "'$courseTitle' কোর্সের ৳$amount পেমেন্ট (TrxID: $trxId) বাতিল করা হয়েছে। কারণ: $reason",
+                            eventType = "PAYMENT_REJECTED",
+                            extraData = mapOf(
+                                "payment_id" to payload.transactionId,
+                                "transaction_id" to trxId,
+                                "amount" to amount,
+                                "status" to "REJECTED",
+                                "rejection_reason" to reason
+                            )
+                        )
+                    }
+
                     loadCourseSalesData()
                     val msg = if (payload.approve) {
                         "✅ পেমেন্ট অনুমোদিত হয়েছে এবং শিক্ষার্থীর কোর্স আনলক (ACTIVE) করা হয়েছে!"
@@ -1789,6 +2084,19 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     newNextDueDateIso = newDueIso
                 )
                 if (result.isSuccess) {
+                    val courseTitle = enrollment.programTitle?.takeIf { it.isNotBlank() } ?: "কোর্স"
+                    dispatchStudentPushForPhoneOrDevice(
+                        studentPhone = enrollment.effectivePhone,
+                        deviceIdOrHash = enrollment.deviceId.orEmpty().ifBlank { enrollment.displayDeviceId.orEmpty() },
+                        title = "📅 কিস্তির সময় বাড়ানো হয়েছে!",
+                        message = "'$courseTitle' কোর্সে আপনার পরবর্তী কিস্তি পরিশোধের মেয়াদ +$extraDays দিন বাড়ানো হয়েছে।",
+                        eventType = "INSTALLMENT_DUE_EXTENDED",
+                        extraData = mapOf(
+                            "enrollment_id" to enrollment.id,
+                            "extra_days" to extraDays,
+                            "next_due_date" to newDueIso
+                        )
+                    )
                     loadCourseSalesData()
                     showToast("✅ কিস্তির মেয়াদ +$extraDays দিন বাড়ানো হয়েছে!")
                 } else {
@@ -1814,8 +2122,25 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     newStatus = newStatus
                 )
                 if (result.isSuccess) {
+                    val courseTitle = enrollment.programTitle?.takeIf { it.isNotBlank() } ?: "কোর্স"
+                    val isUnlocked = newStatus.equals("ACTIVE", ignoreCase = true)
+                    dispatchStudentPushForPhoneOrDevice(
+                        studentPhone = enrollment.effectivePhone,
+                        deviceIdOrHash = enrollment.deviceId.orEmpty().ifBlank { enrollment.displayDeviceId.orEmpty() },
+                        title = if (isUnlocked) "✅ আপনার কোর্স আনলক করা হয়েছে!" else "🔒 কোর্স এক্সেস আপডেট",
+                        message = if (isUnlocked) {
+                            "'$courseTitle' কোর্সটি আবার আনলক (ACTIVE) করা হয়েছে। এখন আপনি ক্লাস করতে পারবেন।"
+                        } else {
+                            "'$courseTitle' কোর্সের স্ট্যাটাস পরিবর্তন ($newStatus) করা হয়েছে।"
+                        },
+                        eventType = if (isUnlocked) "COURSE_UNLOCKED" else "COURSE_LOCKED",
+                        extraData = mapOf(
+                            "enrollment_id" to enrollment.id,
+                            "status" to newStatus
+                        )
+                    )
                     loadCourseSalesData()
-                    val msg = if (newStatus.equals("ACTIVE", ignoreCase = true)) {
+                    val msg = if (isUnlocked) {
                         "✅ কোর্সটি আনলক (ACTIVE) করা হয়েছে!"
                     } else {
                         "🔒 কোর্সটি লক ($newStatus) করা হয়েছে!"

@@ -137,6 +137,28 @@ interface MaxBirdRepository {
         newNextDueDateIso: String? = null,
         adminNote: String? = null
     ): Result<Unit>
+
+    // OneSignal + FCM Admin Push & Student Push RPC
+    suspend fun fetchOneSignalPublicAppId(): Result<String>
+
+    suspend fun upsertAdminPushDevice(
+        adminDeviceId: String,
+        oneSignalPlayerId: String,
+        fcmToken: String,
+        adminLabel: String,
+        isActive: Boolean = true
+    ): Result<Unit>
+
+    suspend fun notifyStudentViaOneSignal(
+        oneSignalPlayerId: String = "",
+        deviceHash: String = "",
+        studentPhone: String = "",
+        title: String,
+        message: String,
+        eventType: String,
+        extraData: Map<String, Any?> = emptyMap()
+    ): Result<Unit>
 }
+
 
 

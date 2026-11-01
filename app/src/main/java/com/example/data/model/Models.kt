@@ -286,6 +286,8 @@ data class UserDevice(
     @Json(name = "user_phone") val userPhone: String? = null,
     @Json(name = "shikho_account_key") val shikhoAccountKey: String? = null,
     @Json(name = "student_name") val studentName: String? = null,
+    @Json(name = "onesignal_player_id") val onesignalPlayerId: String? = null,
+    @Json(name = "fcm_token") val fcmToken: String? = null,
     @Json(name = "can_view_profiles") val canViewProfiles: Boolean = false
 ) {
     val isBlockedDevice: Boolean

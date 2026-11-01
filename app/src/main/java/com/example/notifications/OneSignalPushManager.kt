@@ -2,8 +2,12 @@ package com.example.notifications
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import com.example.MainActivity
+import com.example.data.api.SupabaseClient
 import com.example.data.preferences.AdminPreferences
+import com.example.data.repository.SupabaseMaxBirdRepository
+import com.google.firebase.messaging.FirebaseMessaging
 import com.onesignal.OneSignal
 import com.onesignal.debug.LogLevel
 import com.onesignal.notifications.INotificationClickEvent
@@ -12,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -20,19 +25,20 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
 
 /**
- * Full OneSignal Real Push Notification Manager for MaxBird Admin App.
+ * Full OneSignal + Firebase Cloud Messaging (FCM) Push Notification Manager for MaxBird Admin App.
  *
- * 1. Initializes the official OneSignal Android SDK v5 (`OneSignal.initWithContext(context, appId)`),
- *    binds external ID `"maxbird_admin"` and tag `"role" = "admin"`, and listens for push clicks
- *    to deep-link into Device Verification, Course Access Requests, or Payment Verification.
- * 2. Dispatches real cloud push notifications via the OneSignal REST API (`https://onesignal.com/api/v1/notifications`)
- *    so notifications arrive via FCM/OneSignal even when the app is completely killed/closed.
- * 3. Generates the ready-to-run Supabase `pg_net` Database Webhook Trigger SQL script pre-populated
- *    with the admin's OneSignal App ID and REST API Key so Supabase automatically pushes OneSignal
- *    alerts on `INSERT`/`UPDATE` of `public.devices`, `public.course_access_enrollments`, and
- *    `public.course_payment_transactions` even when the Admin phone is turned off or app is force-stopped.
+ * 1. Resolves OneSignal App ID from `BuildConfig.ONESIGNAL_APP_ID` / `AdminPreferences`, or falls back
+ *    to Supabase RPC `POST /rest/v1/rpc/get_onesignal_public_app_id`.
+ * 2. Initializes the official OneSignal Android SDK v5 (`OneSignal.initWithContext(context, appId)`),
+ *    binds external ID `"ADMIN_MASTER"` and tags `"role" = "admin"`, `"is_admin" = "true"`, and listens
+ *    for push clicks to deep-link into Device Verification, Course Access Requests, or Payment Verification.
+ * 3. Obtains the device's FCM token (`FirebaseMessaging.getInstance().token`), registers it with
+ *    OneSignal REST API (`POST https://onesignal.com/api/v1/players`), and automatically upserts
+ *    the `onesignal_player_id` and `fcm_token` into Supabase `public.admin_push_devices`
+ *    (`POST /rest/v1/admin_push_devices?on_conflict=admin_device_id`).
  */
 object OneSignalPushManager {
 
@@ -56,8 +62,9 @@ object OneSignalPushManager {
     }
 
     /**
-     * Initializes the OneSignal SDK if a valid OneSignal App ID is configured.
-     * Safe to call multiple times (e.g., on app startup and after saving new OneSignal credentials).
+     * Initializes the OneSignal SDK if a valid OneSignal App ID is configured, and launches
+     * background sync for Supabase `get_onesignal_public_app_id`, FCM token, OneSignal `/api/v1/players`,
+     * and Supabase `public.admin_push_devices`.
      */
     fun initializeIfConfigured(
         context: Context,
@@ -67,10 +74,27 @@ object OneSignalPushManager {
         val prefs = AdminPreferences(appContext)
         val appId = explicitAppId?.trim()?.takeIf { it.isNotEmpty() }
             ?: prefs.getOneSignalAppId().trim()
-        if (!isValidOneSignalAppId(appId)) {
-            return false
+
+        val initializedNow = if (isValidOneSignalAppId(appId)) {
+            initOneSignalSdkInternal(appContext, appId)
+        } else {
+            false
         }
 
+        // Always launch background registration sync (will also fetch App ID from Supabase RPC if blank)
+        syncAdminPushRegistration(
+            context = appContext,
+            explicitAppId = explicitAppId
+        )
+
+        return initializedNow
+    }
+
+    private fun initOneSignalSdkInternal(
+        appContext: Context,
+        appId: String
+    ): Boolean {
+        if (!isValidOneSignalAppId(appId)) return false
         return try {
             OneSignal.Debug.logLevel = LogLevel.WARN
             if (initializedAppId != appId) {
@@ -78,12 +102,13 @@ object OneSignalPushManager {
                 initializedAppId = appId
             }
 
-            // Tag & login this device as MaxBird Admin so server/webhook pushes reach it
+            // Tag & login this device as ADMIN_MASTER with role=admin, is_admin=true
             try {
-                OneSignal.login("maxbird_admin")
+                OneSignal.login("ADMIN_MASTER")
                 OneSignal.User.addTags(
                     mapOf(
                         "role" to "admin",
+                        "is_admin" to "true",
                         "app_type" to "maxbird_admin"
                     )
                 )
@@ -105,10 +130,28 @@ object OneSignalPushManager {
                     override fun onClick(event: INotificationClickEvent) {
                         try {
                             val data = event.notification.additionalData
-                            val targetScreen = data?.optString("target_screen", "")?.takeIf { it.isNotBlank() }
-                                ?: "course_sales"
-                            val subTab = data?.optInt("course_sales_tab", 0) ?: 0
-                            val deviceQuery = data?.optString("device_id", "")?.takeIf { it.isNotBlank() }
+                            val eventType = data?.optString("type", "")?.takeIf { it.isNotBlank() }
+                                ?: data?.optString("event_type", "")?.takeIf { it.isNotBlank() }
+                                ?: ""
+                            val explicitTarget = data?.optString("target_screen", "")?.takeIf { it.isNotBlank() }
+
+                            val targetScreen = when {
+                                !explicitTarget.isNullOrBlank() -> explicitTarget
+                                eventType.equals("ADMIN_DEVICE_ACCESS_REQUEST", ignoreCase = true) ||
+                                    eventType.contains("device", ignoreCase = true) -> "devices"
+                                else -> "course_sales"
+                            }
+
+                            val subTab = when {
+                                data?.has("course_sales_tab") == true -> data.optInt("course_sales_tab", 0)
+                                eventType.equals("ADMIN_COURSE_PAYMENT_SUBMITTED", ignoreCase = true) ||
+                                    eventType.contains("payment", ignoreCase = true) -> 1
+                                else -> 0
+                            }
+
+                            val deviceQuery = data?.optString("display_device_id", "")?.takeIf { it.isNotBlank() }
+                                ?: data?.optString("device_id", "")?.takeIf { it.isNotBlank() }
+                                ?: data?.optString("device_hash", "")?.takeIf { it.isNotBlank() }
 
                             val launchIntent = Intent(appContext, MainActivity::class.java).apply {
                                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -134,7 +177,182 @@ object OneSignalPushManager {
     }
 
     /**
-     * Returns current OneSignal SDK subscription status summary for the UI.
+     * Full automatic registration pipeline:
+     * 1. Resolves OneSignal App ID (from preferences / BuildConfig, or via Supabase RPC `get_onesignal_public_app_id`).
+     * 2. Obtains FCM token from `FirebaseMessaging.getInstance().token`.
+     * 3. Registers FCM token with OneSignal REST API `POST https://onesignal.com/api/v1/players`
+     *    (`external_user_id = "ADMIN_MASTER"`, `tags = {"role": "admin", "is_admin": "true"}`).
+     * 4. Upserts `admin_device_id`, `onesignal_player_id`, `fcm_token`, `admin_label`, `is_active = true`
+     *    to Supabase `public.admin_push_devices`.
+     */
+    fun syncAdminPushRegistration(
+        context: Context,
+        explicitAppId: String? = null,
+        fcmTokenOverride: String? = null,
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
+        val appContext = context.applicationContext
+        scope.launch {
+            val ok = syncAdminPushRegistrationSuspend(
+                appContext = appContext,
+                explicitAppId = explicitAppId,
+                fcmTokenOverride = fcmTokenOverride
+            )
+            onComplete?.invoke(ok)
+        }
+    }
+
+    suspend fun syncAdminPushRegistrationSuspend(
+        appContext: Context,
+        explicitAppId: String? = null,
+        fcmTokenOverride: String? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val prefs = AdminPreferences(appContext)
+            val supabaseClient = SupabaseClient(prefs)
+            val repository = SupabaseMaxBirdRepository(supabaseClient, prefs)
+
+            // Step 1: Resolve OneSignal App ID (local/BuildConfig first, then Supabase RPC get_onesignal_public_app_id)
+            var appId = explicitAppId?.trim()?.takeIf { isValidOneSignalAppId(it) }
+                ?: prefs.getOneSignalAppId().trim().takeIf { isValidOneSignalAppId(it) }
+                ?: ""
+
+            if (appId.isBlank()) {
+                val rpcResult = repository.fetchOneSignalPublicAppId()
+                val fetchedId = rpcResult.getOrNull()?.trim().orEmpty()
+                if (isValidOneSignalAppId(fetchedId)) {
+                    appId = fetchedId
+                    prefs.setOneSignalAppId(appId)
+                }
+            }
+
+            if (isValidOneSignalAppId(appId)) {
+                initOneSignalSdkInternal(appContext, appId)
+            }
+
+            // Step 2: Obtain FCM Token
+            val fcmToken = fcmTokenOverride?.trim()?.takeIf { it.isNotEmpty() }
+                ?: fetchFcmTokenSuspend().takeIf { it.isNotEmpty() }
+                ?: prefs.getSavedFcmToken()
+
+            if (fcmToken.isNotBlank()) {
+                prefs.setSavedFcmToken(fcmToken)
+            }
+
+            // Step 3: Register with OneSignal REST API (`POST https://onesignal.com/api/v1/players`)
+            var playerId = ""
+            if (isValidOneSignalAppId(appId) && fcmToken.isNotBlank()) {
+                playerId = registerPlayerWithOneSignalRestApi(
+                    appId = appId,
+                    fcmToken = fcmToken
+                )
+            }
+
+            if (playerId.isBlank()) {
+                playerId = try {
+                    OneSignal.User.pushSubscription.id.trim()
+                } catch (_: Throwable) {
+                    ""
+                }
+            }
+            if (playerId.isBlank()) {
+                playerId = prefs.getSavedOneSignalPlayerId()
+            } else {
+                prefs.setSavedOneSignalPlayerId(playerId)
+            }
+
+            // Step 4: Upsert into Supabase `public.admin_push_devices`
+            if (playerId.isNotBlank() || fcmToken.isNotBlank()) {
+                val adminDeviceId = prefs.getAdminAndroidDeviceId(appContext)
+                val manufacturer = Build.MANUFACTURER?.trim().orEmpty()
+                val model = Build.MODEL?.trim().orEmpty()
+                val adminLabel = when {
+                    manufacturer.isNotEmpty() && model.isNotEmpty() && !model.startsWith(manufacturer, ignoreCase = true) ->
+                        "$manufacturer $model"
+                    model.isNotEmpty() -> model
+                    manufacturer.isNotEmpty() -> manufacturer
+                    else -> "MaxBird Admin Android"
+                }
+
+                repository.upsertAdminPushDevice(
+                    adminDeviceId = adminDeviceId,
+                    oneSignalPlayerId = playerId,
+                    fcmToken = fcmToken,
+                    adminLabel = adminLabel,
+                    isActive = true
+                )
+                return@withContext true
+            }
+            false
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private suspend fun fetchFcmTokenSuspend(): String = suspendCancellableCoroutine { cont ->
+        try {
+            FirebaseMessaging.getInstance().token
+                .addOnCompleteListener { task ->
+                    if (!cont.isActive) return@addOnCompleteListener
+                    if (task.isSuccessful) {
+                        cont.resume(task.result?.trim().orEmpty())
+                    } else {
+                        cont.resume("")
+                    }
+                }
+        } catch (_: Throwable) {
+            if (cont.isActive) {
+                cont.resume("")
+            }
+        }
+    }
+
+    /**
+     * Calls `POST https://onesignal.com/api/v1/players` to register the Admin device's FCM token
+     * with `external_user_id = "ADMIN_MASTER"` and `tags = {"role": "admin", "is_admin": "true"}`.
+     * Returns the OneSignal `player_id` (`id`).
+     */
+    private fun registerPlayerWithOneSignalRestApi(
+        appId: String,
+        fcmToken: String
+    ): String {
+        return try {
+            val payload = JSONObject().apply {
+                put("app_id", appId.trim())
+                put("device_type", 1) // 1 = Android
+                put("identifier", fcmToken.trim())
+                put("notification_types", 1) // 1 = Subscribed
+                put("external_user_id", "ADMIN_MASTER")
+                put("tags", JSONObject().apply {
+                    put("role", "admin")
+                    put("is_admin", "true")
+                })
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val request = Request.Builder()
+                .url("https://onesignal.com/api/v1/players")
+                .addHeader("Content-Type", "application/json; charset=utf-8")
+                .addHeader("Accept", "application/json")
+                .post(payload.toString().toRequestBody(mediaType))
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val bodyStr = response.body?.string().orEmpty()
+                if (response.isSuccessful && bodyStr.isNotBlank()) {
+                    val json = JSONObject(bodyStr)
+                    json.optString("id", "").trim()
+                } else {
+                    ""
+                }
+            }
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
+    /**
+     * Returns current OneSignal + FCM subscription status summary for the UI.
      */
     fun getSubscriptionStatusSummary(
         context: Context,
@@ -144,26 +362,37 @@ object OneSignalPushManager {
         val appId = appIdOverride?.trim()?.takeIf { it.isNotEmpty() }
             ?: prefs.getOneSignalAppId().trim()
         val apiKey = prefs.getOneSignalRestApiKey().trim()
+        val savedPlayerId = prefs.getSavedOneSignalPlayerId()
+        val savedFcm = prefs.getSavedFcmToken()
+
         if (!isValidOneSignalAppId(appId)) {
-            return "OneSignal App ID সেট করা হয়নি (সেট করলে অ্যাপ বন্ধ থাকলেও ক্লাউড পুশ আসবে)"
+            return if (savedFcm.isNotBlank()) {
+                "✅ FCM সক্রিয় • OneSignal App ID অটো-সিঙ্ক হচ্ছে..."
+            } else {
+                "OneSignal App ID সেট করা হয়নি (সেট করলে বা ডাটাবেজ কানেক্ট থাকলে অটো-সিঙ্ক হবে)"
+            }
         }
         return try {
             val subId = try {
                 OneSignal.User.pushSubscription.id.takeIf { it.isNotBlank() }
             } catch (_: Throwable) {
                 null
-            }
+            } ?: savedPlayerId.takeIf { it.isNotBlank() }
+
             val optedIn = try {
                 OneSignal.User.pushSubscription.optedIn
             } catch (_: Throwable) {
                 false
             }
             buildString {
-                append("✅ OneSignal SDK সংযুক্ত (App ID: ${appId.take(8)}...)")
+                append("✅ OneSignal + FCM সংযুক্ত (App: ${appId.take(8)}...)")
                 if (!subId.isNullOrBlank()) {
-                    append(" • Sub ID: ${subId.take(10)}...")
+                    append(" • Player ID: ${subId.take(8)}...")
                 } else if (optedIn) {
                     append(" • Push Opted-In")
+                }
+                if (savedFcm.isNotBlank()) {
+                    append(" • FCM রেডি")
                 }
                 if (apiKey.isNotBlank()) {
                     append(" • REST API সক্রিয়")
