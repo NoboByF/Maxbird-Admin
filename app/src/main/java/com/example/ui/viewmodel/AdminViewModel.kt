@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.api.CloudinaryClient
+import com.example.data.api.MaxbirdFirestoreClient
 import com.example.data.api.SupabaseClient
 import com.example.data.model.AccessCode
 import com.example.data.model.ActivatedDevice
@@ -23,16 +24,23 @@ import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceWithStudent
 import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
+import com.example.data.model.MaxbirdAdminAuthSession
+import com.example.data.model.MaxbirdPortalSettings
 import com.example.data.model.ReviewCoursePaymentRpcPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import com.example.data.preferences.AdminPreferences
 import com.example.data.repository.MaxBirdRepository
 import com.example.data.repository.SupabaseMaxBirdRepository
+import com.example.notifications.AdminNotificationHelper
+import com.example.notifications.AdminRealtimeMonitorService
+import com.example.notifications.OneSignalPushManager
 import com.example.ui.navigation.Screen
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
@@ -42,6 +50,8 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val supabaseClient = SupabaseClient(adminPreferences)
     private val repository: MaxBirdRepository = SupabaseMaxBirdRepository(supabaseClient, adminPreferences)
     private val cloudinaryClient = CloudinaryClient(application)
+    private val maxbirdFirestoreClient = MaxbirdFirestoreClient(application)
+    private val notificationHelper = AdminNotificationHelper(application)
 
     // Navigation State
     private val _currentScreen = MutableStateFlow<Screen>(Screen.Dashboard)
@@ -296,8 +306,229 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _courseSalesSelectedSubTab = MutableStateFlow(0)
     val courseSalesSelectedSubTab: StateFlow<Int> = _courseSalesSelectedSubTab.asStateFlow()
 
+    // Maxbird Website Admin (portal_settings/main on named Firestore database) State
+    private val _maxbirdPortalSettings = MutableStateFlow(MaxbirdPortalSettings())
+    val maxbirdPortalSettings: StateFlow<MaxbirdPortalSettings> = _maxbirdPortalSettings.asStateFlow()
+
+    private val _maxbirdAuthSession = MutableStateFlow(maxbirdFirestoreClient.getSavedAuthSession())
+    val maxbirdAuthSession: StateFlow<MaxbirdAdminAuthSession> = _maxbirdAuthSession.asStateFlow()
+
+    private val _isLoadingMaxbirdPortal = MutableStateFlow(false)
+    val isLoadingMaxbirdPortal: StateFlow<Boolean> = _isLoadingMaxbirdPortal.asStateFlow()
+
+    private val _isSavingMaxbirdPortal = MutableStateFlow(false)
+    val isSavingMaxbirdPortal: StateFlow<Boolean> = _isSavingMaxbirdPortal.asStateFlow()
+
+    private val _maxbirdSyncMessage = MutableStateFlow<String?>(null)
+    val maxbirdSyncMessage: StateFlow<String?> = _maxbirdSyncMessage.asStateFlow()
+
+    // Real-Time Push / Background Notification Monitor State
+    private val _isLiveNotificationMonitorEnabled = MutableStateFlow(notificationHelper.isLiveMonitorEnabled())
+    val isLiveNotificationMonitorEnabled: StateFlow<Boolean> = _isLiveNotificationMonitorEnabled.asStateFlow()
+
+    // OneSignal Push Configuration State
+    private val _oneSignalAppId = MutableStateFlow(adminPreferences.getOneSignalAppId())
+    val oneSignalAppId: StateFlow<String> = _oneSignalAppId.asStateFlow()
+
+    private val _oneSignalRestApiKey = MutableStateFlow(adminPreferences.getOneSignalRestApiKey())
+    val oneSignalRestApiKey: StateFlow<String> = _oneSignalRestApiKey.asStateFlow()
+
+    private val _oneSignalStatusSummary = MutableStateFlow(OneSignalPushManager.getSubscriptionSummary(application))
+    val oneSignalStatusSummary: StateFlow<String> = _oneSignalStatusSummary.asStateFlow()
+
+    private val _isSendingOneSignalTest = MutableStateFlow(false)
+    val isSendingOneSignalTest: StateFlow<Boolean> = _isSendingOneSignalTest.asStateFlow()
+
     init {
+        OneSignalPushManager.initializeIfConfigured(application)
+        _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(application)
         loadAllData()
+        loadMaxbirdPortalSettings()
+        startInAppRealtimeMonitorLoop()
+        AdminRealtimeMonitorService.startIfEnabled(application)
+    }
+
+    private fun startInAppRealtimeMonitorLoop() {
+        viewModelScope.launch {
+            while (isActive) {
+                delay(15_000L)
+                _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(getApplication())
+                if (_isLiveNotificationMonitorEnabled.value) {
+                    try {
+                        val devicesRes = repository.getUserDevices()
+                        if (devicesRes.isSuccess) {
+                            _userDevices.value = devicesRes.getOrNull().orEmpty()
+                        }
+                        val enrollmentsRes = repository.getCourseAccessEnrollments()
+                        if (enrollmentsRes.isSuccess) {
+                            _courseAccessEnrollments.value = enrollmentsRes.getOrNull().orEmpty()
+                        }
+                        val transactionsRes = repository.getCoursePaymentTransactions()
+                        if (transactionsRes.isSuccess) {
+                            _coursePaymentTransactions.value = transactionsRes.getOrNull().orEmpty()
+                        }
+                        val statsRes = repository.getDashboardStats()
+                        if (statsRes.isSuccess) {
+                            statsRes.getOrNull()?.let { _stats.value = it }
+                        }
+
+                        notificationHelper.checkAndNotifyNewEvents(
+                            devices = _userDevices.value,
+                            enrollments = _courseAccessEnrollments.value,
+                            transactions = _coursePaymentTransactions.value
+                        )
+                    } catch (_: Throwable) {}
+                }
+            }
+        }
+    }
+
+    fun updateOneSignalAppId(appId: String) {
+        _oneSignalAppId.value = appId
+    }
+
+    fun updateOneSignalRestApiKey(restApiKey: String) {
+        _oneSignalRestApiKey.value = restApiKey
+    }
+
+    fun saveOneSignalConfig(appId: String = _oneSignalAppId.value, restApiKey: String = _oneSignalRestApiKey.value) {
+        val cleanAppId = appId.trim()
+        val cleanRestKey = restApiKey.trim()
+        _oneSignalAppId.value = cleanAppId
+        _oneSignalRestApiKey.value = cleanRestKey
+        adminPreferences.setOneSignalAppId(cleanAppId)
+        adminPreferences.setOneSignalRestApiKey(cleanRestKey)
+        val app = getApplication<Application>()
+        val initialized = OneSignalPushManager.initializeIfConfigured(app, cleanAppId)
+        _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
+        if (initialized) {
+            showToast("✅ OneSignal App ID সংরক্ষিত ও সক্রিয় করা হয়েছে!")
+        } else if (cleanAppId.isBlank()) {
+            showToast("ℹ️ OneSignal App ID মুছে ফেলা হয়েছে।")
+        } else {
+            showToast("✅ OneSignal কনফিগারেশন সেভ হয়েছে!")
+        }
+    }
+
+    fun toggleLiveNotificationMonitor(enabled: Boolean) {
+        notificationHelper.setLiveMonitorEnabled(enabled)
+        _isLiveNotificationMonitorEnabled.value = enabled
+        val app = getApplication<Application>()
+        if (enabled) {
+            AdminRealtimeMonitorService.startIfEnabled(app)
+            OneSignalPushManager.initializeIfConfigured(app)
+            _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
+            showToast("🔔 24/7 লাইভ ও OneSignal পুশ নোটিফিকেশন চালু করা হয়েছে!")
+        } else {
+            AdminRealtimeMonitorService.stop(app)
+            showToast("🔕 লাইভ নোটিফিকেশন মনিটর বন্ধ করা হয়েছে।")
+        }
+    }
+
+    fun sendTestPushNotification() {
+        val app = getApplication<Application>()
+        if (!notificationHelper.hasNotificationPermission()) {
+            showToast("⚠️ অনুগ্রহ করে ফোনের Notification Permission অ্যালাউ করুন!")
+            return
+        }
+        // Always fire immediate local notification
+        notificationHelper.sendTestNotification()
+
+        // Also dispatch real OneSignal Cloud REST API push if App ID + REST API Key are configured
+        val appId = _oneSignalAppId.value.trim()
+        val restKey = _oneSignalRestApiKey.value.trim()
+        if (appId.isNotBlank() && restKey.isNotBlank()) {
+            viewModelScope.launch {
+                try {
+                    _isSendingOneSignalTest.value = true
+                    val res = OneSignalPushManager.sendCloudPushNotification(
+                        context = app,
+                        title = "🚀 MaxBird OneSignal ক্লাউড পুশ সচল!",
+                        message = "অ্যাপ সম্পূর্ণ বন্ধ থাকলেও নতুন ডিভাইস রিকোয়েস্ট, কোর্স আবেদন ও পেমেন্ট আসলে এভাবেই পুশ নোটিফিকেশন আসবে।",
+                        targetScreen = "course_sales",
+                        courseSalesTab = 0
+                    )
+                    _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
+                    if (res.isSuccess) {
+                        showToast("✅ লোকাল + OneSignal ক্লাউড পুশ পাঠানো হয়েছে!")
+                    } else {
+                        showToast("✅ লোকাল টেস্ট নোটিফিকেশন পাঠানো হয়েছে! (OneSignal: ${res.exceptionOrNull()?.message})")
+                    }
+                } finally {
+                    _isSendingOneSignalTest.value = false
+                }
+            }
+        } else {
+            showToast("✅ টেস্ট নোটিফিকেশন পাঠানো হয়েছে! স্ট্যাটাস বার চেক করুন।")
+        }
+    }
+
+    fun handleNotificationDeepLink(
+        targetScreen: String?,
+        courseSalesTab: Int = 0,
+        deviceSearchQuery: String? = null
+    ) {
+        when (targetScreen) {
+            "devices" -> {
+                if (!deviceSearchQuery.isNullOrBlank()) {
+                    navigateToDeviceInspection(deviceSearchQuery, null)
+                } else {
+                    _deviceFilter.value = "PENDING"
+                    navigateTo(Screen.Devices)
+                }
+            }
+            "course_sales" -> {
+                _courseSalesSelectedSubTab.value = courseSalesTab.coerceIn(0, 3)
+                navigateTo(Screen.CourseSales)
+            }
+            "maxbird_web_admin" -> {
+                navigateTo(Screen.MaxbirdWebsiteAdmin)
+            }
+        }
+    }
+
+    /**
+     * Navigates directly from a Course Access Request, Payment Verification, or Installment Card
+     * to the Student's Device in `DeviceManagementScreen`, selecting the right tab and search filter
+     * so the admin can immediately inspect or block/unblock the device.
+     */
+    fun navigateToDeviceInspection(query: String, targetDevice: UserDevice? = null) {
+        val cleanQuery = query.trim()
+        val matched = targetDevice ?: _userDevices.value.firstOrNull { dev ->
+            dev.displayDeviceId.equals(cleanQuery, ignoreCase = true) ||
+                dev.deviceHash.equals(cleanQuery, ignoreCase = true) ||
+                dev.extractedPhoneFromDevice == cleanQuery ||
+                (dev.studentNote?.contains(cleanQuery, ignoreCase = true) == true)
+        }
+        _deviceFilter.value = when {
+            matched?.isBlockedDevice == true -> "BLOCKED"
+            matched?.isPendingDevice == true -> "PENDING"
+            matched?.isActiveDevice == true -> "ACTIVE"
+            else -> "ACTIVE"
+        }
+        _deviceSearchQuery.value = matched?.displayDeviceId?.ifBlank { cleanQuery } ?: cleanQuery
+        _currentScreen.value = Screen.Devices
+        loadUserDevices(forceRefresh = true)
+    }
+
+    /**
+     * 1-Click links a student's phone/name/course to a `UserDevice`'s `student_note` in Supabase
+     * so the student and device are permanently linked across both screens.
+     */
+    fun linkStudentToDevice(
+        device: UserDevice,
+        studentPhone: String,
+        studentName: String,
+        courseTitle: String = ""
+    ) {
+        val cleanName = studentName.trim().ifBlank { "শিক্ষার্থী" }
+        val cleanPhone = studentPhone.trim()
+        val noteParts = mutableListOf<String>()
+        noteParts.add(cleanName)
+        if (cleanPhone.isNotBlank()) noteParts.add(cleanPhone)
+        if (courseTitle.isNotBlank()) noteParts.add(courseTitle.trim())
+        val formattedNote = noteParts.joinToString(" • ")
+        updateUserDeviceStudentNote(device, formattedNote)
     }
 
     fun setCourseSalesSubTab(tabIndex: Int) {
@@ -314,8 +545,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         _currentScreen.value = screen
         if (screen == Screen.CourseSales || screen == Screen.Settings) {
             loadCourseSalesData()
+            loadUserDevices(forceRefresh = false)
         } else if (screen == Screen.Devices) {
             loadUserDevices(forceRefresh = true)
+            loadCourseSalesData()
+        } else if (screen == Screen.MaxbirdWebsiteAdmin) {
+            loadMaxbirdPortalSettings()
         }
     }
 
@@ -1352,6 +1587,14 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 if (settingsRes.isSuccess) {
                     settingsRes.getOrNull()?.let { _coursePaymentSettings.value = it }
                 }
+
+                if (_isLiveNotificationMonitorEnabled.value) {
+                    notificationHelper.checkAndNotifyNewEvents(
+                        devices = _userDevices.value,
+                        enrollments = _courseAccessEnrollments.value,
+                        transactions = _coursePaymentTransactions.value
+                    )
+                }
             } catch (_: Throwable) {
                 // Keep existing state on transient error
             } finally {
@@ -1605,6 +1848,166 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 _isProcessingCourseSalesAction.value = false
             }
+        }
+    }
+
+    // =========================================================================
+    // Maxbird Website Admin Control Panel (`portal_settings/main`) Operations
+    // =========================================================================
+
+    fun updateMaxbirdPortalDraft(updated: MaxbirdPortalSettings) {
+        _maxbirdPortalSettings.value = updated
+    }
+
+    fun loadMaxbirdPortalSettings() {
+        viewModelScope.launch {
+            try {
+                _isLoadingMaxbirdPortal.value = true
+                _maxbirdAuthSession.value = maxbirdFirestoreClient.getSavedAuthSession()
+                val res = maxbirdFirestoreClient.fetchPortalSettings()
+                if (res.isSuccess) {
+                    res.getOrNull()?.let { loaded ->
+                        _maxbirdPortalSettings.value = loaded
+                    }
+                }
+            } catch (_: Throwable) {
+                // Keep existing state on error
+            } finally {
+                _isLoadingMaxbirdPortal.value = false
+            }
+        }
+    }
+
+    fun saveMaxbirdPortalSettings(draft: MaxbirdPortalSettings = _maxbirdPortalSettings.value) {
+        viewModelScope.launch {
+            try {
+                _isSavingMaxbirdPortal.value = true
+                _maxbirdSyncMessage.value = null
+                val res = maxbirdFirestoreClient.savePortalSettings(draft)
+                if (res.isSuccess) {
+                    val saved = res.getOrNull() ?: draft.copy(documentExists = true)
+                    _maxbirdPortalSettings.value = saved
+                    val msg = "✅ পরিবর্তনসমূহ সফলভাবে maxbird.pages.dev ওয়েবসাইটে লাইভ আপডেট হয়েছে!"
+                    _maxbirdSyncMessage.value = msg
+                    showToast(msg)
+                } else {
+                    val err = res.exceptionOrNull()?.message ?: "সেভ করতে ব্যর্থ হয়েছে"
+                    showToast("⚠️ $err")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isSavingMaxbirdPortal.value = false
+            }
+        }
+    }
+
+    fun signInMaxbirdAdminWithEmailPassword(email: String, password: String) {
+        viewModelScope.launch {
+            try {
+                _isLoadingMaxbirdPortal.value = true
+                val res = maxbirdFirestoreClient.signInWithEmailPassword(email, password)
+                if (res.isSuccess) {
+                    val session = res.getOrNull()!!
+                    _maxbirdAuthSession.value = session
+                    showToast("✅ ${session.email} হিসেবে সফলভাবে লগইন হয়েছে!")
+                    loadMaxbirdPortalSettings()
+                } else {
+                    showToast("⚠️ ${res.exceptionOrNull()?.message ?: "লগইন ব্যর্থ হয়েছে"}")
+                }
+            } finally {
+                _isLoadingMaxbirdPortal.value = false
+            }
+        }
+    }
+
+    fun createMaxbirdAdminWithEmailPassword(email: String, password: String) {
+        viewModelScope.launch {
+            try {
+                _isLoadingMaxbirdPortal.value = true
+                val res = maxbirdFirestoreClient.createAdminAccountWithEmailPassword(email, password)
+                if (res.isSuccess) {
+                    val session = res.getOrNull()!!
+                    _maxbirdAuthSession.value = session
+                    showToast("✅ অ্যাডমিন অ্যাকাউন্ট সেটআপ ও লগইন সম্পন্ন হয়েছে!")
+                    loadMaxbirdPortalSettings()
+                } else {
+                    showToast("⚠️ ${res.exceptionOrNull()?.message ?: "অ্যাকাউন্ট তৈরি ব্যর্থ হয়েছে"}")
+                }
+            } finally {
+                _isLoadingMaxbirdPortal.value = false
+            }
+        }
+    }
+
+    fun sendMaxbirdAdminPasswordReset(email: String) {
+        viewModelScope.launch {
+            val res = maxbirdFirestoreClient.sendPasswordResetEmail(email)
+            if (res.isSuccess) {
+                showToast("📧 $email-এ পাসওয়ার্ড রিসেট লিংক পাঠানো হয়েছে! ইনবক্স বা স্প্যাম ফোল্ডার চেক করুন।")
+            } else {
+                showToast("⚠️ ${res.exceptionOrNull()?.message ?: "রিসেট ইমেইল পাঠানো যায়নি"}")
+            }
+        }
+    }
+
+    fun verifyMaxbirdAdminManualIdToken(idToken: String) {
+        viewModelScope.launch {
+            val res = maxbirdFirestoreClient.verifyAndSaveFirebaseIdToken(idToken)
+            if (res.isSuccess) {
+                val session = res.getOrNull()!!
+                _maxbirdAuthSession.value = session
+                showToast("✅ টোকেন ভেরিফাইড: ${session.email} লগইন সফল!")
+                loadMaxbirdPortalSettings()
+            } else {
+                showToast("⚠️ ${res.exceptionOrNull()?.message ?: "টোকেন ভেরিফিকেশন ব্যর্থ"}")
+            }
+        }
+    }
+
+    fun onMaxbirdWebSdkAuthReceived(
+        uid: String,
+        email: String,
+        displayName: String,
+        photoUrl: String,
+        idToken: String,
+        refreshToken: String
+    ) {
+        if (idToken.isBlank() || email.isBlank()) return
+        val session = MaxbirdAdminAuthSession(
+            uid = uid,
+            email = email,
+            displayName = displayName,
+            photoUrl = photoUrl,
+            idToken = idToken,
+            refreshToken = refreshToken,
+            isSignedIn = true
+        )
+        maxbirdFirestoreClient.saveAuthSession(session)
+        _maxbirdAuthSession.value = session
+    }
+
+    fun signOutMaxbirdAdmin() {
+        maxbirdFirestoreClient.clearAuthSession()
+        _maxbirdAuthSession.value = MaxbirdAdminAuthSession()
+        showToast("লগআউট সম্পন্ন হয়েছে।")
+    }
+
+    fun inspectLocalApkForMaxbirdWebsite(uri: android.net.Uri) {
+        val res = maxbirdFirestoreClient.inspectLocalApkFile(uri)
+        if (res.isSuccess) {
+            val info = res.getOrNull()!!
+            val current = _maxbirdPortalSettings.value
+            val autoUrl = MaxbirdPortalSettings.autoBuildR2Url(current.r2BucketPublicDomain, info.fileName)
+            val updated = current.copy(
+                fileSize = info.fileSizeFormatted,
+                r2ObjectKey = info.fileName.take(300),
+                apkDownloadUrl = if (autoUrl.isNotEmpty()) autoUrl else current.apkDownloadUrl
+            )
+            _maxbirdPortalSettings.value = updated
+            showToast("📦 APK ফাইল ডিটেক্টেড: ${info.fileName} (${info.fileSizeFormatted})")
+        } else {
+            showToast("⚠️ ফাইল রিড করা যায়নি: ${res.exceptionOrNull()?.message}")
         }
     }
 

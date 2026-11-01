@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terminal
@@ -34,11 +35,16 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,6 +60,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
+import com.example.notifications.OneSignalPushManager
+import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CardBorderGradientEnd
 import com.example.ui.theme.CardBorderGradientStart
 import com.example.ui.theme.CoralDanger
@@ -208,9 +216,17 @@ fun SettingsScreen(
     onShowToast: (String) -> Unit,
     paymentSettings: CoursePaymentSettings = CoursePaymentSettings(),
     isSavingPaymentSettings: Boolean = false,
-    onSavePaymentSettings: (UpsertCoursePaymentSettingsPayload) -> Unit = {}
+    onSavePaymentSettings: (UpsertCoursePaymentSettingsPayload) -> Unit = {},
+    oneSignalAppId: String = "",
+    oneSignalRestApiKey: String = "",
+    oneSignalStatusSummary: String = "",
+    isSendingOneSignalTest: Boolean = false,
+    onSaveOneSignalConfig: (String, String) -> Unit = { _, _ -> },
+    onTestPushNotification: () -> Unit = {}
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
+    var appIdDraft by remember(oneSignalAppId) { mutableStateOf(oneSignalAppId) }
+    var restKeyDraft by remember(oneSignalRestApiKey) { mutableStateOf(oneSignalRestApiKey) }
 
     LazyColumn(
         modifier = Modifier
@@ -231,6 +247,217 @@ fun SettingsScreen(
                 },
                 onShowToast = onShowToast
             )
+        }
+
+        // 1B. OneSignal Real Push Notification & Supabase Auto-Trigger Setup Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.dp,
+                        Brush.horizontalGradient(
+                            listOf(
+                                if (oneSignalAppId.isNotBlank()) EmeraldSuccess.copy(alpha = 0.6f) else AmberWarning.copy(alpha = 0.6f),
+                                NeonCyan.copy(alpha = 0.4f)
+                            )
+                        ),
+                        RoundedCornerShape(20.dp)
+                    )
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(EmeraldSuccess.copy(alpha = 0.16f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = EmeraldSuccess,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "OneSignal ক্লাউড পুশ নোটিফিকেশন",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color.White
+                                    )
+                                )
+                                Text(
+                                    text = "অ্যাপ বন্ধ (Closed/Killed) থাকলেও ১০০% রিয়েল-টাইম অ্যালার্ট",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = NeonCyan,
+                                        fontSize = 11.sp
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    if (oneSignalStatusSummary.isNotBlank()) {
+                        Surface(
+                            color = Slate900,
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (oneSignalAppId.isNotBlank()) EmeraldSuccess.copy(alpha = 0.4f) else AmberWarning.copy(alpha = 0.4f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = oneSignalStatusSummary,
+                                color = if (oneSignalAppId.isNotBlank()) EmeraldSuccess else AmberWarning,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = appIdDraft,
+                        onValueChange = { appIdDraft = it },
+                        label = { Text("OneSignal App ID (UUID)", color = Slate400, fontSize = 12.sp) },
+                        placeholder = { Text("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", color = Slate400, fontSize = 12.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonCyan,
+                            unfocusedBorderColor = Slate700,
+                            focusedContainerColor = Slate900,
+                            unfocusedContainerColor = Slate900,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_onesignal_app_id")
+                    )
+
+                    OutlinedTextField(
+                        value = restKeyDraft,
+                        onValueChange = { restKeyDraft = it },
+                        label = { Text("OneSignal REST API Key", color = Slate400, fontSize = 12.sp) },
+                        placeholder = { Text("os_v2_app_...", color = Slate400, fontSize = 12.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonCyan,
+                            unfocusedBorderColor = Slate700,
+                            focusedContainerColor = Slate900,
+                            unfocusedContainerColor = Slate900,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_onesignal_rest_key")
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                onSaveOneSignalConfig(appIdDraft.trim(), restKeyDraft.trim())
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("btn_save_onesignal")
+                        ) {
+                            Icon(Icons.Default.Save, contentDescription = null, tint = Slate950, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("OneSignal সেভ", color = Slate950, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = onTestPushNotification,
+                            enabled = !isSendingOneSignalTest,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("btn_test_onesignal_push")
+                        ) {
+                            if (isSendingOneSignalTest) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = NeonCyan, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("টেস্ট পুশ", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+
+                    // 1-Click Copy Supabase pg_net -> OneSignal Auto-Trigger SQL
+                    Surface(
+                        color = Slate900,
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.45f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "🚀 অ্যাপ সম্পূর্ণ বন্ধ (Killed) থাকলেও সুপাবেস থেকে সরাসরি OneSignal পুশ পাওয়ার জন্য নিচের বাটনে ক্লিক করে SQL Trigger কপি করে Supabase SQL Editor-এ একবার Run করুন:",
+                                color = Slate200,
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp
+                            )
+                            Button(
+                                onClick = {
+                                    val sql = OneSignalPushManager.buildSupabaseOneSignalTriggerSql(
+                                        appId = appIdDraft.trim(),
+                                        restApiKey = restKeyDraft.trim()
+                                    )
+                                    clipboardManager.setText(AnnotatedString(sql))
+                                    onShowToast("✅ Supabase + OneSignal অটো-পুশ SQL Trigger কপি হয়েছে! এখন Supabase SQL Editor-এ Run করুন।")
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("btn_copy_onesignal_trigger_sql")
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Supabase + OneSignal অটো-পুশ SQL ট্রিগার কপি করুন",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Modern Header Card

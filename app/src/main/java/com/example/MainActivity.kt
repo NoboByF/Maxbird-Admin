@@ -1,12 +1,19 @@
 package com.example
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,6 +62,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.notifications.AdminNotificationHelper
+import com.example.notifications.AdminRealtimeMonitorService
+import com.example.notifications.OneSignalPushManager
 import com.example.ui.navigation.Screen
 import com.example.ui.screens.ActivationSupportLinksScreen
 import com.example.ui.screens.CloudinaryMediaScreen
@@ -63,6 +73,7 @@ import com.example.ui.screens.CodeManagementScreen
 import com.example.ui.screens.CourseSalesManagementScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.DeviceManagementScreen
+import com.example.ui.screens.MaxbirdWebsiteAdminScreen
 import com.example.ui.screens.NoticeManagementScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.UpdatesManagementScreen
@@ -82,9 +93,28 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: AdminViewModel by viewModels()
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    private fun handleNotificationIntent(intent: Intent?) {
+        val target = intent?.getStringExtra(AdminNotificationHelper.EXTRA_NAVIGATE_SCREEN)
+        val subTab = intent?.getIntExtra(AdminNotificationHelper.EXTRA_COURSE_SALES_TAB, 0) ?: 0
+        val deviceQuery = intent?.getStringExtra(AdminNotificationHelper.EXTRA_DEVICE_SEARCH_QUERY)
+        if (!target.isNullOrBlank()) {
+            viewModel.handleNotificationDeepLink(target, subTab, deviceQuery)
+            intent.removeExtra(AdminNotificationHelper.EXTRA_NAVIGATE_SCREEN)
+            intent.removeExtra(AdminNotificationHelper.EXTRA_DEVICE_SEARCH_QUERY)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        OneSignalPushManager.initializeIfConfigured(this)
+        handleNotificationIntent(intent)
 
         setContent {
             MyApplicationTheme {
@@ -94,6 +124,30 @@ class MainActivity : ComponentActivity() {
 
                 val snackbarHostState = remember { SnackbarHostState() }
                 val coroutineScope = rememberCoroutineScope()
+
+                val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { isGranted ->
+                    if (isGranted) {
+                        AdminRealtimeMonitorService.startIfEnabled(context)
+                    }
+                }
+
+                LaunchedEffect(Unit) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        val granted = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (!granted) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            AdminRealtimeMonitorService.startIfEnabled(context)
+                        }
+                    } else {
+                        AdminRealtimeMonitorService.startIfEnabled(context)
+                    }
+                }
 
                 // Display toast or snackbar
                 LaunchedEffect(toastMessage) {
@@ -142,22 +196,106 @@ class MainActivity : ComponentActivity() {
                                 val stats by viewModel.stats.collectAsStateWithLifecycle()
                                 val codes by viewModel.codes.collectAsStateWithLifecycle()
                                 val isLoadingStats by viewModel.isLoadingStats.collectAsStateWithLifecycle()
+                                val enrollments by viewModel.courseAccessEnrollments.collectAsStateWithLifecycle()
+                                val transactions by viewModel.coursePaymentTransactions.collectAsStateWithLifecycle()
+                                val isLiveNotificationEnabled by viewModel.isLiveNotificationMonitorEnabled.collectAsStateWithLifecycle()
+                                val oneSignalAppId by viewModel.oneSignalAppId.collectAsStateWithLifecycle()
+                                val oneSignalRestApiKey by viewModel.oneSignalRestApiKey.collectAsStateWithLifecycle()
+                                val oneSignalStatusSummary by viewModel.oneSignalStatusSummary.collectAsStateWithLifecycle()
+                                val isSendingOneSignalTest by viewModel.isSendingOneSignalTest.collectAsStateWithLifecycle()
+
+                                val pendingCourseRequests = enrollments.count { it.isAccessRequestedStatus }
+                                val pendingPayments = transactions.count { it.status.equals("PENDING", ignoreCase = true) }
 
                                 DashboardScreen(
                                     stats = stats,
                                     recentCodes = codes,
                                     isLoading = isLoadingStats,
-                                    onRefresh = { viewModel.refreshStats() },
+                                    onRefresh = { viewModel.loadAllData() },
                                     onNavigate = { screen -> viewModel.navigateTo(screen) },
                                     onOpenSettings = { viewModel.navigateTo(Screen.Settings) },
                                     onShowToast = { msg -> viewModel.showToast(msg) },
-                                    onOpenPaymentMethodsManager = { viewModel.openPaymentMethodsManager() }
+                                    onOpenPaymentMethodsManager = { viewModel.openPaymentMethodsManager() },
+                                    isLiveNotificationEnabled = isLiveNotificationEnabled,
+                                    pendingCourseRequestsCount = pendingCourseRequests,
+                                    pendingPaymentsCount = pendingPayments,
+                                    oneSignalAppId = oneSignalAppId,
+                                    oneSignalRestApiKey = oneSignalRestApiKey,
+                                    oneSignalStatusSummary = oneSignalStatusSummary,
+                                    isSendingOneSignalTest = isSendingOneSignalTest,
+                                    onSaveOneSignalConfig = { appId, restKey ->
+                                        viewModel.saveOneSignalConfig(appId, restKey)
+                                    },
+                                    onToggleLiveNotification = { enabled ->
+                                        if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                            val granted = ContextCompat.checkSelfPermission(
+                                                context,
+                                                Manifest.permission.POST_NOTIFICATIONS
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                            if (!granted) {
+                                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                            }
+                                        }
+                                        viewModel.toggleLiveNotificationMonitor(enabled)
+                                    },
+                                    onTestNotification = {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                            val granted = ContextCompat.checkSelfPermission(
+                                                context,
+                                                Manifest.permission.POST_NOTIFICATIONS
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                            if (!granted) {
+                                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                            }
+                                        }
+                                        viewModel.sendTestPushNotification()
+                                    }
+                                )
+                            }
+
+                            Screen.MaxbirdWebsiteAdmin -> {
+                                val portalSettings by viewModel.maxbirdPortalSettings.collectAsStateWithLifecycle()
+                                val authSession by viewModel.maxbirdAuthSession.collectAsStateWithLifecycle()
+                                val isLoadingPortal by viewModel.isLoadingMaxbirdPortal.collectAsStateWithLifecycle()
+                                val isSavingPortal by viewModel.isSavingMaxbirdPortal.collectAsStateWithLifecycle()
+                                val syncMessage by viewModel.maxbirdSyncMessage.collectAsStateWithLifecycle()
+
+                                MaxbirdWebsiteAdminScreen(
+                                    settings = portalSettings,
+                                    authSession = authSession,
+                                    isLoading = isLoadingPortal,
+                                    isSaving = isSavingPortal,
+                                    lastSyncMessage = syncMessage,
+                                    onUpdateDraft = { viewModel.updateMaxbirdPortalDraft(it) },
+                                    onRefreshFromFirestore = { viewModel.loadMaxbirdPortalSettings() },
+                                    onSaveToFirestore = { viewModel.saveMaxbirdPortalSettings(it) },
+                                    onSignInWithEmailPassword = { email, pass ->
+                                        viewModel.signInMaxbirdAdminWithEmailPassword(email, pass)
+                                    },
+                                    onCreateAdminWithEmailPassword = { email, pass ->
+                                        viewModel.createMaxbirdAdminWithEmailPassword(email, pass)
+                                    },
+                                    onSendPasswordReset = { email ->
+                                        viewModel.sendMaxbirdAdminPasswordReset(email)
+                                    },
+                                    onVerifyManualIdToken = { token ->
+                                        viewModel.verifyMaxbirdAdminManualIdToken(token)
+                                    },
+                                    onWebSdkAuthReceived = { uid, email, name, photo, idToken, refreshToken ->
+                                        viewModel.onMaxbirdWebSdkAuthReceived(uid, email, name, photo, idToken, refreshToken)
+                                    },
+                                    onSignOut = { viewModel.signOutMaxbirdAdmin() },
+                                    onInspectLocalApkUri = { uri ->
+                                        viewModel.inspectLocalApkForMaxbirdWebsite(uri)
+                                    },
+                                    onShowToast = { msg -> viewModel.showToast(msg) }
                                 )
                             }
 
                             Screen.CourseSales -> {
                                 val enrollments by viewModel.courseAccessEnrollments.collectAsStateWithLifecycle()
                                 val transactions by viewModel.coursePaymentTransactions.collectAsStateWithLifecycle()
+                                val userDevices by viewModel.userDevices.collectAsStateWithLifecycle()
                                 val paymentSettings by viewModel.coursePaymentSettings.collectAsStateWithLifecycle()
                                 val isLoadingCourseSales by viewModel.isLoadingCourseSales.collectAsStateWithLifecycle()
                                 val isProcessingCourseSales by viewModel.isProcessingCourseSalesAction.collectAsStateWithLifecycle()
@@ -166,10 +304,14 @@ class MainActivity : ComponentActivity() {
                                 CourseSalesManagementScreen(
                                     enrollments = enrollments,
                                     transactions = transactions,
+                                    devices = userDevices,
                                     paymentSettings = paymentSettings,
                                     isLoading = isLoadingCourseSales,
                                     isProcessingAction = isProcessingCourseSales,
-                                    onRefreshAll = { viewModel.loadCourseSalesData() },
+                                    onRefreshAll = {
+                                        viewModel.loadCourseSalesData()
+                                        viewModel.loadUserDevices(forceRefresh = true)
+                                    },
                                     onApproveAccessRequest = { payload, onSuccess ->
                                         viewModel.approveCourseAccessRequest(payload, onSuccess)
                                     },
@@ -193,6 +335,15 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onSavePaymentSettings = { payload ->
                                         viewModel.saveCoursePaymentSettings(payload)
+                                    },
+                                    onNavigateToDevice = { query, targetDevice ->
+                                        viewModel.navigateToDeviceInspection(query, targetDevice)
+                                    },
+                                    onLinkStudentToDevice = { device, phone, name, course ->
+                                        viewModel.linkStudentToDevice(device, phone, name, course)
+                                    },
+                                    onBlockStudentDevice = { device, reason ->
+                                        viewModel.setUserDeviceBlockStatus(device, isBlocked = true, banReason = reason)
                                     },
                                     onShowToast = { msg -> viewModel.showToast(msg) },
                                     initialSubTab = selectedCourseSalesTab,
@@ -260,18 +411,25 @@ class MainActivity : ComponentActivity() {
 
                             Screen.Devices -> {
                                 val userDevices by viewModel.userDevices.collectAsStateWithLifecycle()
+                                val enrollments by viewModel.courseAccessEnrollments.collectAsStateWithLifecycle()
+                                val transactions by viewModel.coursePaymentTransactions.collectAsStateWithLifecycle()
                                 val searchQuery by viewModel.deviceSearchQuery.collectAsStateWithLifecycle()
                                 val filter by viewModel.deviceFilter.collectAsStateWithLifecycle()
                                 val isLoadingDevices by viewModel.isLoadingDevices.collectAsStateWithLifecycle()
 
                                 DeviceManagementScreen(
                                     devices = userDevices,
+                                    enrollments = enrollments,
+                                    transactions = transactions,
                                     searchQuery = searchQuery,
                                     filter = filter,
                                     isLoading = isLoadingDevices,
                                     onSearchChange = { viewModel.setDeviceSearchQuery(it) },
                                     onFilterChange = { viewModel.setDeviceFilter(it) },
-                                    onRefresh = { viewModel.loadUserDevices(forceRefresh = true) },
+                                    onRefresh = {
+                                        viewModel.loadUserDevices(forceRefresh = true)
+                                        viewModel.loadCourseSalesData()
+                                    },
                                     onApproveDevice = { device, note ->
                                         viewModel.approveUserDeviceVerification(device, note)
                                     },
@@ -477,6 +635,10 @@ class MainActivity : ComponentActivity() {
                                 val isConnectionSuccess by viewModel.isConnectionSuccess.collectAsStateWithLifecycle()
                                 val paymentSettings by viewModel.coursePaymentSettings.collectAsStateWithLifecycle()
                                 val isProcessingCourseSales by viewModel.isProcessingCourseSalesAction.collectAsStateWithLifecycle()
+                                val oneSignalAppId by viewModel.oneSignalAppId.collectAsStateWithLifecycle()
+                                val oneSignalRestApiKey by viewModel.oneSignalRestApiKey.collectAsStateWithLifecycle()
+                                val oneSignalStatusSummary by viewModel.oneSignalStatusSummary.collectAsStateWithLifecycle()
+                                val isSendingOneSignalTest by viewModel.isSendingOneSignalTest.collectAsStateWithLifecycle()
 
                                 SettingsScreen(
                                     supabaseUrl = supabaseUrl,
@@ -493,6 +655,16 @@ class MainActivity : ComponentActivity() {
                                     isSavingPaymentSettings = isProcessingCourseSales,
                                     onSavePaymentSettings = { payload ->
                                         viewModel.saveCoursePaymentSettings(payload)
+                                    },
+                                    oneSignalAppId = oneSignalAppId,
+                                    oneSignalRestApiKey = oneSignalRestApiKey,
+                                    oneSignalStatusSummary = oneSignalStatusSummary,
+                                    isSendingOneSignalTest = isSendingOneSignalTest,
+                                    onSaveOneSignalConfig = { appId, restKey ->
+                                        viewModel.saveOneSignalConfig(appId, restKey)
+                                    },
+                                    onTestPushNotification = {
+                                        viewModel.sendTestPushNotification()
                                     }
                                 )
                             }
@@ -718,9 +890,10 @@ private fun AdminBottomNavigationBar(
                 label = {
                     Text(
                         text = screen.navBarLabel,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1
+                        fontSize = 10.sp,
+                        fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 },
                 colors = NavigationBarItemDefaults.colors(

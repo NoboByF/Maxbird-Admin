@@ -781,34 +781,7 @@ data class CourseAccessEnrollment(
         }
 
         fun parseIsoTimestampToMillis(rawIso: String?): Long? {
-            if (rawIso.isNullOrBlank()) return null
-            return try {
-                val clean = rawIso.trim()
-                    .replace(" ", "T")
-                    .let { s ->
-                        val dotIdx = s.indexOf('.')
-                        if (dotIdx != -1) {
-                            val prefix = s.substring(0, dotIdx)
-                            val rest = s.substring(dotIdx + 1)
-                            val tzIdx = rest.indexOfFirst { it == 'Z' || it == '+' || it == '-' }
-                            if (tzIdx != -1) prefix + rest.substring(tzIdx) else prefix + "Z"
-                        } else {
-                            s
-                        }
-                    }
-                    .let { s ->
-                        if (s.endsWith("+00:00")) s.removeSuffix("+00:00") + "Z"
-                        else if (s.endsWith("+00")) s.removeSuffix("+00") + "Z"
-                        else if (!s.endsWith("Z") && !s.contains("+")) "${s}Z"
-                        else s
-                    }
-                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
-                    timeZone = java.util.TimeZone.getTimeZone("UTC")
-                }
-                sdf.parse(clean.take(19) + "Z")?.time
-            } catch (_: Exception) {
-                null
-            }
+            return com.example.util.TimestampUtils.parseIsoToMillis(rawIso)
         }
     }
 }

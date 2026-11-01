@@ -134,4 +134,40 @@ class AdminPreferences(context: Context) {
         val url = getSupabaseUrl()
         return !url.contains("your-project-ref") && !url.contains("krmhyxovnpxlqfaptyuv")
     }
+
+    fun getOneSignalAppId(): String {
+        val saved = prefs.getString("onesignal_app_id", "")?.trim().orEmpty()
+        if (saved.isNotEmpty() && !saved.contains("your-onesignal")) {
+            return saved
+        }
+        return try {
+            val field = BuildConfig::class.java.getField("ONESIGNAL_APP_ID")
+            val value = (field.get(null) as? String)?.trim().orEmpty()
+            if (value.isNotEmpty() && !value.contains("your-onesignal")) value else ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    fun setOneSignalAppId(appId: String) {
+        prefs.edit().putString("onesignal_app_id", appId.trim()).apply()
+    }
+
+    fun getOneSignalRestApiKey(): String {
+        val saved = prefs.getString("onesignal_rest_api_key", "")?.trim().orEmpty()
+        if (saved.isNotEmpty() && !saved.contains("your-onesignal")) {
+            return saved
+        }
+        return try {
+            val field = BuildConfig::class.java.getField("ONESIGNAL_REST_API_KEY")
+            val value = (field.get(null) as? String)?.trim().orEmpty()
+            if (value.isNotEmpty() && !value.contains("your-onesignal")) value else ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    fun setOneSignalRestApiKey(apiKey: String) {
+        prefs.edit().putString("onesignal_rest_api_key", apiKey.trim()).apply()
+    }
 }

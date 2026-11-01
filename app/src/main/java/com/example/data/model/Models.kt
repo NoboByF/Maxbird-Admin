@@ -281,6 +281,11 @@ data class UserDevice(
     @Json(name = "created_at") val createdAt: String? = null,
     @Json(name = "updated_at") val updatedAt: String? = null,
     @Json(name = "last_seen") val lastSeen: String? = null,
+    @Json(name = "last_active_at") val lastActiveAt: String? = null,
+    @Json(name = "student_phone") val studentPhone: String? = null,
+    @Json(name = "user_phone") val userPhone: String? = null,
+    @Json(name = "shikho_account_key") val shikhoAccountKey: String? = null,
+    @Json(name = "student_name") val studentName: String? = null,
     @Json(name = "can_view_profiles") val canViewProfiles: Boolean = false
 ) {
     val isBlockedDevice: Boolean
@@ -295,7 +300,20 @@ data class UserDevice(
         get() = !isBlockedDevice && (status.equals("active", ignoreCase = true) || status.isBlank())
 
     val displayStudentName: String
-        get() = studentNote?.trim()?.takeIf { it.isNotEmpty() } ?: "নতুন শিক্ষার্থী"
+        get() = studentNote?.trim()?.takeIf { it.isNotEmpty() }
+            ?: studentName?.trim()?.takeIf { it.isNotEmpty() }
+            ?: "নতুন শিক্ষার্থী"
+
+    val extractedPhoneFromDevice: String
+        get() {
+            val direct = studentPhone?.trim()?.takeIf { it.isNotEmpty() }
+                ?: userPhone?.trim()?.takeIf { it.isNotEmpty() }
+                ?: shikhoAccountKey?.trim()?.takeIf { it.isNotEmpty() }
+            if (!direct.isNullOrBlank()) return CourseAccessEnrollment.normalizeBdPhone(direct)
+            val noteText = studentNote.orEmpty()
+            val match = Regex("01[3-9]\\d{8}").find(noteText)
+            return match?.value ?: ""
+        }
 
     val fullPhoneModel: String
         get() {

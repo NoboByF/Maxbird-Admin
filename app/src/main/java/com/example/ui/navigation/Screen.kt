@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.HeadsetMic
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.HeadsetMic
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SystemUpdate
@@ -44,6 +46,14 @@ sealed class Screen(
         titleBn = "কোর্স বিক্রি ও কিস্তি ম্যানেজমেন্ট",
         selectedIcon = Icons.Filled.Payments,
         unselectedIcon = Icons.Outlined.Payments
+    )
+
+    data object MaxbirdWebsiteAdmin : Screen(
+        route = "maxbird_web_admin",
+        titleEn = "Maxbird Admin Control Panel (maxbird.pages.dev)",
+        titleBn = "Maxbird ওয়েবসাইট কন্ট্রোল প্যানেল",
+        selectedIcon = Icons.Filled.Language,
+        unselectedIcon = Icons.Outlined.Language
     )
 
     data object Generator : Screen(
@@ -113,10 +123,11 @@ sealed class Screen(
     val navBarLabel: String
         get() = when (this) {
             Dashboard -> "হোম"
-            CourseSales -> "কিস্তি ও বিক্রি"
+            CourseSales -> "কোর্স"
+            MaxbirdWebsiteAdmin -> "ওয়েবসাইট"
             Codes -> "কোডসমূহ"
             CloudinaryMedia -> "মিডিয়া"
-            Devices -> "ভেরিফিকেশন"
+            Devices -> "ডিভাইস"
             Settings -> "সেটিংস"
             Generator -> "নতুন কোড"
             Notices -> "নোটিশ"
@@ -125,9 +136,9 @@ sealed class Screen(
         }
 
     companion object {
-        // Core 5 primary destinations for clean, spacious Material 3 NavigationBar
+        // Core 5 primary destinations including the dedicated Maxbird Website Admin tab
         val bottomNavItems: List<Screen>
-            get() = listOf(Dashboard, Devices, CourseSales, Codes, Settings)
+            get() = listOf(Dashboard, Devices, CourseSales, MaxbirdWebsiteAdmin, Settings)
     }
 }
 

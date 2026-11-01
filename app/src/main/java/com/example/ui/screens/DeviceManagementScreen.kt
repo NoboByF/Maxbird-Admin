@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,12 +34,13 @@ import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -58,14 +61,15 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -77,11 +81,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.CourseAccessEnrollment
+import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.UserDevice
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CoralDanger
 import com.example.ui.theme.ElectricBlue
-import com.example.ui.theme.ElectricBlueLight
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.Slate200
@@ -91,20 +96,26 @@ import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate850
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
+import com.example.util.StudentDeviceMatcher
+import com.example.util.TimestampUtils
+import kotlinx.coroutines.delay
 
 /**
  * স্টুডেন্ট ডিভাইস ভেরিফিকেশন ও কন্ট্রোল (One-Click Student Verification & Device Control)
  * Connected to Supabase `public.devices` table and RPCs:
  * - `admin_approve_device_verification(p_device_hash)`
  * - `admin_set_device_block_status(p_device_hash, p_is_banned, p_reason)`
+ *
+ * Features:
+ * - Clean, zero-duplicate header & 3-tab selector (Pending, Active, Blocked)
+ * - Accurate real-time "Last Online / Active" status (`last_seen`, `updated_at`, `approved_at`, `requested_at`)
+ * - Linked Student Phone & Course Profile (`StudentDeviceMatcher`) + 1-click student note linking
  */
 @Composable
 fun DeviceManagementScreen(
     devices: List<UserDevice>,
+    enrollments: List<CourseAccessEnrollment> = emptyList(),
+    transactions: List<CoursePaymentTransaction> = emptyList(),
     searchQuery: String,
     filter: String,
     isLoading: Boolean,
@@ -123,6 +134,15 @@ fun DeviceManagementScreen(
 ) {
     val clipboardManager = LocalClipboardManager.current
 
+    // Live ticking clock so "সর্বশেষ অনলাইন" (Last Active / Online) updates in real time
+    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(10_000L)
+            nowMillis = System.currentTimeMillis()
+        }
+    }
+
     // Normalize active tab: PENDING, ACTIVE, or BLOCKED
     val activeTab = remember(filter) {
         when (filter.uppercase()) {
@@ -137,35 +157,63 @@ fun DeviceManagementScreen(
     var deviceToBlock by remember { mutableStateOf<UserDevice?>(null) }
     var blockReasonInput by remember { mutableStateOf("অ্যাডমিন কর্তৃক ব্লক করা হয়েছে") }
 
-    // Dialog state for editing student_note (শিক্ষার্থীর নাম / নোট)
+    // Dialog state for editing student_note (শিক্ষার্থীর নাম / মোবাইল নম্বর / নোট)
     var deviceToEditNote by remember { mutableStateOf<UserDevice?>(null) }
     var studentNoteInput by remember { mutableStateOf("") }
 
     // Dialog state for deleting a device record
     var deviceToDelete by remember { mutableStateOf<UserDevice?>(null) }
 
-    // Realtime counts for the 3 tabs
+    // Sort devices by real parsed timestamp (most recently active / requested first)
     val pendingDevicesList = remember(devices) {
         devices
             .filter { it.isPendingDevice }
-            .sortedByDescending { it.requestedAt ?: it.updatedAt ?: it.lastSeen ?: "" }
+            .sortedByDescending {
+                TimestampUtils.parseIsoToMillis(it.requestedAt)
+                    ?: TimestampUtils.parseIsoToMillis(it.lastSeen)
+                    ?: TimestampUtils.parseIsoToMillis(it.updatedAt)
+                    ?: 0L
+            }
     }
     val activeDevicesList = remember(devices) {
         devices
             .filter { it.isActiveDevice }
-            .sortedByDescending { it.approvedAt ?: it.updatedAt ?: it.lastSeen ?: "" }
+            .sortedByDescending {
+                TimestampUtils.parseIsoToMillis(it.lastSeen)
+                    ?: TimestampUtils.parseIsoToMillis(it.lastActiveAt)
+                    ?: TimestampUtils.parseIsoToMillis(it.updatedAt)
+                    ?: TimestampUtils.parseIsoToMillis(it.approvedAt)
+                    ?: 0L
+            }
     }
     val blockedDevicesList = remember(devices) {
         devices
             .filter { it.isBlockedDevice }
-            .sortedByDescending { it.updatedAt ?: it.requestedAt ?: it.lastSeen ?: "" }
+            .sortedByDescending {
+                TimestampUtils.parseIsoToMillis(it.updatedAt)
+                    ?: TimestampUtils.parseIsoToMillis(it.lastSeen)
+                    ?: TimestampUtils.parseIsoToMillis(it.requestedAt)
+                    ?: 0L
+            }
     }
 
     val pendingCount = pendingDevicesList.size
     val activeCount = activeDevicesList.size
     val blockedCount = blockedDevicesList.size
 
-    // Filter by selected tab and search query (student_note, device_model, display_device_id)
+    val onlineRightNowCount = remember(devices, nowMillis) {
+        devices.count { dev ->
+            TimestampUtils.resolveDeviceOnlineInfo(
+                lastSeen = dev.lastSeen ?: dev.lastActiveAt,
+                updatedAt = dev.updatedAt,
+                approvedAt = dev.approvedAt,
+                requestedAt = dev.requestedAt,
+                nowMillis = nowMillis
+            ).isOnlineNow
+        }
+    }
+
+    // If a search query is active and doesn't match the current tab, also check all devices
     val baseTabList = when (activeTab) {
         "PENDING" -> pendingDevicesList
         "ACTIVE" -> activeDevicesList
@@ -173,348 +221,306 @@ fun DeviceManagementScreen(
         else -> pendingDevicesList
     }
 
-    val filteredDevices = remember(baseTabList, searchQuery) {
+    val filteredDevices = remember(baseTabList, devices, searchQuery, enrollments, transactions) {
         val q = searchQuery.trim()
         if (q.isEmpty()) {
             baseTabList
         } else {
-            baseTabList.filter { dev ->
-                (dev.studentNote?.contains(q, ignoreCase = true) == true) ||
-                    dev.displayStudentName.contains(q, ignoreCase = true) ||
-                    dev.deviceModel.contains(q, ignoreCase = true) ||
-                    (dev.deviceBrand?.contains(q, ignoreCase = true) == true) ||
-                    dev.fullPhoneModel.contains(q, ignoreCase = true) ||
-                    dev.displayDeviceId.contains(q, ignoreCase = true) ||
-                    dev.deviceHash.contains(q, ignoreCase = true)
+            val matchingInTab = baseTabList.filter { dev ->
+                matchesDeviceQuery(dev, q, enrollments, transactions)
+            }
+            if (matchingInTab.isNotEmpty()) {
+                matchingInTab
+            } else {
+                // Search across all devices if not in current tab so 1-click jump from Course/Payment always finds it
+                devices.filter { dev ->
+                    matchesDeviceQuery(dev, q, enrollments, transactions)
+                }
             }
         }
+    }
+
+    // Recent known student profiles for 1-click linking in Edit Note modal
+    val knownStudentSuggestions = remember(enrollments, transactions) {
+        val list = mutableListOf<Pair<String, String>>() // Phone to Label
+        val seenPhones = mutableSetOf<String>()
+        enrollments.forEach { e ->
+            val phone = e.effectivePhone.ifBlank { e.effectiveAccountKey }
+            if (phone.isNotBlank() && seenPhones.add(phone)) {
+                val name = e.studentName?.takeIf { it.isNotBlank() } ?: "শিক্ষার্থী"
+                val course = e.programTitle?.takeIf { it.isNotBlank() } ?: e.programId.orEmpty()
+                val label = if (course.isNotBlank()) "$name • $phone • $course" else "$name • $phone"
+                list.add(phone to label)
+            }
+        }
+        transactions.forEach { tx ->
+            val phone = tx.effectiveStudentPhone
+            if (phone.isNotBlank() && seenPhones.add(phone)) {
+                val name = tx.studentName?.takeIf { it.isNotBlank() } ?: "শিক্ষার্থী"
+                val course = tx.programTitle?.takeIf { it.isNotBlank() } ?: tx.programId.orEmpty()
+                val label = if (course.isNotBlank()) "$name • $phone • $course" else "$name • $phone"
+                list.add(phone to label)
+            }
+        }
+        list.take(12)
     }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(Slate900)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 14.dp),
+        contentPadding = PaddingValues(vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 1. Screen Header
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(ElectricBlue, NeonCyan)
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.VerifiedUser,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "স্টুডেন্ট ডিভাইস ভেরিফিকেশন ও কন্ট্রোল",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                fontSize = 17.sp
-                            )
-                        )
-                        Text(
-                            text = "১-ক্লিকে স্টুডেন্ট ভেরিফিকেশন • কোড ছাড়াই সরাসরি অ্যাক্সেস",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = NeonCyan,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 11.sp
-                            )
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = onRefresh,
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(Slate800)
-                        .border(1.dp, Slate700, CircleShape)
-                        .testTag("btn_refresh_devices")
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = NeonCyan,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Refresh Devices",
-                            tint = NeonCyan
-                        )
-                    }
-                }
-            }
-        }
-
-        // 2. Realtime Counter Badges Banner (Pending Requests, Active Devices, Blocked Devices)
+        // 1. Unified Top Status Strip + 3 Interactive Tab Cards (No duplicate bars!)
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Slate850),
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(
-                        1.dp,
-                        Brush.horizontalGradient(
-                            listOf(ElectricBlue.copy(alpha = 0.45f), NeonCyan.copy(alpha = 0.25f))
-                        ),
-                        RoundedCornerShape(18.dp)
-                    )
+                    .border(1.dp, Slate700, RoundedCornerShape(16.dp))
             ) {
                 Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // Live Online Counter + Refresh Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(9.dp)
-                                    .clip(CircleShape)
-                                    .background(if (pendingCount > 0) AmberWarning else EmeraldSuccess)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "রিয়েলটাইম ডিভাইস কাউন্টার (public.devices)",
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = EmeraldSuccess.copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.5f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(EmeraldSuccess)
+                                    )
+                                    Text(
+                                        text = "এখন অনলাইন: $onlineRightNowCount",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = EmeraldSuccess,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 11.sp
+                                        )
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Slate900,
+                                border = BorderStroke(1.dp, Slate700)
+                            ) {
+                                Text(
+                                    text = "মোট ${devices.size}টি ডিভাইস",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = Slate200,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp
+                                    )
                                 )
-                            )
+                            }
                         }
 
                         Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = EmeraldSuccess.copy(alpha = 0.15f),
-                            border = BorderStroke(0.8.dp, EmeraldSuccess.copy(alpha = 0.5f))
+                            shape = RoundedCornerShape(10.dp),
+                            color = Slate800,
+                            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .clickable { onRefresh() }
+                                .testTag("btn_refresh_devices")
                         ) {
-                            Text(
-                                text = "মোট ${devices.size}টি ডিভাইস",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = EmeraldSuccess,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                if (isLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        color = NeonCyan,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Refresh Devices",
+                                        tint = NeonCyan,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "রিফ্রেশ",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = NeonCyan,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 11.sp
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
 
+                    // Single Clean 3-Tab Selector Row (Replaces the duplicate 2 tab bars)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         VerificationCounterBadge(
                             modifier = Modifier.weight(1f),
-                            titleBn = "অপেক্ষমান আবেদন",
-                            subtitleEn = "Pending Requests",
+                            titleBn = "অপেক্ষমান",
                             count = pendingCount,
                             accentColor = AmberWarning,
                             icon = Icons.Default.HourglassTop,
                             isSelected = activeTab == "PENDING",
                             onClick = { onFilterChange("PENDING") },
-                            testTag = "badge_pending_requests"
+                            testTag = "tab_pending_devices"
                         )
                         VerificationCounterBadge(
                             modifier = Modifier.weight(1f),
-                            titleBn = "ভেরিফাইড ডিভাইস",
-                            subtitleEn = "Active Devices",
+                            titleBn = "ভেরিফাইড",
                             count = activeCount,
                             accentColor = EmeraldSuccess,
                             icon = Icons.Default.CheckCircle,
                             isSelected = activeTab == "ACTIVE",
                             onClick = { onFilterChange("ACTIVE") },
-                            testTag = "badge_active_devices"
+                            testTag = "tab_active_devices"
                         )
                         VerificationCounterBadge(
                             modifier = Modifier.weight(1f),
-                            titleBn = "ব্লকড ডিভাইস",
-                            subtitleEn = "Blocked Devices",
+                            titleBn = "ব্লকড",
                             count = blockedCount,
                             accentColor = CoralDanger,
                             icon = Icons.Default.Block,
                             isSelected = activeTab == "BLOCKED",
                             onClick = { onFilterChange("BLOCKED") },
-                            testTag = "badge_blocked_devices"
+                            testTag = "tab_blocked_devices"
                         )
+                    }
+
+                    // Full-Width Single-Line Search Bar
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchChange,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_search_devices"),
+                        placeholder = {
+                            Text(
+                                text = "নাম, মোবাইল নম্বর, ফোনের মডেল বা ডিভাইস আইডি খুঁজুন...",
+                                color = Slate400,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = NeonCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { onSearchChange("") }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear",
+                                        tint = Slate400,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Slate900,
+                            unfocusedContainerColor = Slate900,
+                            focusedBorderColor = ElectricBlue,
+                            unfocusedBorderColor = Slate700,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        )
+                    )
+                }
+            }
+        }
+
+        // 2. Active Filter / Deep-Link Banner when navigated from Course Request or Payment Verification
+        if (searchQuery.isNotBlank()) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = ElectricBlue.copy(alpha = 0.16f),
+                    border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "🎯 ফিল্টারকৃত ডিভাইস / স্টুডেন্ট: \"$searchQuery\"",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = NeonCyan,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            )
+                            Text(
+                                text = "পাওয়া গেছে: ${filteredDevices.size}টি ডিভাইস • নিচে ব্লক/আনব্লক বা কন্ট্রোল করুন",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = Slate200,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Slate900,
+                            border = BorderStroke(1.dp, Slate700),
+                            modifier = Modifier.clickable { onSearchChange("") }
+                        ) {
+                            Text(
+                                text = "সব দেখুন ✕",
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // 3. Search Bar & 3 Clear Tabs
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Search Input by student_note, device_model, or display_device_id
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = onSearchChange,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("input_search_devices"),
-                    placeholder = {
-                        Text(
-                            text = "শিক্ষার্থীর নাম (student_note), ফোনের মডেল বা ডিভাইস আইডি দিয়ে খুঁজুন...",
-                            color = Slate400,
-                            fontSize = 12.sp
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = NeonCyan
-                        )
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { onSearchChange("") }) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Clear",
-                                    tint = Slate400
-                                )
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Slate800,
-                        unfocusedContainerColor = Slate800,
-                        focusedBorderColor = ElectricBlue,
-                        unfocusedBorderColor = Slate700,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    )
-                )
-
-                // 3 Distinct Navigation Tabs:
-                // 1) অপেক্ষমান আবেদন (Pending)
-                // 2) ভেরিফাইড ডিভাইস (Active)
-                // 3) ব্লকড ডিভাইস (Blocked)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Slate950)
-                        .border(1.dp, Slate700, RoundedCornerShape(14.dp))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    DeviceVerificationTabItem(
-                        modifier = Modifier.weight(1f),
-                        label = "অপেক্ষমান",
-                        count = pendingCount,
-                        selected = activeTab == "PENDING",
-                        accentColor = AmberWarning,
-                        onClick = { onFilterChange("PENDING") },
-                        testTag = "tab_pending_devices"
-                    )
-                    DeviceVerificationTabItem(
-                        modifier = Modifier.weight(1f),
-                        label = "ভেরিফাইড",
-                        count = activeCount,
-                        selected = activeTab == "ACTIVE",
-                        accentColor = EmeraldSuccess,
-                        onClick = { onFilterChange("ACTIVE") },
-                        testTag = "tab_active_devices"
-                    )
-                    DeviceVerificationTabItem(
-                        modifier = Modifier.weight(1f),
-                        label = "ব্লকড",
-                        count = blockedCount,
-                        selected = activeTab == "BLOCKED",
-                        accentColor = CoralDanger,
-                        onClick = { onFilterChange("BLOCKED") },
-                        testTag = "tab_blocked_devices"
-                    )
-                }
-            }
-        }
-
-        // 4. Active Tab Context Banner
-        item {
-            val (bannerTitle, bannerSubtitle, bannerColor) = when (activeTab) {
-                "PENDING" -> Triple(
-                    "⏳ অপেক্ষমান ভেরিফিকেশন আবেদন ($pendingCount)",
-                    "শিক্ষার্থী অ্যাপ থেকে 'স্টুডেন্ট ভেরিফিকেশন করুন' বাটনে ক্লিক করলে এখানে সবার উপরে দেখাবে। ১ ক্লিকে অ্যাপ্রুভ করুন!",
-                    AmberWarning
-                )
-                "ACTIVE" -> Triple(
-                    "✅ ভেরিফাইড ও অনুমোদিত ডিভাইস ($activeCount)",
-                    "এই ডিভাইসগুলো সরাসরি অ্যাপে প্রবেশ করতে পারবে। চাইলে শিক্ষার্থীর নাম/নোট এডিট করে চিনতে সুবিধা করুন।",
-                    EmeraldSuccess
-                )
-                else -> Triple(
-                    "🚫 ব্লক করা ডিভাইস তালিকা ($blockedCount)",
-                    "ব্লক করা ডিভাইসগুলো অ্যাপে প্রবেশ করতে পারবে না। চাইলে ১ ক্লিকে আনব্লক ও পুনরায় অ্যাপ্রুভ করতে পারবেন।",
-                    CoralDanger
-                )
-            }
-
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = bannerColor.copy(alpha = 0.1f),
-                border = BorderStroke(1.dp, bannerColor.copy(alpha = 0.35f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Text(
-                        text = bannerTitle,
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            color = bannerColor,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    )
-                    Text(
-                        text = bannerSubtitle,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = Slate200,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp
-                        )
-                    )
-                }
-            }
-        }
-
-        // 5. Device Cards List or Empty State
+        // 3. Device Cards List or Empty State
         if (filteredDevices.isEmpty()) {
             item {
                 EmptyDeviceTabState(
@@ -527,13 +533,26 @@ fun DeviceManagementScreen(
                 items = filteredDevices,
                 key = { it.effectiveKey.ifBlank { it.hashCode().toString() } }
             ) { device ->
+                val studentProfile = remember(device, enrollments, transactions) {
+                    StudentDeviceMatcher.resolveStudentProfileForDevice(
+                        device = device,
+                        enrollments = enrollments,
+                        transactions = transactions
+                    )
+                }
                 StudentVerificationDeviceCard(
                     device = device,
+                    studentProfile = studentProfile,
+                    nowMillis = nowMillis,
                     activeTab = activeTab,
                     onCopyId = {
                         val toCopy = device.displayDeviceId.ifBlank { device.deviceHash }
                         clipboardManager.setText(AnnotatedString(toCopy))
                         onShowToast("ডিভাইস আইডি কপি করা হয়েছে: $toCopy")
+                    },
+                    onCopyPhone = { phone ->
+                        clipboardManager.setText(AnnotatedString(phone))
+                        onShowToast("মোবাইল নম্বর কপি করা হয়েছে: $phone")
                     },
                     onApproveClick = {
                         onApproveDevice(device, device.studentNote)
@@ -562,10 +581,12 @@ fun DeviceManagementScreen(
                 )
             }
         }
+
+        item { Spacer(modifier = Modifier.height(20.dp)) }
     }
 
     // =========================================================================
-    // Modal 1: Edit Student Name / Note (`student_note`)
+    // Modal 1: Edit Student Name / Phone / Note (`student_note`) with 1-Click Student Picker
     // =========================================================================
     deviceToEditNote?.let { dev ->
         AlertDialog(
@@ -577,7 +598,7 @@ fun DeviceManagementScreen(
             icon = {
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(46.dp)
                         .clip(CircleShape)
                         .background(ElectricBlue.copy(alpha = 0.2f)),
                     contentAlignment = Alignment.Center
@@ -586,19 +607,19 @@ fun DeviceManagementScreen(
                         imageVector = Icons.Default.Edit,
                         contentDescription = null,
                         tint = NeonCyan,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             },
             title = {
                 Text(
-                    text = "শিক্ষার্থীর নাম / নোট এডিট করুন",
+                    text = "শিক্ষার্থীর পরিচয় ও মোবাইল নম্বর লিংক করুন",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    fontSize = 16.sp
                 )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = Slate950,
@@ -627,7 +648,7 @@ fun DeviceManagementScreen(
 
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "শিক্ষার্থীর নাম বা পরিচয় নোট (student_note):",
+                            text = "শিক্ষার্থীর নাম ও মোবাইল নম্বর (student_note):",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = NeonCyan
@@ -640,7 +661,7 @@ fun DeviceManagementScreen(
                                 .testTag("input_edit_student_note"),
                             placeholder = {
                                 Text(
-                                    text = "যেমন: রাফি ইসলাম - HSC 26 (017XXXXXXXX)",
+                                    text = "যেমন: রাফি ইসলাম • 017XXXXXXXX • SSC 27",
                                     fontSize = 12.sp,
                                     color = Slate400
                                 )
@@ -657,6 +678,51 @@ fun DeviceManagementScreen(
                                 unfocusedTextColor = Color.White
                             )
                         )
+                        Text(
+                            text = "💡 নোটের ভেতর স্টুডেন্টের ১১ ডিজিট মোবাইল নম্বর (01XXXXXXXXX) রাখলে কোর্স ও পেমেন্ট রিকোয়েস্টের সাথে এই ডিভাইসটি অটোমেটিক লিংক হয়ে যাবে।",
+                            fontSize = 10.sp,
+                            color = EmeraldSuccess,
+                            lineHeight = 14.sp
+                        )
+                    }
+
+                    if (knownStudentSuggestions.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "⚡ সাম্প্রতিক কোর্স রিকোয়েস্ট থেকে ১-ক্লিকে সিলেক্ট করুন:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AmberWarning
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                knownStudentSuggestions.forEach { (_, suggestionLabel) ->
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = Slate900,
+                                        border = BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.5f)),
+                                        modifier = Modifier.clickable {
+                                            studentNoteInput = suggestionLabel
+                                        }
+                                    ) {
+                                        Text(
+                                            text = suggestionLabel,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                color = Color.White,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            ),
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             },
@@ -712,7 +778,7 @@ fun DeviceManagementScreen(
             },
             title = {
                 Text(
-                    text = "ডিভাইস ব্লক নিশ্চিতকরণ (Block Device)",
+                    text = "ডিভাইস ব্লক নিশ্চিতকরণ",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
@@ -720,7 +786,7 @@ fun DeviceManagementScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "আপনি কি নিশ্চিত যে এই ডিভাইসটি ব্লক করতে চান? ব্লক করলে শিক্ষার্থী অ্যাপে প্রবেশ করতে পারবে না।",
+                        text = "আপনি কি নিশ্চিত যে এই ডিভাইসটি ব্লক করতে চান? ব্লক করলে শিক্ষার্থী সাথে সাথে অ্যাপ থেকে লক হয়ে যাবে।",
                         fontSize = 13.sp,
                         color = Color.White
                     )
@@ -781,7 +847,7 @@ fun DeviceManagementScreen(
                             ),
                             placeholder = {
                                 Text(
-                                    text = "যেমন: অনুমোদনহীন ডিভাইস / শেয়ার করার অভিযোগে ব্লক",
+                                    text = "যেমন: ভুয়া পেমেন্ট রিকোয়েস্ট / অ্যাকাউন্ট শেয়ার করার অভিযোগে ব্লক",
                                     fontSize = 12.sp,
                                     color = Slate400
                                 )
@@ -801,7 +867,7 @@ fun DeviceManagementScreen(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.testTag("btn_confirm_ban")
                 ) {
-                    Text("🚫 হ্যাঁ, ব্লক করুন", fontWeight = FontWeight.Bold)
+                    Text("হ্যাঁ, ব্লক করুন", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -868,14 +934,39 @@ fun DeviceManagementScreen(
     }
 }
 
+private fun matchesDeviceQuery(
+    dev: UserDevice,
+    q: String,
+    enrollments: List<CourseAccessEnrollment>,
+    transactions: List<CoursePaymentTransaction>
+): Boolean {
+    if (
+        (dev.studentNote?.contains(q, ignoreCase = true) == true) ||
+        dev.displayStudentName.contains(q, ignoreCase = true) ||
+        dev.deviceModel.contains(q, ignoreCase = true) ||
+        (dev.deviceBrand?.contains(q, ignoreCase = true) == true) ||
+        dev.fullPhoneModel.contains(q, ignoreCase = true) ||
+        dev.displayDeviceId.contains(q, ignoreCase = true) ||
+        dev.deviceHash.contains(q, ignoreCase = true) ||
+        dev.extractedPhoneFromDevice.contains(q, ignoreCase = true)
+    ) {
+        return true
+    }
+    val profile = StudentDeviceMatcher.resolveStudentProfileForDevice(dev, enrollments, transactions)
+    return profile != null && (
+        profile.studentPhone.contains(q, ignoreCase = true) ||
+            profile.studentName.contains(q, ignoreCase = true) ||
+            profile.coursesSummary.contains(q, ignoreCase = true)
+        )
+}
+
 /**
- * Interactive Counter Badge at the top for Pending Requests, Active Devices, and Blocked Devices.
+ * Clean Interactive Tab Card for Pending, Active, and Blocked tabs.
  */
 @Composable
 private fun VerificationCounterBadge(
     modifier: Modifier = Modifier,
     titleBn: String,
-    subtitleEn: String,
     count: Int,
     accentColor: Color,
     icon: ImageVector,
@@ -885,37 +976,37 @@ private fun VerificationCounterBadge(
 ) {
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() }
             .testTag(testTag),
-        shape = RoundedCornerShape(14.dp),
-        color = if (isSelected) accentColor.copy(alpha = 0.18f) else Slate950,
+        shape = RoundedCornerShape(12.dp),
+        color = if (isSelected) accentColor.copy(alpha = 0.2f) else Slate950,
         border = BorderStroke(
             width = if (isSelected) 1.5.dp else 1.dp,
             color = if (isSelected) accentColor else Slate700
         )
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 9.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
                     tint = accentColor,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(15.dp)
                 )
                 Text(
                     text = count.toString(),
-                    style = MaterialTheme.typography.titleLarge.copy(
+                    style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.ExtraBold,
                         color = Color.White,
-                        fontSize = 20.sp
+                        fontSize = 18.sp
                     )
                 )
             }
@@ -923,75 +1014,13 @@ private fun VerificationCounterBadge(
                 text = titleBn,
                 style = MaterialTheme.typography.labelSmall.copy(
                     color = if (isSelected) accentColor else Slate200,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 11.sp
                 ),
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(
-                text = subtitleEn,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    color = Slate400,
-                    fontSize = 9.sp
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-/**
- * Segmented Tab Item for Pending, Active, and Blocked tabs.
- */
-@Composable
-private fun DeviceVerificationTabItem(
-    modifier: Modifier = Modifier,
-    label: String,
-    count: Int,
-    selected: Boolean,
-    accentColor: Color,
-    onClick: () -> Unit,
-    testTag: String
-) {
-    Surface(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { onClick() }
-            .testTag(testTag),
-        shape = RoundedCornerShape(10.dp),
-        color = if (selected) accentColor else Color.Transparent
-    ) {
-        Row(
-            modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium.copy(
-                    color = if (selected) Slate950 else Slate200,
-                    fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
-                    fontSize = 12.sp
-                ),
-                maxLines = 1
-            )
-            Spacer(modifier = Modifier.width(5.dp))
-            Surface(
-                shape = CircleShape,
-                color = if (selected) Slate950.copy(alpha = 0.22f) else accentColor.copy(alpha = 0.2f)
-            ) {
-                Text(
-                    text = count.toString(),
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = if (selected) Slate950 else accentColor,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 10.sp
-                    )
-                )
-            }
         }
     }
 }
@@ -1007,7 +1036,7 @@ private fun EmptyDeviceTabState(
     val (title, subtitle, accent) = when {
         hasSearchQuery -> Triple(
             "কোনো ডিভাইস খুঁজে পাওয়া যায়নি",
-            "অনুগ্রহ করে অন্য নাম (student_note), ফোনের মডেল বা ডিভাইস আইডি দিয়ে অনুসন্ধান করুন।",
+            "অনুগ্রহ করে অন্য নাম (student_note), মোবাইল নম্বর, ফোনের মডেল বা ডিভাইস আইডি দিয়ে অনুসন্ধান করুন।",
             NeonCyan
         )
         activeTab == "PENDING" -> Triple(
@@ -1017,7 +1046,7 @@ private fun EmptyDeviceTabState(
         )
         activeTab == "ACTIVE" -> Triple(
             "কোনো ভেরিফাইড ডিভাইস এখনো নেই",
-            "অপেক্ষমান তালিকা থেকে কোনো ডিভাইস '✅ অ্যাপ্রুভ করুন' বাটনে ক্লিক করলেই সেটি এখানে যুক্ত হবে।",
+            "অপেক্ষমান তালিকা থেকে কোনো ডিভাইস 'অ্যাপ্রুভ করুন' বাটনে ক্লিক করলেই সেটি এখানে যুক্ত হবে।",
             EmeraldSuccess
         )
         else -> Triple(
@@ -1077,13 +1106,19 @@ private fun EmptyDeviceTabState(
 }
 
 /**
- * Card representing a student device in Pending, Active, or Blocked state.
+ * Clean, well-proportioned Student Device Card:
+ * - Fixes the squashed vertical blue line bug from Screenshot 1
+ * - Shows Real-Time Online / Last Active Time (`last_seen`) prominently alongside Requested & Approved timestamps
+ * - Shows linked Student Phone & Course Profile (`StudentDeviceMatcher`)
  */
 @Composable
 private fun StudentVerificationDeviceCard(
     device: UserDevice,
+    studentProfile: StudentDeviceMatcher.DeviceStudentProfile?,
+    nowMillis: Long,
     activeTab: String,
     onCopyId: () -> Unit,
+    onCopyPhone: (String) -> Unit,
     onApproveClick: () -> Unit,
     onBlockClick: () -> Unit,
     onUnblockAndApproveClick: () -> Unit,
@@ -1102,15 +1137,39 @@ private fun StudentVerificationDeviceCard(
     }
 
     val statusLabel = when {
-        isBlocked -> "🚫 ব্লকড (Blocked)"
-        isPending -> "⏳ অপেক্ষমান (Pending)"
-        else -> "✅ ভেরিফাইড (Active)"
+        isBlocked -> "ব্লকড (Blocked)"
+        isPending -> "অপেক্ষমান (Pending)"
+        else -> "ভেরিফাইড (Active)"
     }
 
     val statusIcon = when {
         isBlocked -> Icons.Default.Block
         isPending -> Icons.Default.HourglassTop
         else -> Icons.Default.CheckCircle
+    }
+
+    val onlineInfo = remember(
+        device.lastSeen,
+        device.lastActiveAt,
+        device.updatedAt,
+        device.approvedAt,
+        device.requestedAt,
+        nowMillis
+    ) {
+        TimestampUtils.resolveDeviceOnlineInfo(
+            lastSeen = device.lastSeen ?: device.lastActiveAt,
+            updatedAt = device.updatedAt,
+            approvedAt = device.approvedAt,
+            requestedAt = device.requestedAt,
+            nowMillis = nowMillis
+        )
+    }
+
+    val resolvedStudentName = when {
+        !device.studentNote.isNullOrBlank() -> device.displayStudentName
+        studentProfile != null && studentProfile.studentName.isNotBlank() ->
+            "${studentProfile.studentName} (${studentProfile.studentPhone})"
+        else -> "নতুন শিক্ষার্থী (নাম যোগ করুন)"
     }
 
     Card(
@@ -1126,14 +1185,14 @@ private fun StudentVerificationDeviceCard(
             .testTag("card_device_${device.displayDeviceId.ifBlank { device.effectiveKey }}")
     ) {
         Column(
-            modifier = Modifier.padding(15.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // 1. Top Row: Student Name (`student_note`) + Edit Note Button & Status Pill
+            // 1. Clean Top Header Row: Avatar + Student Name (with full weight) + Edit Icon + Status Pill
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -1155,79 +1214,70 @@ private fun StudentVerificationDeviceCard(
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = device.displayStudentName,
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = if (device.studentNote.isNullOrBlank()) AmberWarning else Color.White,
-                                    fontSize = 16.sp
-                                ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Slate950,
-                                border = BorderStroke(0.8.dp, NeonCyan.copy(alpha = 0.5f)),
-                                modifier = Modifier
-                                    .clickable { onEditNoteClick() }
-                                    .testTag("btn_edit_note_${device.effectiveKey}")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Edit,
-                                        contentDescription = "Edit Student Note",
-                                        tint = NeonCyan,
-                                        modifier = Modifier.size(11.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text(
-                                        text = if (device.studentNote.isNullOrBlank()) "নাম যোগ করুন" else "এডিট",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = NeonCyan,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 10.sp
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = resolvedStudentName,
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (device.studentNote.isNullOrBlank() && studentProfile == null) {
+                                    AmberWarning
+                                } else {
+                                    Color.White
+                                },
+                                fontSize = 15.sp
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         Text(
                             text = "📱 ${device.fullPhoneModel} • ${device.androidVersion ?: "Android"} (v${device.appVersion ?: "1.0"})",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = Slate200,
                                 fontWeight = FontWeight.Medium,
-                                fontSize = 12.sp
-                            )
+                                fontSize = 11.sp
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
 
-                // Status Badge
+                // Compact Edit Note Icon Button (Never squashed!)
+                IconButton(
+                    onClick = onEditNoteClick,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Slate950)
+                        .border(1.dp, NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
+                        .testTag("btn_edit_note_${device.effectiveKey}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit Student Note",
+                        tint = NeonCyan,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Clean Single-Icon Status Badge
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     color = statusColor.copy(alpha = 0.15f),
                     border = BorderStroke(1.dp, statusColor)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = statusIcon,
                             contentDescription = null,
                             tint = statusColor,
-                            modifier = Modifier.size(13.dp)
+                            modifier = Modifier.size(12.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
@@ -1236,21 +1286,190 @@ private fun StudentVerificationDeviceCard(
                                 color = statusColor,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp
-                            )
+                            ),
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
             }
 
-            HorizontalDivider(color = Slate700, thickness = 0.8.dp)
+            // 2. Real-Time Online / Last Active Status Box (Accurate Postgres Timestamp Parsing)
+            val onlineAccent = when {
+                onlineInfo.isOnlineNow -> EmeraldSuccess
+                onlineInfo.isActiveWithinHour -> NeonCyan
+                else -> Slate400
+            }
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Slate950,
+                border = BorderStroke(
+                    1.dp,
+                    if (onlineInfo.isOnlineNow) EmeraldSuccess.copy(alpha = 0.6f) else Slate700
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(onlineAccent)
+                            )
+                            Text(
+                                text = onlineInfo.statusBadgeTextBn,
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = if (onlineInfo.isOnlineNow) EmeraldSuccess else Color.White,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
 
-            // 2. Display Device ID + Timestamp Info Box
+                        Text(
+                            text = onlineInfo.lastActiveExactBn,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = NeonCyan,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            )
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "📅 আবেদন: ${onlineInfo.requestedAtFormattedBn}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Slate400,
+                                fontSize = 10.sp
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (!device.approvedAt.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "✅ অ্যাপ্রুভড: ${onlineInfo.approvedAtFormattedBn}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = EmeraldSuccess,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 3. Linked Student Phone & Course Profile (if matched via StudentDeviceMatcher)
+            val phoneToShow = studentProfile?.studentPhone?.takeIf { it.isNotBlank() }
+                ?: device.extractedPhoneFromDevice.takeIf { it.isNotBlank() }
+
+            if (phoneToShow != null || studentProfile != null) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = ElectricBlue.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.School,
+                                contentDescription = null,
+                                tint = NeonCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = buildString {
+                                        append("স্টুডেন্ট মোবাইল: ${phoneToShow ?: "N/A"}")
+                                        if (studentProfile != null && studentProfile.studentName.isNotBlank()) {
+                                            append(" • ${studentProfile.studentName}")
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        color = Color.White,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 12.sp
+                                    )
+                                )
+                                if (studentProfile != null && studentProfile.coursesSummary.isNotBlank()) {
+                                    Text(
+                                        text = "কোর্স: ${studentProfile.coursesSummary}",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = NeonCyan,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+
+                        if (!phoneToShow.isNullOrBlank()) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Slate950,
+                                border = BorderStroke(1.dp, Slate700),
+                                modifier = Modifier.clickable { onCopyPhone(phoneToShow) }
+                            ) {
+                                Text(
+                                    text = "নম্বর কপি",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = NeonCyan,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Display Device ID + Student Note Quick Edit Bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Copyable Display Device ID (`display_device_id`)
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = Slate950,
@@ -1262,7 +1481,7 @@ private fun StudentVerificationDeviceCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1314,50 +1533,75 @@ private fun StudentVerificationDeviceCard(
                         }
                     }
                 }
-            }
 
-            // 3. Timestamps Row: Requested At / Approved At
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                // Quick Student Note / Link Button
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Slate950,
+                    border = BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.5f)),
+                    modifier = Modifier.clickable { onEditNoteClick() }
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.AccessTime,
-                        contentDescription = null,
-                        tint = Slate400,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    val timeLabel = when {
-                        isPending -> "আবেদনের সময়: ${formatTimestampWithRelative(device.requestedAt ?: device.updatedAt ?: device.lastSeen)}"
-                        !device.approvedAt.isNullOrBlank() -> "অ্যাপ্রুভড: ${formatTimestampWithRelative(device.approvedAt)}"
-                        else -> "আপডেট: ${formatTimestampWithRelative(device.updatedAt ?: device.requestedAt ?: device.lastSeen)}"
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Link,
+                            contentDescription = null,
+                            tint = NeonCyan,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = if (device.studentNote.isNullOrBlank()) "নাম/নম্বর লিংক" else "নোট এডিট",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = NeonCyan,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 11.sp
+                            )
+                        )
                     }
-                    Text(
-                        text = timeLabel,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = Slate400,
-                            fontSize = 11.sp
-                        )
-                    )
-                }
-
-                if (!device.requestedAt.isNullOrBlank() && !isPending) {
-                    Text(
-                        text = "আবেদন: ${formatRelativeTime(device.requestedAt)}",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = Slate400,
-                            fontSize = 10.sp
-                        )
-                    )
                 }
             }
 
-            // 4. If Blocked, show Ban Reason Banner
+            // Show saved student_note if present
+            if (!device.studentNote.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Slate950,
+                    border = BorderStroke(1.dp, Slate700),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onEditNoteClick() }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "📝 নোট: ${device.studentNote}",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "এডিট",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = NeonCyan,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
+                }
+            }
+
+            // 5. If Blocked, show Ban Reason Banner
             if (isBlocked && !device.banReason.isNullOrBlank()) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
@@ -1390,24 +1634,23 @@ private fun StudentVerificationDeviceCard(
                 }
             }
 
-            // 5. Tab-Specific Primary Action Buttons
+            // 6. Tab-Specific Primary Action Buttons (Clean single icons, no duplicate emojis!)
             when {
                 // TAB 1: PENDING (`status = 'pending' AND is_banned = false`)
-                isPending || activeTab == "PENDING" -> {
+                isPending -> {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 1. ✅ অ্যাপ্রুভ করুন (Approve) — 1-Click Verification
                         Button(
                             onClick = onApproveClick,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = EmeraldSuccess,
-                                contentColor = Color.White
+                                contentColor = Slate950
                             ),
                             shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(vertical = 12.dp, horizontal = 14.dp),
+                            contentPadding = PaddingValues(vertical = 11.dp, horizontal = 14.dp),
                             modifier = Modifier
                                 .weight(1.35f)
                                 .testTag("btn_approve_device_${device.effectiveKey}")
@@ -1419,13 +1662,12 @@ private fun StudentVerificationDeviceCard(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "✅ অ্যাপ্রুভ করুন",
+                                text = "অ্যাপ্রুভ করুন",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.ExtraBold
                             )
                         }
 
-                        // 2. 🚫 ব্লক করুন (Block)
                         Button(
                             onClick = onBlockClick,
                             colors = ButtonDefaults.buttonColors(
@@ -1433,7 +1675,7 @@ private fun StudentVerificationDeviceCard(
                                 contentColor = Color.White
                             ),
                             shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(vertical = 12.dp, horizontal = 12.dp),
+                            contentPadding = PaddingValues(vertical = 11.dp, horizontal = 12.dp),
                             modifier = Modifier
                                 .weight(1f)
                                 .testTag("btn_block_pending_${device.effectiveKey}")
@@ -1445,7 +1687,7 @@ private fun StudentVerificationDeviceCard(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "🚫 ব্লক করুন",
+                                text = "ব্লক করুন",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -1454,21 +1696,20 @@ private fun StudentVerificationDeviceCard(
                 }
 
                 // TAB 3: BLOCKED (`is_banned = true OR status = 'blocked'`)
-                isBlocked || activeTab == "BLOCKED" -> {
+                isBlocked -> {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 🔓 আনব্লক ও অ্যাপ্রুভ করুন (Unblock & Approve)
                         Button(
                             onClick = onUnblockAndApproveClick,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = EmeraldSuccess,
-                                contentColor = Color.White
+                                contentColor = Slate950
                             ),
                             shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(vertical = 12.dp, horizontal = 14.dp),
+                            contentPadding = PaddingValues(vertical = 11.dp, horizontal = 14.dp),
                             modifier = Modifier
                                 .weight(1f)
                                 .testTag("btn_unblock_approve_${device.effectiveKey}")
@@ -1480,7 +1721,7 @@ private fun StudentVerificationDeviceCard(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "🔓 আনব্লক ও অ্যাপ্রুভ করুন (Unblock & Approve)",
+                                text = "আনব্লক ও অ্যাপ্রুভ করুন",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.ExtraBold
                             )
@@ -1507,63 +1748,7 @@ private fun StudentVerificationDeviceCard(
 
                 // TAB 2: ACTIVE / VERIFIED (`status = 'active' AND is_banned = false`)
                 else -> {
-                    // Student Note Quick Edit Bar for Active Devices
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Slate950,
-                        border = BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.4f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onEditNoteClick() }
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 9.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = null,
-                                    tint = NeonCyan,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = "শিক্ষার্থীর নাম / নোট (student_note)",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = Slate400,
-                                            fontSize = 10.sp
-                                        )
-                                    )
-                                    Text(
-                                        text = device.studentNote?.takeIf { it.isNotBlank() }
-                                            ?: "নাম দেওয়া নেই — চিনতে নাম/নোট লিখতে এখানে ট্যাপ করুন",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = if (device.studentNote.isNullOrBlank()) AmberWarning else Color.White,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 12.sp
-                                        )
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "এডিট করুন",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = NeonCyan,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            )
-                        }
-                    }
-
-                    // Optional Profile View Permission Switch (`can_view_profiles`)
+                    // Profile View Permission Switch (`can_view_profiles`)
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = Slate950,
@@ -1575,7 +1760,7 @@ private fun StudentVerificationDeviceCard(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1619,7 +1804,6 @@ private fun StudentVerificationDeviceCard(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 1-Click Block Button
                         Button(
                             onClick = onBlockClick,
                             colors = ButtonDefaults.buttonColors(
@@ -1639,13 +1823,12 @@ private fun StudentVerificationDeviceCard(
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
-                                text = "🚫 ব্লক করুন",
+                                text = "ব্লক করুন",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
 
-                        // Revoke / Move to Pending Button
                         OutlinedButton(
                             onClick = onRevokeToPendingClick,
                             shape = RoundedCornerShape(10.dp),
@@ -1663,13 +1846,12 @@ private fun StudentVerificationDeviceCard(
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
-                                text = "রিমুভ / পেন্ডিং",
+                                text = "পেন্ডিং করুন",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
 
-                        // Delete Record Button
                         IconButton(
                             onClick = onDeleteClick,
                             modifier = Modifier
@@ -1690,64 +1872,6 @@ private fun StudentVerificationDeviceCard(
                 }
             }
         }
-    }
-}
-
-/**
- * Formats ISO timestamp with both date/time and relative indicator.
- */
-private fun formatTimestampWithRelative(dateString: String?): String {
-    if (dateString.isNullOrBlank()) return "অজানা"
-    val parsed = parseIsoDate(dateString) ?: return dateString.take(16).replace("T", " ")
-    val formatted = SimpleDateFormat("dd MMM, hh:mm a", Locale.US).format(parsed)
-    val rel = formatRelativeTime(dateString)
-    return "$formatted ($rel)"
-}
-
-private fun parseIsoDate(dateString: String?): Date? {
-    if (dateString.isNullOrBlank()) return null
-    val formats = listOf(
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX", Locale.US),
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US),
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US),
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }
-    )
-    for (format in formats) {
-        try {
-            val parsed = format.parse(dateString)
-            if (parsed != null) return parsed
-        } catch (_: Exception) {
-        }
-    }
-    return null
-}
-
-/**
- * Parses timestamps and computes a relative Bengali human-readable string.
- */
-private fun formatRelativeTime(dateString: String?): String {
-    if (dateString.isNullOrBlank()) return "অজানা"
-    return try {
-        val parsedDate = parseIsoDate(dateString) ?: return dateString.take(10)
-
-        val diffMs = System.currentTimeMillis() - parsedDate.time
-        val diffSec = diffMs / 1000
-        val diffMin = diffSec / 60
-        val diffHours = diffMin / 60
-        val diffDays = diffHours / 24
-
-        when {
-            diffSec < 60 -> "এইমাত্র"
-            diffMin < 60 -> "$diffMin মিনিট আগে"
-            diffHours < 24 -> "$diffHours ঘণ্টা আগে"
-            diffDays == 1L -> "গতকাল"
-            diffDays < 7 -> "$diffDays দিন আগে"
-            else -> SimpleDateFormat("dd MMM, yyyy", Locale.US).format(parsedDate)
-        }
-    } catch (_: Exception) {
-        dateString.take(10)
     }
 }
 

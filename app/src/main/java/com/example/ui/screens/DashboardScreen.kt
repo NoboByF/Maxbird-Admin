@@ -37,6 +37,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.HeadsetMic
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
@@ -46,6 +48,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -55,10 +58,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -75,6 +87,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AccessCode
 import com.example.data.model.DashboardStats
+import com.example.notifications.OneSignalPushManager
 import com.example.ui.navigation.Screen
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CardBorderGradientEnd
@@ -115,9 +128,20 @@ fun DashboardScreen(
     onNavigate: (Screen) -> Unit,
     onOpenSettings: () -> Unit,
     onShowToast: (String) -> Unit,
-    onOpenPaymentMethodsManager: () -> Unit = {}
+    onOpenPaymentMethodsManager: () -> Unit = {},
+    isLiveNotificationEnabled: Boolean = true,
+    pendingCourseRequestsCount: Int = 0,
+    pendingPaymentsCount: Int = 0,
+    onToggleLiveNotification: (Boolean) -> Unit = {},
+    onTestNotification: () -> Unit = {},
+    oneSignalAppId: String = "",
+    oneSignalRestApiKey: String = "",
+    oneSignalStatusSummary: String = "",
+    isSendingOneSignalTest: Boolean = false,
+    onSaveOneSignalConfig: (String, String) -> Unit = { _, _ -> }
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
+    var showOneSignalDialog by remember { mutableStateOf(false) }
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseAlpha by infiniteTransition.animateFloat(
@@ -388,6 +412,359 @@ fun DashboardScreen(
             }
         }
 
+        // 2B. Real-Time Push Notification Monitor Card (Device Requests, Course Requests & Payments)
+        item {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate800),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.dp,
+                        if (isLiveNotificationEnabled) EmeraldSuccess.copy(alpha = 0.45f) else Slate700,
+                        RoundedCornerShape(18.dp)
+                    )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isLiveNotificationEnabled)
+                                            EmeraldSuccess.copy(alpha = 0.2f)
+                                        else
+                                            Slate700
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = if (isLiveNotificationEnabled) EmeraldSuccess else Slate400,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "২৪/৭ লাইভ পুশ নোটিফিকেশন গার্ড",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Text(
+                                    text = "ডিভাইস রিকোয়েস্ট, কোর্স আবেদন বা টাকা পাঠালে সাথে সাথে অ্যালার্ট",
+                                    color = Slate400,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isLiveNotificationEnabled,
+                            onCheckedChange = onToggleLiveNotification,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = EmeraldSuccess
+                            ),
+                            modifier = Modifier.testTag("switch_live_notification_guard")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Slate900,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (stats.pendingVerificationDevices > 0) AmberWarning.copy(alpha = 0.5f) else Slate700
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onNavigate(Screen.Devices) }
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "${stats.pendingVerificationDevices}",
+                                    color = if (stats.pendingVerificationDevices > 0) AmberWarning else Color.White,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 16.sp
+                                )
+                                Text(
+                                    text = "ডিভাইস পেন্ডিং",
+                                    color = Slate400,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Slate900,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (pendingCourseRequestsCount > 0) NeonCyan.copy(alpha = 0.5f) else Slate700
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onNavigate(Screen.CourseSales) }
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "$pendingCourseRequestsCount",
+                                    color = if (pendingCourseRequestsCount > 0) NeonCyan else Color.White,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 16.sp
+                                )
+                                Text(
+                                    text = "কোর্স রিকোয়েস্ট",
+                                    color = Slate400,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Slate900,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (pendingPaymentsCount > 0) EmeraldSuccess.copy(alpha = 0.5f) else Slate700
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onNavigate(Screen.CourseSales) }
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "$pendingPaymentsCount",
+                                    color = if (pendingPaymentsCount > 0) EmeraldSuccess else Color.White,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 16.sp
+                                )
+                                Text(
+                                    text = "পেমেন্ট পেন্ডিং",
+                                    color = Slate400,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+                    }
+
+                    if (oneSignalStatusSummary.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Slate900,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (oneSignalAppId.isNotBlank()) EmeraldSuccess.copy(alpha = 0.45f) else AmberWarning.copy(alpha = 0.45f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = oneSignalStatusSummary,
+                                color = if (oneSignalAppId.isNotBlank()) EmeraldSuccess else AmberWarning,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onTestNotification,
+                            enabled = !isSendingOneSignalTest,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("btn_test_push_notification")
+                        ) {
+                            if (isSendingOneSignalTest) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(15.dp),
+                                    color = NeonCyan,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "টেস্ট পুশ",
+                                color = NeonCyan,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        Button(
+                            onClick = { showOneSignalDialog = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (oneSignalAppId.isNotBlank()) EmeraldSuccess else ElectricBlue
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("btn_open_onesignal_setup")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = null,
+                                tint = if (oneSignalAppId.isNotBlank()) Slate950 else Color.White,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = if (oneSignalAppId.isNotBlank()) "OneSignal সক্রিয়" else "OneSignal সেটআপ",
+                                color = if (oneSignalAppId.isNotBlank()) Slate950 else Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (showOneSignalDialog) {
+                var appIdInput by remember(oneSignalAppId) { mutableStateOf(oneSignalAppId) }
+                var restKeyInput by remember(oneSignalRestApiKey) { mutableStateOf(oneSignalRestApiKey) }
+
+                AlertDialog(
+                    onDismissRequest = { showOneSignalDialog = false },
+                    containerColor = Slate850,
+                    titleContentColor = Color.White,
+                    textContentColor = Slate200,
+                    title = {
+                        Text(
+                            text = "🔔 OneSignal ক্লাউড পুশ নোটিফিকেশন সেটআপ",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 16.sp
+                        )
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = "অ্যাপ সম্পূর্ণ বন্ধ (Closed/Killed) থাকলেও স্টুডেন্ট ডিভাইস ভেরিফিকেশন, কোর্স রিকোয়েস্ট বা টাকা পাঠালে সাথে সাথে নোটিফিকেশন পেতে আপনার OneSignal App ID ও REST API Key দিন:",
+                                color = Slate200,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp
+                            )
+
+                            OutlinedTextField(
+                                value = appIdInput,
+                                onValueChange = { appIdInput = it },
+                                label = { Text("OneSignal App ID", fontSize = 12.sp) },
+                                placeholder = { Text("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", fontSize = 11.sp) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NeonCyan,
+                                    unfocusedBorderColor = Slate700,
+                                    focusedContainerColor = Slate900,
+                                    unfocusedContainerColor = Slate900,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = restKeyInput,
+                                onValueChange = { restKeyInput = it },
+                                label = { Text("OneSignal REST API Key", fontSize = 12.sp) },
+                                placeholder = { Text("os_v2_app_...", fontSize = 11.sp) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NeonCyan,
+                                    unfocusedBorderColor = Slate700,
+                                    focusedContainerColor = Slate900,
+                                    unfocusedContainerColor = Slate900,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedButton(
+                                onClick = {
+                                    val sql = OneSignalPushManager.buildSupabaseOneSignalTriggerSql(
+                                        appId = appIdInput.trim(),
+                                        restApiKey = restKeyInput.trim()
+                                    )
+                                    clipboardManager.setText(AnnotatedString(sql))
+                                    onShowToast("✅ অটো-পুশ SQL Trigger কপি হয়েছে! Supabase SQL Editor-এ Run করুন।")
+                                },
+                                border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Supabase Auto-Push SQL ট্রিগার কপি",
+                                    color = NeonCyan,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                onSaveOneSignalConfig(appIdInput.trim(), restKeyInput.trim())
+                                showOneSignalDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
+                        ) {
+                            Text("সেভ ও চালু করুন", color = Slate950, fontWeight = FontWeight.ExtraBold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showOneSignalDialog = false }) {
+                            Text("বন্ধ করুন", color = Slate400)
+                        }
+                    }
+                )
+            }
+        }
+
         // 3. Admin Modules Section Header
         item {
             Row(
@@ -437,6 +814,19 @@ fun DashboardScreen(
         // 4. Admin Modules 2-Column Balanced Grid
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Featured Row: Maxbird Website Admin Control Panel (https://maxbird.pages.dev)
+                FeaturedModuleCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "Maxbird Website কন্ট্রোল প্যানেল (maxbird.pages.dev)",
+                    subtitle = "ওয়েবসাইটের APK লিংক (R2), ডাউনলোড কাউন্টার, ভার্সন, ফাইল সাইজ ও টপ নোটিশ লাইভ কন্ট্রোল",
+                    icon = Icons.Default.Language,
+                    badge = "🌐 ওয়েবসাইট লাইভ",
+                    accentColor = ElectricBlueLight,
+                    gradientStart = ElectricBlue.copy(alpha = 0.28f),
+                    onClick = { onNavigate(Screen.MaxbirdWebsiteAdmin) },
+                    testTag = "mod_card_maxbird_website_admin"
+                )
+
                 // Featured Row 00: 1-Click Student Device Verification & Control
                 FeaturedModuleCard(
                     modifier = Modifier.fillMaxWidth(),
