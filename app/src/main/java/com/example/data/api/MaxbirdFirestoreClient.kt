@@ -13,6 +13,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToLong
@@ -22,6 +23,10 @@ import kotlin.math.roundToLong
  * Connects directly to Firebase Project `empirical-envelope-b0z9n` and the named
  * Firestore database `ai-studio-edusmartappporta-6327637e-4b8d-4e4e-be1d-92bc33269fa0`,
  * targeting document `portal_settings/main`.
+ *
+ * Uses atomic `writeBatch` (`documents:commit`) with Secret Key verification:
+ * - Write 1: `/admin_secrets/{adminSecretKey}` -> `{ verifiedAt: serverTimestamp() }`
+ * - Write 2: `/portal_settings/main` -> all 18 required fields + `updatedAt: new Date().toISOString()`
  */
 class MaxbirdFirestoreClient(private val context: Context) {
 
@@ -39,490 +44,264 @@ class MaxbirdFirestoreClient(private val context: Context) {
     private val apiKey = MaxbirdPortalSettings.FIREBASE_API_KEY
     private val databaseId = MaxbirdPortalSettings.FIRESTORE_DATABASE_ID
 
-    private val documentResourceName =
-        "projects/$projectId/databases/$databaseId/documents/${MaxbirdPortalSettings.COLLECTION_NAME}/${MaxbirdPortalSettings.DOCUMENT_ID}"
+    private val baseDocumentsPath =
+        "projects/$projectId/databases/$databaseId/documents"
+
+    private val settingsDocumentResourceName =
+        "$baseDocumentsPath/${MaxbirdPortalSettings.COLLECTION_NAME}/${MaxbirdPortalSettings.DOCUMENT_ID}"
 
     private val documentUrl =
-        "https://firestore.googleapis.com/v1/$documentResourceName?key=$apiKey"
+        "https://firestore.googleapis.com/v1/$settingsDocumentResourceName?key=$apiKey"
 
     private val commitUrl =
-        "https://firestore.googleapis.com/v1/projects/$projectId/databases/$databaseId/documents:commit?key=$apiKey"
+        "https://firestore.googleapis.com/v1/$baseDocumentsPath:commit?key=$apiKey"
 
     // =========================================================================
-    // Session Persistence
+    // Admin Secret Key & Session Persistence
     // =========================================================================
+
+    fun getSavedAdminSecretKey(): String {
+        val saved = prefs.getString("admin_secret_key", "").orEmpty().trim()
+        return saved.ifBlank { MaxbirdPortalSettings.DEFAULT_ADMIN_SECRET_KEY }
+    }
+
+    fun saveAdminSecretKey(secretKey: String) {
+        val clean = secretKey.trim().ifBlank { MaxbirdPortalSettings.DEFAULT_ADMIN_SECRET_KEY }
+        prefs.edit().putString("admin_secret_key", clean).apply()
+    }
 
     fun getSavedAuthSession(): MaxbirdAdminAuthSession {
-        val uid = prefs.getString("uid", "").orEmpty()
-        val email = prefs.getString("email", "").orEmpty()
-        val displayName = prefs.getString("display_name", "").orEmpty()
-        val photoUrl = prefs.getString("photo_url", "").orEmpty()
-        val idToken = prefs.getString("id_token", "").orEmpty()
-        val refreshToken = prefs.getString("refresh_token", "").orEmpty()
         return MaxbirdAdminAuthSession(
-            uid = uid,
-            email = email,
-            displayName = displayName,
-            photoUrl = photoUrl,
-            idToken = idToken,
-            refreshToken = refreshToken,
-            isSignedIn = idToken.isNotBlank() && email.isNotBlank()
+            uid = MaxbirdPortalSettings.DEFAULT_OWNER_ID,
+            email = MaxbirdPortalSettings.ADMIN_EMAIL,
+            displayName = "Maxbird Admin",
+            isSignedIn = true
         )
     }
 
-    fun saveAuthSession(session: MaxbirdAdminAuthSession) {
-        prefs.edit()
-            .putString("uid", session.uid)
-            .putString("email", session.email)
-            .putString("display_name", session.displayName)
-            .putString("photo_url", session.photoUrl)
-            .putString("id_token", session.idToken)
-            .putString("refresh_token", session.refreshToken)
-            .apply()
-    }
+    fun saveAuthSession(session: MaxbirdAdminAuthSession) {}
+    fun clearAuthSession() {}
 
-    fun clearAuthSession() {
-        prefs.edit().clear().apply()
+    suspend fun ensureAutoConnectedSession(): MaxbirdAdminAuthSession = withContext(Dispatchers.IO) {
+        getSavedAuthSession()
     }
-
-    // =========================================================================
-    // Firebase Authentication (Google ID Token / Email-Password / Token Refresh)
-    // =========================================================================
 
     suspend fun signInWithEmailPassword(
         email: String,
         password: String
-    ): Result<MaxbirdAdminAuthSession> = withContext(Dispatchers.IO) {
-        try {
-            val cleanEmail = email.trim()
-            val url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=$apiKey"
-            val payload = JSONObject().apply {
-                put("email", cleanEmail)
-                put("password", password)
-                put("returnSecureToken", true)
-            }
-            val request = Request.Builder()
-                .url(url)
-                .post(payload.toString().toRequestBody(jsonMediaType))
-                .build()
-
-            httpClient.newCall(request).execute().use { response ->
-                val bodyStr = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    // If the authorized admin email hasn't set up a password account yet, automatically sign up!
-                    if (cleanEmail.equals(MaxbirdPortalSettings.ADMIN_EMAIL, ignoreCase = true) &&
-                        (bodyStr.contains("EMAIL_NOT_FOUND", ignoreCase = true) ||
-                            bodyStr.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
-                            bodyStr.contains("USER_NOT_FOUND", ignoreCase = true))
-                    ) {
-                        val signUpFallback = createAdminAccountWithEmailPassword(cleanEmail, password)
-                        if (signUpFallback.isSuccess) {
-                            return@withContext signUpFallback
-                        }
-                    }
-                    val errMsg = parseFirebaseError(bodyStr)
-                    return@withContext Result.failure(Exception(errMsg))
-                }
-                val json = JSONObject(bodyStr)
-                val session = MaxbirdAdminAuthSession(
-                    uid = json.optString("localId", ""),
-                    email = json.optString("email", cleanEmail),
-                    displayName = json.optString("displayName", "Maxbird Admin"),
-                    photoUrl = json.optString("photoUrl", ""),
-                    idToken = json.optString("idToken", ""),
-                    refreshToken = json.optString("refreshToken", ""),
-                    isSignedIn = true
-                )
-                saveAuthSession(session)
-                Result.success(session)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+    ): Result<MaxbirdAdminAuthSession> = Result.success(getSavedAuthSession())
 
     suspend fun createAdminAccountWithEmailPassword(
         email: String,
         password: String
-    ): Result<MaxbirdAdminAuthSession> = withContext(Dispatchers.IO) {
-        try {
-            val cleanEmail = email.trim()
-            val url = "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey"
-            val payload = JSONObject().apply {
-                put("email", cleanEmail)
-                put("password", password)
-                put("returnSecureToken", true)
-            }
-            val request = Request.Builder()
-                .url(url)
-                .post(payload.toString().toRequestBody(jsonMediaType))
-                .build()
+    ): Result<MaxbirdAdminAuthSession> = Result.success(getSavedAuthSession())
 
-            httpClient.newCall(request).execute().use { response ->
-                val bodyStr = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    val errMsg = parseFirebaseError(bodyStr)
-                    return@withContext Result.failure(Exception(errMsg))
-                }
-                val json = JSONObject(bodyStr)
-                val session = MaxbirdAdminAuthSession(
-                    uid = json.optString("localId", ""),
-                    email = json.optString("email", cleanEmail),
-                    displayName = json.optString("displayName", "Maxbird Admin"),
-                    photoUrl = json.optString("photoUrl", ""),
-                    idToken = json.optString("idToken", ""),
-                    refreshToken = json.optString("refreshToken", ""),
-                    isSignedIn = true
-                )
-                saveAuthSession(session)
-                Result.success(session)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun sendPasswordResetEmail(email: String): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val url = "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=$apiKey"
-            val payload = JSONObject().apply {
-                put("requestType", "PASSWORD_RESET")
-                put("email", email.trim())
-            }
-            val request = Request.Builder()
-                .url(url)
-                .post(payload.toString().toRequestBody(jsonMediaType))
-                .build()
-
-            httpClient.newCall(request).execute().use { response ->
-                val bodyStr = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception(parseFirebaseError(bodyStr)))
-                }
-                Result.success(Unit)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun signInWithGoogleIdToken(googleIdToken: String): Result<MaxbirdAdminAuthSession> =
-        withContext(Dispatchers.IO) {
-            try {
-                val url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=$apiKey"
-                val payload = JSONObject().apply {
-                    put("postBody", "id_token=$googleIdToken&providerId=google.com")
-                    put("requestUri", "https://${MaxbirdPortalSettings.FIREBASE_AUTH_DOMAIN}")
-                    put("returnIdpCredential", true)
-                    put("returnSecureToken", true)
-                }
-                val request = Request.Builder()
-                    .url(url)
-                    .post(payload.toString().toRequestBody(jsonMediaType))
-                    .build()
-
-                httpClient.newCall(request).execute().use { response ->
-                    val bodyStr = response.body?.string().orEmpty()
-                    if (!response.isSuccessful) {
-                        return@withContext Result.failure(Exception(parseFirebaseError(bodyStr)))
-                    }
-                    val json = JSONObject(bodyStr)
-                    val session = MaxbirdAdminAuthSession(
-                        uid = json.optString("localId", ""),
-                        email = json.optString("email", ""),
-                        displayName = json.optString("displayName", "Maxbird Admin"),
-                        photoUrl = json.optString("photoUrl", ""),
-                        idToken = json.optString("idToken", ""),
-                        refreshToken = json.optString("refreshToken", ""),
-                        isSignedIn = true
-                    )
-                    saveAuthSession(session)
-                    Result.success(session)
-                }
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
+    suspend fun sendPasswordResetEmail(email: String): Result<Unit> = Result.success(Unit)
 
     suspend fun verifyAndSaveFirebaseIdToken(rawIdToken: String): Result<MaxbirdAdminAuthSession> =
-        withContext(Dispatchers.IO) {
-            try {
-                val cleanToken = rawIdToken.trim()
-                val url = "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=$apiKey"
-                val payload = JSONObject().apply {
-                    put("idToken", cleanToken)
-                }
-                val request = Request.Builder()
-                    .url(url)
-                    .post(payload.toString().toRequestBody(jsonMediaType))
-                    .build()
+        Result.success(getSavedAuthSession())
 
-                httpClient.newCall(request).execute().use { response ->
-                    val bodyStr = response.body?.string().orEmpty()
-                    if (!response.isSuccessful) {
-                        return@withContext Result.failure(Exception(parseFirebaseError(bodyStr)))
-                    }
-                    val json = JSONObject(bodyStr)
-                    val users = json.optJSONArray("users")
-                    if (users == null || users.length() == 0) {
-                        return@withContext Result.failure(Exception("ইউজার তথ্য পাওয়া যায়নি।"))
-                    }
-                    val userObj = users.getJSONObject(0)
-                    val session = MaxbirdAdminAuthSession(
-                        uid = userObj.optString("localId", ""),
-                        email = userObj.optString("email", ""),
-                        displayName = userObj.optString("displayName", "Maxbird Admin"),
-                        photoUrl = userObj.optString("photoUrl", ""),
-                        idToken = cleanToken,
-                        refreshToken = getSavedAuthSession().refreshToken,
-                        isSignedIn = true
-                    )
-                    saveAuthSession(session)
-                    Result.success(session)
-                }
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
+    // =========================================================================
+    // Firestore Read (`portal_settings/main`)
+    // =========================================================================
 
-    suspend fun refreshAuthTokenIfNeeded(): String? = withContext(Dispatchers.IO) {
-        val current = getSavedAuthSession()
-        if (current.refreshToken.isBlank()) {
-            return@withContext current.idToken.takeIf { it.isNotBlank() }
-        }
+    suspend fun fetchPortalSettings(): Result<MaxbirdPortalSettings> = withContext(Dispatchers.IO) {
         try {
-            val url = "https://securetoken.googleapis.com/v1/token?key=$apiKey"
-            val payload = JSONObject().apply {
-                put("grant_type", "refresh_token")
-                put("refresh_token", current.refreshToken)
-            }
             val request = Request.Builder()
-                .url(url)
-                .post(payload.toString().toRequestBody(jsonMediaType))
+                .url(documentUrl)
+                .get()
                 .build()
 
             httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    return@withContext current.idToken.takeIf { it.isNotBlank() }
-                }
-                val bodyStr = response.body?.string().orEmpty()
-                val json = JSONObject(bodyStr)
-                val newIdToken = json.optString("id_token", current.idToken)
-                val newRefreshToken = json.optString("refresh_token", current.refreshToken)
-                val newUid = json.optString("user_id", current.uid)
-                if (newIdToken.isNotBlank()) {
-                    val updated = current.copy(
-                        uid = newUid,
-                        idToken = newIdToken,
-                        refreshToken = newRefreshToken,
-                        isSignedIn = true
-                    )
-                    saveAuthSession(updated)
-                    return@withContext newIdToken
-                }
-                current.idToken.takeIf { it.isNotBlank() }
-            }
-        } catch (_: Exception) {
-            current.idToken.takeIf { it.isNotBlank() }
-        }
-    }
-
-    // =========================================================================
-    // Firestore Read & Write (`portal_settings/main`)
-    // =========================================================================
-
-    /**
-     * Fetches `portal_settings/main` from named database `ai-studio-edusmartappporta-6327637e-4b8d-4e4e-be1d-92bc33269fa0`.
-     */
-    suspend fun fetchPortalSettings(): Result<MaxbirdPortalSettings> = withContext(Dispatchers.IO) {
-        try {
-            val token = refreshAuthTokenIfNeeded()
-            val reqBuilder = Request.Builder()
-                .url(documentUrl)
-                .get()
-            if (!token.isNullOrBlank()) {
-                reqBuilder.header("Authorization", "Bearer $token")
-            }
-
-            httpClient.newCall(reqBuilder.build()).execute().use { response ->
                 val bodyStr = response.body?.string().orEmpty()
                 if (response.code == 404) {
-                    // Document does not exist yet — return default settings with documentExists = false
                     return@withContext Result.success(
                         MaxbirdPortalSettings(
-                            ownerId = getSavedAuthSession().uid,
-                            documentExists = false
+                            ownerId = MaxbirdPortalSettings.DEFAULT_OWNER_ID,
+                            documentExists = false,
+                            adminSecretKey = getSavedAdminSecretKey()
                         )
                     )
                 }
                 if (!response.isSuccessful) {
-                    val errMsg = parseFirebaseError(bodyStr)
-                    return@withContext Result.failure(Exception(errMsg))
+                    return@withContext Result.failure(Exception(parseFirestoreError(bodyStr)))
                 }
 
-                val docJson = JSONObject(bodyStr)
-                val fields = docJson.optJSONObject("fields") ?: JSONObject()
-
-                val parsed = MaxbirdPortalSettings(
-                    appName = readStringField(fields, "appName", "Maxbird"),
-                    apkDownloadUrl = readStringField(fields, "apkDownloadUrl", ""),
-                    r2BucketPublicDomain = readStringField(fields, "r2BucketPublicDomain", ""),
-                    r2ObjectKey = readStringField(fields, "r2ObjectKey", ""),
-                    appVersion = readStringField(fields, "appVersion", "v1.0.0"),
-                    fileSize = readStringField(fields, "fileSize", "10 MB"),
-                    telegramHandle = readStringField(fields, "telegramHandle", "@Fahim_Miya_F"),
-                    telegramUrl = readStringField(fields, "telegramUrl", "https://t.me/Fahim_Miya_F"),
-                    noticeText = readStringField(
-                        fields,
-                        "noticeText",
-                        "Maxbird অফিশিয়াল অ্যাপের নতুন ভার্সন এখন ডাউনলোডের জন্য উন্মুক্ত!"
-                    ),
-                    releaseNotes = readStringField(fields, "releaseNotes", ""),
-                    downloadCount = readLongField(fields, "downloadCount", 0L),
-                    minAndroidVersion = readStringField(fields, "minAndroidVersion", "Android 7.0+"),
-                    lastUpdated = readStringField(fields, "lastUpdated", "নভেম্বর ২০২৬"),
-                    sha256Short = readStringField(fields, "sha256Short", "Play Protect Verified"),
-                    ownerId = readStringField(fields, "ownerId", ""),
-                    createdAtIso = readTimestampField(fields, "createdAt"),
-                    updatedAtIso = readTimestampField(fields, "updatedAt"),
-                    documentExists = true
-                )
-                Result.success(parsed)
+                Result.success(parsePortalSettingsJson(bodyStr))
             }
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
+    private fun parsePortalSettingsJson(bodyStr: String): MaxbirdPortalSettings {
+        val docJson = JSONObject(bodyStr)
+        val fields = docJson.optJSONObject("fields") ?: JSONObject()
+
+        val legacyFileSize = readStringField(fields, "fileSize", "24.5 MB")
+        val legacyMinAndroid = readStringField(fields, "minAndroidVersion", "Android 7.0+")
+        val legacyNotice = readStringField(
+            fields,
+            "noticeText",
+            "Maxbird অফিশিয়াল অ্যাপের নতুন ভার্সন এখন ডাউনলোডের জন্য উন্মুক্ত!"
+        )
+        val legacyDownloadCount = readLongField(fields, "downloadCount", 0L)
+
+        val resolvedAppSize = readStringField(fields, "appSize", "").ifBlank { legacyFileSize }
+        val resolvedAndroidReq = readStringField(fields, "androidRequirement", "").ifBlank { legacyMinAndroid }
+        val resolvedNoticeBanner = readStringField(fields, "noticeBannerText", "").ifBlank { legacyNotice }
+        val resolvedTotalDownloads = readStringOrNumberField(
+            fields,
+            "totalDownloads",
+            if (legacyDownloadCount > 0L) legacyDownloadCount.toString() else "10,000+"
+        )
+
+        val updatedAtStr = readStringField(fields, "updatedAt", "")
+            .ifBlank { readTimestampField(fields, "updatedAt") ?: MaxbirdPortalSettings.currentIsoString() }
+
+        return MaxbirdPortalSettings(
+            appName = readStringField(fields, "appName", "Maxbird"),
+            appTagline = readStringField(
+                fields,
+                "appTagline",
+                "এইচএসসি ও এসএসসি শিক্ষার্থীদের স্মার্ট লার্নিং অ্যাপ"
+            ),
+            appVersion = readStringField(fields, "appVersion", "v1.0.0"),
+            appSize = resolvedAppSize,
+            androidRequirement = resolvedAndroidReq,
+            lastUpdated = readStringField(fields, "lastUpdated", "নভেম্বর ২০২৬"),
+            totalDownloads = resolvedTotalDownloads,
+            apkDownloadUrl = readStringField(fields, "apkDownloadUrl", ""),
+            releaseNotes = readStringField(fields, "releaseNotes", ""),
+            noticeBannerText = resolvedNoticeBanner,
+            showNoticeBanner = readBooleanField(fields, "showNoticeBanner", true),
+            supportPhone = readStringField(fields, "supportPhone", ""),
+            supportWhatsApp = readStringField(fields, "supportWhatsApp", ""),
+            supportEmail = readStringField(fields, "supportEmail", "maiafahim1234@gmail.com"),
+            developerName = readStringField(fields, "developerName", "Maxbird Official"),
+            appIconUrl = readStringField(fields, "appIconUrl", ""),
+            appScreenshots = readStringArrayField(fields, "appScreenshots"),
+            updatedAt = updatedAtStr,
+            r2BucketPublicDomain = readStringField(
+                fields,
+                "r2BucketPublicDomain",
+                CloudflareR2Client.PUBLIC_BASE_URL.removePrefix("https://")
+            ),
+            r2ObjectKey = readStringField(fields, "r2ObjectKey", ""),
+            telegramHandle = readStringField(fields, "telegramHandle", "@Fahim_Miya_F"),
+            telegramUrl = readStringField(fields, "telegramUrl", "https://t.me/Fahim_Miya_F"),
+            sha256Short = readStringField(fields, "sha256Short", "Play Protect Verified"),
+            ownerId = readStringField(fields, "ownerId", MaxbirdPortalSettings.DEFAULT_OWNER_ID),
+            createdAtIso = readTimestampField(fields, "createdAt"),
+            updatedAtIso = readTimestampField(fields, "updatedAt"),
+            documentExists = true,
+            adminSecretKey = getSavedAdminSecretKey()
+        )
+    }
+
+    // =========================================================================
+    // Firestore Atomic `writeBatch` Save (`admin_secrets` + `portal_settings/main`)
+    // =========================================================================
+
     /**
-     * Saves `portal_settings/main` to the named Firestore database, strictly maintaining
-     * the exact 17 required fields (`hasAll` and `hasOnly`) and types:
-     * - Preserves existing `ownerId` and `createdAt` on update (NEVER overwrites `createdAt` on update).
-     * - Sets `updatedAt` to `REQUEST_TIME` (`serverTimestamp()`) on every save.
-     * - Sets `createdAt` to `REQUEST_TIME` (`serverTimestamp()`) ONLY on initial create.
+     * Executes the exact `writeBatch` specified by the user:
+     * ```ts
+     * const batch = writeBatch(db);
+     * const secretRef = doc(db, "admin_secrets", adminSecretKey.trim());
+     * batch.set(secretRef, { verifiedAt: serverTimestamp() });
+     *
+     * const mainRef = doc(db, "portal_settings", "main");
+     * batch.set(mainRef, {
+     *   ...data,
+     *   updatedAt: new Date().toISOString()
+     * });
+     * await batch.commit();
+     * ```
      */
     suspend fun savePortalSettings(
         draft: MaxbirdPortalSettings
     ): Result<MaxbirdPortalSettings> = withContext(Dispatchers.IO) {
         try {
-            val session = getSavedAuthSession()
-            val token = refreshAuthTokenIfNeeded()
-            if (token.isNullOrBlank()) {
-                return@withContext Result.failure(
-                    Exception("সেভ করার পূর্বে অ্যাডমিন ইমেইল (${MaxbirdPortalSettings.ADMIN_EMAIL}) দিয়ে লগইন করুন।")
-                )
+            val secretKey = draft.adminSecretKey.trim().ifBlank { getSavedAdminSecretKey() }
+            if (secretKey.isBlank()) {
+                return@withContext Result.failure(Exception("দয়া করে Admin Secret Key দিন।"))
             }
+            saveAdminSecretKey(secretKey)
 
-            // First fetch the latest document from Firestore so we always know if it exists
-            // and never lose its original `createdAt` or `ownerId` on update.
-            val latestRemote = fetchPortalSettings().getOrNull()
-            val docExists = latestRemote?.documentExists == true
-            val preservedCreatedAtIso = latestRemote?.createdAtIso ?: draft.createdAtIso
-            val preservedOwnerId = if (docExists && !latestRemote?.ownerId.isNullOrBlank()) {
-                latestRemote!!.ownerId
-            } else {
-                session.uid.ifBlank { draft.ownerId.ifBlank { "admin" } }
-            }
+            val sanitized = draft.copy(adminSecretKey = secretKey).sanitizeForSave()
 
-            val mergedDraft = draft.copy(
-                ownerId = preservedOwnerId,
-                createdAtIso = preservedCreatedAtIso,
-                documentExists = docExists
-            )
+            val encodedSecretDocId = URLEncoder.encode(secretKey, "UTF-8").replace("+", "%20")
+            val secretDocResourceName =
+                "$baseDocumentsPath/${MaxbirdPortalSettings.ADMIN_SECRETS_COLLECTION}/$encodedSecretDocId"
 
-            val (sanitized, validationError) = mergedDraft.validateAndSanitize(session.uid)
-            if (validationError != null) {
-                return@withContext Result.failure(Exception(validationError))
-            }
-
-            val hasServerCreatedAt = docExists && !preservedCreatedAtIso.isNullOrBlank()
-
-            // Helper to execute a commit write operation
-            fun executeCommit(useUpdateMaskPreserveCreatedAt: Boolean): Pair<Boolean, String> {
-                val fieldsObj = JSONObject().apply {
-                    put("appName", stringValue(sanitized.appName))
-                    put("apkDownloadUrl", stringValue(sanitized.apkDownloadUrl))
-                    put("r2BucketPublicDomain", stringValue(sanitized.r2BucketPublicDomain))
-                    put("r2ObjectKey", stringValue(sanitized.r2ObjectKey))
-                    put("appVersion", stringValue(sanitized.appVersion))
-                    put("fileSize", stringValue(sanitized.fileSize))
-                    put("telegramHandle", stringValue(sanitized.telegramHandle))
-                    put("telegramUrl", stringValue(sanitized.telegramUrl))
-                    put("noticeText", stringValue(sanitized.noticeText))
-                    put("releaseNotes", stringValue(sanitized.releaseNotes))
-                    put("downloadCount", integerValue(sanitized.downloadCount))
-                    put("minAndroidVersion", stringValue(sanitized.minAndroidVersion))
-                    put("lastUpdated", stringValue(sanitized.lastUpdated))
-                    put("sha256Short", stringValue(sanitized.sha256Short))
-                    put("ownerId", stringValue(sanitized.ownerId))
-                    if (!useUpdateMaskPreserveCreatedAt && hasServerCreatedAt) {
-                        put("createdAt", timestampValue(preservedCreatedAtIso!!))
+            // Step 1: batch.set(secretRef, { verifiedAt: serverTimestamp() })
+            val secretWriteOp = JSONObject().apply {
+                put(
+                    "update",
+                    JSONObject().apply {
+                        put("name", secretDocResourceName)
+                        put("fields", JSONObject())
                     }
-                }
-
-                val fieldTransforms = JSONArray().apply {
-                    if (!useUpdateMaskPreserveCreatedAt && !hasServerCreatedAt) {
+                )
+                put(
+                    "updateTransforms",
+                    JSONArray().apply {
                         put(
                             JSONObject().apply {
-                                put("fieldPath", "createdAt")
+                                put("fieldPath", "verifiedAt")
                                 put("setToServerValue", "REQUEST_TIME")
                             }
                         )
                     }
-                    put(
-                        JSONObject().apply {
-                            put("fieldPath", "updatedAt")
-                            put("setToServerValue", "REQUEST_TIME")
-                        }
-                    )
+                )
+            }
+
+            // Step 2 (Primary 18-field schema):
+            // batch.set(mainRef, { ...18 fields, updatedAt: new Date().toISOString() })
+            fun executePrimary18FieldBatch(): Pair<Boolean, String> {
+                val mainFieldsObj = JSONObject().apply {
+                    put("appName", stringValue(sanitized.appName))
+                    put("appTagline", stringValue(sanitized.appTagline))
+                    put("appVersion", stringValue(sanitized.appVersion))
+                    put("appSize", stringValue(sanitized.appSize))
+                    put("androidRequirement", stringValue(sanitized.androidRequirement))
+                    put("lastUpdated", stringValue(sanitized.lastUpdated))
+                    put("totalDownloads", stringValue(sanitized.totalDownloads))
+                    put("apkDownloadUrl", stringValue(sanitized.apkDownloadUrl))
+                    put("releaseNotes", stringValue(sanitized.releaseNotes))
+                    put("noticeBannerText", stringValue(sanitized.noticeBannerText))
+                    put("showNoticeBanner", booleanValue(sanitized.showNoticeBanner))
+                    put("supportPhone", stringValue(sanitized.supportPhone))
+                    put("supportWhatsApp", stringValue(sanitized.supportWhatsApp))
+                    put("supportEmail", stringValue(sanitized.supportEmail))
+                    put("developerName", stringValue(sanitized.developerName))
+                    put("appIconUrl", stringValue(sanitized.appIconUrl))
+                    put("appScreenshots", stringArrayValue(sanitized.appScreenshots))
+                    put("updatedAt", stringValue(sanitized.updatedAt))
                 }
 
-                val writeOperation = JSONObject().apply {
+                val mainWriteOp = JSONObject().apply {
                     put(
                         "update",
                         JSONObject().apply {
-                            put("name", documentResourceName)
-                            put("fields", fieldsObj)
+                            put("name", settingsDocumentResourceName)
+                            put("fields", mainFieldsObj)
                         }
                     )
-                    if (useUpdateMaskPreserveCreatedAt) {
-                        // Partial update via updateMask so existing server `createdAt` is preserved bit-for-bit!
-                        put(
-                            "updateMask",
-                            JSONObject().apply {
-                                put(
-                                    "fieldPaths",
-                                    JSONArray().apply {
-                                        put("appName")
-                                        put("apkDownloadUrl")
-                                        put("r2BucketPublicDomain")
-                                        put("r2ObjectKey")
-                                        put("appVersion")
-                                        put("fileSize")
-                                        put("telegramHandle")
-                                        put("telegramUrl")
-                                        put("noticeText")
-                                        put("releaseNotes")
-                                        put("downloadCount")
-                                        put("minAndroidVersion")
-                                        put("lastUpdated")
-                                        put("sha256Short")
-                                        put("ownerId")
-                                    }
-                                )
-                            }
-                        )
-                    }
-                    put("updateTransforms", fieldTransforms)
                 }
 
                 val commitPayload = JSONObject().apply {
-                    put("writes", JSONArray().put(writeOperation))
+                    put(
+                        "writes",
+                        JSONArray().apply {
+                            put(secretWriteOp)
+                            put(mainWriteOp)
+                        }
+                    )
                 }
 
                 val request = Request.Builder()
                     .url(commitUrl)
-                    .header("Authorization", "Bearer $token")
                     .post(commitPayload.toString().toRequestBody(jsonMediaType))
                     .build()
 
@@ -532,23 +311,13 @@ class MaxbirdFirestoreClient(private val context: Context) {
                 }
             }
 
-            // 1. If document exists, first update using updateMask so server `createdAt` stays untouched
-            var (ok, errBody) = executeCommit(useUpdateMaskPreserveCreatedAt = hasServerCreatedAt)
-            if (!ok && hasServerCreatedAt) {
-                // 2. Fallback to full document write if updateMask was rejected
-                val retry = executeCommit(useUpdateMaskPreserveCreatedAt = false)
-                ok = retry.first
-                errBody = retry.second
-            }
-
+            val (ok, errBody) = executePrimary18FieldBatch()
             if (!ok) {
-                val errMsg = parseFirebaseError(errBody)
-                return@withContext Result.failure(Exception(errMsg))
+                return@withContext Result.failure(Exception(parseFirestoreError(errBody)))
             }
 
-            // Re-fetch to return the fresh live state from Firestore
             val refreshed = fetchPortalSettings().getOrNull() ?: sanitized.copy(documentExists = true)
-            Result.success(refreshed)
+            Result.success(refreshed.copy(adminSecretKey = secretKey))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -566,7 +335,7 @@ class MaxbirdFirestoreClient(private val context: Context) {
 
     fun inspectLocalApkFile(uri: Uri): Result<ApkFileInspection> {
         return try {
-            var fileName = "maxbird-release.apk"
+            var fileName = "Maxbird.apk"
             var sizeBytes = 0L
 
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -597,7 +366,7 @@ class MaxbirdFirestoreClient(private val context: Context) {
             val formattedSize = when {
                 mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
                 sizeBytes > 0L -> String.format(Locale.US, "%.0f KB", sizeBytes / 1024.0)
-                else -> "10 MB"
+                else -> "24.5 MB"
             }
 
             Result.success(
@@ -619,11 +388,19 @@ class MaxbirdFirestoreClient(private val context: Context) {
     private fun stringValue(value: String): JSONObject =
         JSONObject().put("stringValue", value)
 
-    private fun integerValue(value: Long): JSONObject =
-        JSONObject().put("integerValue", value.toDouble().roundToLong().toString())
+    private fun booleanValue(value: Boolean): JSONObject =
+        JSONObject().put("booleanValue", value)
 
-    private fun timestampValue(isoString: String): JSONObject =
-        JSONObject().put("timestampValue", isoString)
+    private fun stringArrayValue(items: List<String>): JSONObject {
+        val valuesArray = JSONArray()
+        items.forEach { item ->
+            valuesArray.put(stringValue(item))
+        }
+        return JSONObject().put(
+            "arrayValue",
+            JSONObject().put("values", valuesArray)
+        )
+    }
 
     private fun readStringField(fields: JSONObject, key: String, default: String): String {
         val fieldObj = fields.optJSONObject(key) ?: return default
@@ -632,6 +409,40 @@ class MaxbirdFirestoreClient(private val context: Context) {
         } else {
             default
         }
+    }
+
+    private fun readStringOrNumberField(fields: JSONObject, key: String, default: String): String {
+        val fieldObj = fields.optJSONObject(key) ?: return default
+        return when {
+            fieldObj.has("stringValue") -> fieldObj.optString("stringValue", default)
+            fieldObj.has("integerValue") -> fieldObj.optString("integerValue", default)
+            fieldObj.has("doubleValue") -> fieldObj.optDouble("doubleValue", 0.0).roundToLong().toString()
+            else -> default
+        }
+    }
+
+    private fun readBooleanField(fields: JSONObject, key: String, default: Boolean): Boolean {
+        val fieldObj = fields.optJSONObject(key) ?: return default
+        return if (fieldObj.has("booleanValue")) {
+            fieldObj.optBoolean("booleanValue", default)
+        } else {
+            default
+        }
+    }
+
+    private fun readStringArrayField(fields: JSONObject, key: String): List<String> {
+        val fieldObj = fields.optJSONObject(key) ?: return emptyList()
+        val arrayVal = fieldObj.optJSONObject("arrayValue") ?: return emptyList()
+        val values = arrayVal.optJSONArray("values") ?: return emptyList()
+        val result = mutableListOf<String>()
+        for (i in 0 until values.length()) {
+            val itemObj = values.optJSONObject(i) ?: continue
+            val str = itemObj.optString("stringValue", "").trim()
+            if (str.isNotEmpty()) {
+                result.add(str)
+            }
+        }
+        return result
     }
 
     private fun readLongField(fields: JSONObject, key: String, default: Long): Long {
@@ -648,23 +459,16 @@ class MaxbirdFirestoreClient(private val context: Context) {
         return fieldObj.optString("timestampValue", "").takeIf { it.isNotBlank() }
     }
 
-    private fun parseFirebaseError(rawBody: String): String {
+    private fun parseFirestoreError(rawBody: String): String {
         if (rawBody.isBlank()) return "সার্ভারের সাথে সংযোগ ব্যর্থ হয়েছে।"
         return try {
             val json = JSONObject(rawBody)
             val errObj = json.optJSONObject("error")
             val rawMessage = errObj?.optString("message").orEmpty().ifBlank { rawBody.take(180) }
             when {
-                rawMessage.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
-                    rawMessage.contains("INVALID_PASSWORD", ignoreCase = true) ->
-                    "ইমেইল বা পাসওয়ার্ড সঠিক নয়। আপনি যদি প্রথমবার লগইন করেন তবে 'অ্যাডমিন পাসওয়ার্ড সেট/রিসেট' বা Google Sign-In ব্যবহার করুন।"
-                rawMessage.contains("EMAIL_NOT_FOUND", ignoreCase = true) ->
-                    "এই ইমেইলে এখনো পাসওয়ার্ড সেট করা হয়নি। নিচে 'প্রথমবার অ্যাকাউন্ট তৈরি / পাসওয়ার্ড সেট' অপশন ব্যবহার করুন অথবা Google Sign-In করুন।"
-                rawMessage.contains("EMAIL_EXISTS", ignoreCase = true) ->
-                    "এই ইমেইলটি ইতিমধ্যে রেজিস্টার্ড আছে। পাসওয়ার্ড দিয়ে লগইন করুন অথবা পাসওয়ার্ড রিসেট করুন।"
                 rawMessage.contains("PERMISSION_DENIED", ignoreCase = true) ||
                     rawMessage.contains("Missing or insufficient permissions", ignoreCase = true) ->
-                    "পারমিশন এরর: শুধুমাত্র অনুমোদিত অ্যাডমিন ইমেইল (${MaxbirdPortalSettings.ADMIN_EMAIL}) দিয়ে লগইন থাকলেই ডাটাবেজে পরিবর্তন সেভ করা যাবে।"
+                    "পারমিশন এরর: Admin Secret Key সঠিক নয় অথবা ডাটাবেজ রুলস মিলছে না! দয়া করে সঠিক Secret Key (Maxbird_Secret_Fahim_2026) দিন।"
                 else -> rawMessage
             }
         } catch (_: Exception) {

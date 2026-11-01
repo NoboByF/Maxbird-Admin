@@ -2284,11 +2284,14 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _isLoadingMaxbirdPortal.value = true
-                _maxbirdAuthSession.value = maxbirdFirestoreClient.getSavedAuthSession()
+                _maxbirdAuthSession.value = maxbirdFirestoreClient.ensureAutoConnectedSession()
                 val res = maxbirdFirestoreClient.fetchPortalSettings()
                 if (res.isSuccess) {
                     res.getOrNull()?.let { loaded ->
-                        _maxbirdPortalSettings.value = loaded
+                        val currentSecret = _maxbirdPortalSettings.value.adminSecretKey
+                            .takeIf { it.isNotBlank() }
+                            ?: loaded.adminSecretKey
+                        _maxbirdPortalSettings.value = loaded.copy(adminSecretKey = currentSecret)
                     }
                 }
             } catch (_: Throwable) {
@@ -2419,10 +2422,10 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         if (res.isSuccess) {
             val info = res.getOrNull()!!
             val current = _maxbirdPortalSettings.value
-            val autoUrl = MaxbirdPortalSettings.autoBuildR2Url(current.r2BucketPublicDomain, info.fileName)
+            val autoUrl = MaxbirdPortalSettings.autoBuildR2Url(current.r2BucketPublicDomain, "apk/${info.fileName}")
             val updated = current.copy(
-                fileSize = info.fileSizeFormatted,
-                r2ObjectKey = info.fileName.take(300),
+                appSize = info.fileSizeFormatted,
+                r2ObjectKey = "apk/${info.fileName}".take(300),
                 apkDownloadUrl = if (autoUrl.isNotEmpty()) autoUrl else current.apkDownloadUrl
             )
             _maxbirdPortalSettings.value = updated
@@ -2598,7 +2601,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
                 // 7. Maxbird APK Share Website (`portal_settings/main`)
                 val webRes = maxbirdFirestoreClient.fetchPortalSettings()
-                val webSession = maxbirdFirestoreClient.getSavedAuthSession()
                 val webDoc = webRes.getOrNull()
                 checks.add(
                     SyncDiagnosticCheckItem(
@@ -2606,8 +2608,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                         titleBn = "৭. APK শেয়ার ওয়েবসাইট কন্ট্রোল (maxbird.pages.dev • Firestore)",
                         isSuccess = webRes.isSuccess,
                         detailBn = if (webRes.isSuccess && webDoc != null) {
-                            val authTag = if (webSession.isSignedIn) "অ্যাডমিন লগইন: ${webSession.email}" else "লগইন প্রয়োজন (ওয়েবসাইট ট্যাব থেকে)"
-                            "✅ কানেক্টেড • ভার্সন: ${webDoc.appVersion} • ডাউনলোড: ${webDoc.downloadCount} • $authTag"
+                            "✅ কানেক্টেড (Live Sync) • ভার্সন: ${webDoc.appVersion} • ডাউনলোড: ${webDoc.downloadCount} • Secret Key সক্রিয়"
                         } else {
                             "❌ ওয়েবসাইট ডাটাবেস কানেকশন ত্রুটি: ${webRes.exceptionOrNull()?.message}"
                         }

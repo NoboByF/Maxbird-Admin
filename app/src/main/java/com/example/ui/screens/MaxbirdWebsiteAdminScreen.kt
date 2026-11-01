@@ -1,24 +1,17 @@
 package com.example.ui.screens
 
-import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,34 +25,29 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Android
-import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Logout
-import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -68,24 +56,28 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -98,17 +90,16 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
+import coil.compose.AsyncImage
+import com.example.data.api.CloudflareR2Client
 import com.example.data.model.MaxbirdAdminAuthSession
 import com.example.data.model.MaxbirdPortalSettings
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CoralDanger
 import com.example.ui.theme.ElectricBlue
-import com.example.ui.theme.ElectricBlueLight
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.PurpleRoyal
-import com.example.ui.theme.Sky500
 import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate600
@@ -117,13 +108,16 @@ import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate850
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
-import kotlin.math.roundToLong
+import kotlinx.coroutines.launch
+import java.util.Locale
 
 /**
- * Dedicated "Maxbird Admin Control Panel" Screen to manage the public Maxbird website
- * (`https://maxbird.pages.dev`) via Firebase Project `empirical-envelope-b0z9n`
- * and Named Firestore Database `ai-studio-edusmartappporta-6327637e-4b8d-4e4e-be1d-92bc33269fa0`,
- * document `portal_settings/main`.
+ * Upgraded Maxbird Website Admin Panel (`https://maxbird.pages.dev`).
+ * Controls:
+ * 1. Direct Cloudflare R2 (`maxbird` bucket) APK file upload, replace & delete with live progress bar
+ * 2. Play Store-style App Icon (`appIconUrl`) & Screenshots Gallery (`appScreenshots`, up to 15 images)
+ *    with upload, replace, delete (from both R2 and Firestore), reorder, and manual URL entry
+ * 3. All 18 required `portal_settings/main` fields saved atomically via `writeBatch` + Secret Key (`Maxbird_Secret_Fahim_2026`)
  */
 @Composable
 fun MaxbirdWebsiteAdminScreen(
@@ -146,1856 +140,1702 @@ fun MaxbirdWebsiteAdminScreen(
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val coroutineScope = rememberCoroutineScope()
+    val r2Client = remember(context) { CloudflareR2Client(context) }
 
-    // 0 = Native Android Control Panel, 1 = Embedded Live Firebase Web SDK Mode
-    var selectedViewMode by remember { mutableIntStateOf(0) }
+    // Secret key visibility toggle
+    var secretKeyVisible by remember { mutableStateOf(false) }
 
-    // Download count edit dialog state
-    var showDownloadCountDialog by remember { mutableStateOf(false) }
-    var downloadCountInput by remember(settings.downloadCount) {
-        mutableStateOf(settings.downloadCount.toString())
-    }
+    // R2 APK Upload State
+    var isUploadingApk by remember { mutableStateOf(false) }
+    var apkUploadProgress by remember { mutableIntStateOf(0) }
+    var apkUploadStatusText by remember { mutableStateOf("") }
+    var autoReplaceOldApkInR2 by remember { mutableStateOf(true) }
 
-    // Auth form state
-    var emailInput by remember { mutableStateOf(MaxbirdPortalSettings.ADMIN_EMAIL) }
-    var passwordInput by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
-    var showTokenInputSection by remember { mutableStateOf(false) }
-    var manualTokenInput by remember { mutableStateOf("") }
-    var showAuthorizedDomainsHelp by remember { mutableStateOf(false) }
+    // R2 Icon & Screenshot Upload State
+    var isUploadingMedia by remember { mutableStateOf(false) }
+    var mediaUploadStatusText by remember { mutableStateOf("") }
+    var screenshotIndexToReplace by remember { mutableIntStateOf(-1) }
+    var manualScreenshotUrlInput by remember { mutableStateOf("") }
 
-    // Local .APK File Picker Launcher
-    val apkPickerLauncher = rememberLauncherForActivityResult(
+    // 1. Launcher: Direct APK Upload to Cloudflare R2 (`apk/Maxbird-vX.X.apk`)
+    val r2ApkUploadLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            onInspectLocalApkUri(uri)
+            coroutineScope.launch {
+                isUploadingApk = true
+                apkUploadProgress = 0
+                val meta = r2Client.inspectUriMetadata(uri)
+                val cleanVersion = settings.appVersion
+                    .trim()
+                    .ifEmpty { "v1.0.0" }
+                    .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                val targetKey = "apk/Maxbird-$cleanVersion-${System.currentTimeMillis() / 1000}.apk"
+                val previousApkUrl = settings.apkDownloadUrl
+
+                apkUploadStatusText = "প্রস্তুত করা হচ্ছে: ${meta.fileName} (${meta.fileSizeFormatted})..."
+
+                val uploadRes = r2Client.uploadUriToR2(
+                    uri = uri,
+                    targetFileKey = targetKey,
+                    contentTypeOverride = "application/vnd.android.package-archive",
+                    onProgress = { pct, uploaded, total ->
+                        apkUploadProgress = pct
+                        val upMb = String.format(Locale.US, "%.1f", uploaded / (1024.0 * 1024.0))
+                        val totMb = String.format(Locale.US, "%.1f", total / (1024.0 * 1024.0))
+                        apkUploadStatusText = "R2-তে APK আপলোড হচ্ছে: $pct% ($upMb MB / $totMb MB)"
+                    }
+                )
+
+                if (uploadRes.isSuccess) {
+                    val info = uploadRes.getOrNull()!!
+                    // If autoReplaceOldApkInR2 is enabled and old URL was on R2, delete old APK object from R2
+                    if (autoReplaceOldApkInR2 &&
+                        previousApkUrl.isNotBlank() &&
+                        previousApkUrl != info.publicUrl &&
+                        CloudflareR2Client.extractFileKeyFromPublicUrl(previousApkUrl) != null
+                    ) {
+                        apkUploadStatusText = "পুরনো APK ফাইল R2 থেকে ডিলিট করা হচ্ছে..."
+                        r2Client.deleteObjectFromR2(previousApkUrl)
+                    }
+
+                    val updatedSettings = settings.copy(
+                        apkDownloadUrl = info.publicUrl,
+                        appSize = info.fileSizeFormatted,
+                        r2ObjectKey = info.fileKey
+                    )
+                    onUpdateDraft(updatedSettings)
+                    onSaveToFirestore(updatedSettings)
+                    apkUploadStatusText = "✅ APK সফলভাবে R2-তে আপলোড ও ওয়েবসাইটে লাইভ সেভ হয়েছে!"
+                    onShowToast("✅ নতুন APK আপলোড সম্পন্ন (${info.fileSizeFormatted})!")
+                } else {
+                    val err = uploadRes.exceptionOrNull()?.message ?: "APK আপলোড ব্যর্থ হয়েছে"
+                    apkUploadStatusText = "❌ $err"
+                    onShowToast("⚠️ $err")
+                }
+                isUploadingApk = false
+            }
         }
     }
 
-    // Dialog to edit or reset Download Counter
-    if (showDownloadCountDialog) {
-        AlertDialog(
-            onDismissRequest = { showDownloadCountDialog = false },
-            containerColor = Slate850,
-            title = {
-                Text(
-                    text = "ডাউনলোড কাউন্টার এডিট / রিসেট",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "ওয়েবসাইটে দেখানো মোট ডাউনলোড সংখ্যা পরিবর্তন করুন বা 0-তে রিসেট করুন (0 থেকে 100,000,000):",
-                        color = Slate200,
-                        fontSize = 13.sp
-                    )
-                    OutlinedTextField(
-                        value = downloadCountInput,
-                        onValueChange = { raw ->
-                            downloadCountInput = raw.filter { it.isDigit() }.take(9)
-                        },
-                        label = { Text("ডাউনলোড সংখ্যা (downloadCount)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        colors = adminTextFieldColors(),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        OutlinedButton(
-                            onClick = { downloadCountInput = "0" },
-                            border = BorderStroke(1.dp, CoralDanger.copy(alpha = 0.6f)),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.RestartAlt,
-                                contentDescription = null,
-                                tint = CoralDanger,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("রিসেট (0)", color = CoralDanger, fontSize = 12.sp)
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                val next = (downloadCountInput.toLongOrNull() ?: settings.downloadCount) + 100L
-                                downloadCountInput = next.coerceAtMost(100_000_000L).toString()
-                            },
-                            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("+১০০ যোগ", color = NeonCyan, fontSize = 12.sp)
-                        }
+    // 2. Launcher: Upload App Icon (`icons/icon-xxx.png`) to Cloudflare R2
+    val r2IconUploadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                isUploadingMedia = true
+                val meta = r2Client.inspectUriMetadata(uri)
+                val ext = meta.fileName.substringAfterLast('.', "png").lowercase(Locale.US).take(4)
+                val targetKey = "icons/app-icon-${System.currentTimeMillis()}.$ext"
+                val oldIconUrl = settings.appIconUrl
+                mediaUploadStatusText = "অ্যাপ আইকন R2-তে আপলোড হচ্ছে..."
+
+                val res = r2Client.uploadUriToR2(
+                    uri = uri,
+                    targetFileKey = targetKey,
+                    onProgress = { pct, _, _ ->
+                        mediaUploadStatusText = "অ্যাপ আইকন আপলোড হচ্ছে ($pct%)..."
                     }
+                )
+                if (res.isSuccess) {
+                    val info = res.getOrNull()!!
+                    if (oldIconUrl.isNotBlank() &&
+                        oldIconUrl != info.publicUrl &&
+                        CloudflareR2Client.extractFileKeyFromPublicUrl(oldIconUrl) != null
+                    ) {
+                        r2Client.deleteObjectFromR2(oldIconUrl)
+                    }
+                    val updated = settings.copy(appIconUrl = info.publicUrl)
+                    onUpdateDraft(updated)
+                    onSaveToFirestore(updated)
+                    mediaUploadStatusText = "✅ অ্যাপ আইকন আপলোড ও সেভ সম্পন্ন!"
+                    onShowToast("✅ নতুন অ্যাপ আইকন আপলোড হয়েছে!")
+                } else {
+                    val err = res.exceptionOrNull()?.message ?: "আইকন আপলোড ব্যর্থ"
+                    mediaUploadStatusText = "❌ $err"
+                    onShowToast("⚠️ $err")
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val parsed = (downloadCountInput.toDoubleOrNull() ?: 0.0)
-                            .roundToLong()
-                            .coerceIn(0L, 100_000_000L)
-                        val updated = settings.copy(downloadCount = parsed)
-                        onUpdateDraft(updated)
-                        showDownloadCountDialog = false
-                        if (authSession.isSignedIn) {
-                            onSaveToFirestore(updated)
-                        } else {
-                            onShowToast("ডাউনলোড সংখ্যা $parsed সেট করা হয়েছে। লাইভ করতে সেভ বাটনে চাপুন।")
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
-                ) {
-                    Text("আপডেট করুন", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDownloadCountDialog = false }) {
-                    Text("বাতিল", color = Slate400)
-                }
+                isUploadingMedia = false
             }
-        )
+        }
     }
 
-    Column(
+    // 3. Launcher: Upload Multiple Screenshots (`screenshots/screen-xxx.jpg`) to Cloudflare R2
+    val r2MultipleScreenshotsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            coroutineScope.launch {
+                val currentList = settings.appScreenshots.toMutableList()
+                val remainingSlots = (MaxbirdPortalSettings.MAX_SCREENSHOTS - currentList.size).coerceAtLeast(0)
+                if (remainingSlots <= 0) {
+                    onShowToast("⚠️ সর্বোচ্চ ১৫টি স্ক্রিনশট যোগ করা যায়।")
+                    return@launch
+                }
+                val toUpload = uris.take(remainingSlots)
+                isUploadingMedia = true
+                var uploadedCount = 0
+
+                for ((idx, uri) in toUpload.withIndex()) {
+                    val meta = r2Client.inspectUriMetadata(uri)
+                    val ext = meta.fileName.substringAfterLast('.', "jpg").lowercase(Locale.US).take(4)
+                    val targetKey = "screenshots/screenshot-${System.currentTimeMillis()}-$idx.$ext"
+                    mediaUploadStatusText = "স্ক্রিনশট আপলোড হচ্ছে (${idx + 1}/${toUpload.size})..."
+
+                    val res = r2Client.uploadUriToR2(uri = uri, targetFileKey = targetKey)
+                    if (res.isSuccess) {
+                        currentList.add(res.getOrNull()!!.publicUrl)
+                        uploadedCount++
+                    }
+                }
+
+                if (uploadedCount > 0) {
+                    val updated = settings.copy(appScreenshots = currentList.take(MaxbirdPortalSettings.MAX_SCREENSHOTS))
+                    onUpdateDraft(updated)
+                    onSaveToFirestore(updated)
+                    mediaUploadStatusText = "✅ $uploadedCount টি স্ক্রিনশট R2-তে আপলোড ও সেভ হয়েছে!"
+                    onShowToast("✅ $uploadedCount টি স্ক্রিনশট যুক্ত হয়েছে!")
+                } else {
+                    mediaUploadStatusText = "❌ স্ক্রিনশট আপলোড ব্যর্থ হয়েছে।"
+                }
+                isUploadingMedia = false
+            }
+        }
+    }
+
+    // 4. Launcher: Replace a Single Screenshot at `screenshotIndexToReplace`
+    val r2ReplaceSingleScreenshotLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        val replaceIdx = screenshotIndexToReplace
+        if (uri != null && replaceIdx in settings.appScreenshots.indices) {
+            coroutineScope.launch {
+                isUploadingMedia = true
+                val oldUrl = settings.appScreenshots[replaceIdx]
+                val meta = r2Client.inspectUriMetadata(uri)
+                val ext = meta.fileName.substringAfterLast('.', "jpg").lowercase(Locale.US).take(4)
+                val targetKey = "screenshots/screenshot-${System.currentTimeMillis()}-replace-$replaceIdx.$ext"
+                mediaUploadStatusText = "স্ক্রিনশট #${replaceIdx + 1} রিপ্লেস হচ্ছে..."
+
+                val res = r2Client.uploadUriToR2(uri = uri, targetFileKey = targetKey)
+                if (res.isSuccess) {
+                    val newUrl = res.getOrNull()!!.publicUrl
+                    if (CloudflareR2Client.extractFileKeyFromPublicUrl(oldUrl) != null) {
+                        r2Client.deleteObjectFromR2(oldUrl)
+                    }
+                    val mutable = settings.appScreenshots.toMutableList()
+                    if (replaceIdx in mutable.indices) {
+                        mutable[replaceIdx] = newUrl
+                    }
+                    val updated = settings.copy(appScreenshots = mutable)
+                    onUpdateDraft(updated)
+                    onSaveToFirestore(updated)
+                    mediaUploadStatusText = "✅ স্ক্রিনশট #${replaceIdx + 1} সফলভাবে রিপ্লেস হয়েছে!"
+                    onShowToast("✅ স্ক্রিনশট #${replaceIdx + 1} রিপ্লেস সম্পন্ন!")
+                } else {
+                    val err = res.exceptionOrNull()?.message ?: "রিপ্লেস ব্যর্থ"
+                    mediaUploadStatusText = "❌ $err"
+                    onShowToast("⚠️ $err")
+                }
+                screenshotIndexToReplace = -1
+                isUploadingMedia = false
+            }
+        }
+    }
+
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(Slate900)
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Top Mode Bar: Switch between Native Android Panel & Live Firebase Web SDK Panel
-        Surface(
-            color = Slate950,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
+        item { Spacer(modifier = Modifier.height(4.dp)) }
+
+        // =====================================================================
+        // TOP HERO CARD + BIG "💾 সব পরিবর্তন ওয়েবসাইটে সেভ করুন" BUTTON
+        // =====================================================================
+        item {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate850),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .border(
+                        1.dp,
+                        Brush.horizontalGradient(listOf(EmeraldSuccess, NeonCyan)),
+                        RoundedCornerShape(18.dp)
+                    )
             ) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (selectedViewMode == 0) ElectricBlue else Slate800,
-                    border = BorderStroke(
-                        1.dp,
-                        if (selectedViewMode == 0) NeonCyan else Slate700
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { selectedViewMode = 0 }
-                        .testTag("tab_maxbird_native_mode")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(vertical = 9.dp, horizontal = 10.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Android,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "নেটিভ কন্ট্রোল প্যানেল",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (selectedViewMode == 1) PurpleRoyal else Slate800,
-                    border = BorderStroke(
-                        1.dp,
-                        if (selectedViewMode == 1) NeonCyan else Slate700
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { selectedViewMode = 1 }
-                        .testTag("tab_maxbird_websdk_mode")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(vertical = 9.dp, horizontal = 10.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Language,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Web SDK + Google Login",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        if (selectedViewMode == 1) {
-            // Embedded Live Firebase Web SDK Mode (uses exact firebase/app, firebase/auth, firebase/firestore)
-            EmbeddedFirebaseWebSdkPanel(
-                onAuthReceived = { uid, email, displayName, photoUrl, idToken, refreshToken ->
-                    onWebSdkAuthReceived(uid, email, displayName, photoUrl, idToken, refreshToken)
-                },
-                onSwitchToNative = {
-                    selectedViewMode = 0
-                    onRefreshFromFirestore()
-                }
-            )
-            return@Column
-        }
-
-        // Native Android Control Panel Mode
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
-
-            // 1. Hero Banner: Maxbird Admin Control Panel & Named Firestore Database Status
-            item {
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = Slate850),
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(
-                            1.dp,
-                            Brush.horizontalGradient(listOf(ElectricBlue, NeonCyan)),
-                            RoundedCornerShape(18.dp)
-                        )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(ElectricBlue.copy(alpha = 0.16f), Slate850)
-                                )
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(EmeraldSuccess.copy(alpha = 0.15f), Slate850)
                             )
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        )
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(42.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Brush.linearGradient(listOf(ElectricBlue, NeonCyan))),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Language,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                                Column {
-                                    Text(
-                                        text = "Maxbird Admin Control Panel",
-                                        style = MaterialTheme.typography.titleMedium.copy(
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Color.White
-                                        )
-                                    )
-                                    Text(
-                                        text = "ওয়েবসাইট: maxbird.pages.dev • Firestore Live Sync",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = NeonCyan,
-                                            fontSize = 11.sp
-                                        )
-                                    )
-                                }
-                            }
-
-                            IconButton(
-                                onClick = onRefreshFromFirestore,
+                            Box(
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Slate800)
-                                    .testTag("btn_refresh_maxbird_firestore")
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Brush.linearGradient(listOf(EmeraldSuccess, ElectricBlue))),
+                                contentAlignment = Alignment.Center
                             ) {
-                                if (isLoading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = NeonCyan
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "Refresh",
-                                        tint = NeonCyan,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        // Database & Document Path Pill
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = Slate950,
-                            border = BorderStroke(1.dp, Slate700),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(3.dp)
-                            ) {
-                                Text(
-                                    text = "Project: ${MaxbirdPortalSettings.FIREBASE_PROJECT_ID} • Doc: portal_settings/main",
-                                    color = EmeraldSuccess,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
+                                Icon(
+                                    imageVector = Icons.Default.Language,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
                                 )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "DB: ${MaxbirdPortalSettings.FIRESTORE_DATABASE_ID}",
-                                    color = Slate400,
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
+                                    text = "Maxbird ওয়েবসাইট ও R2 কন্ট্রোল",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color.White
+                                    ),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = EmeraldSuccess.copy(alpha = 0.16f),
+                                    border = BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.6f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .clip(CircleShape)
+                                                .background(EmeraldSuccess)
+                                        )
+                                        Text(
+                                            text = "ডাটাবেজ ও R2 কানেক্টেড (Live Sync)",
+                                            color = EmeraldSuccess,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
                             }
                         }
 
-                        if (!lastSyncMessage.isNullOrBlank()) {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = EmeraldSuccess.copy(alpha = 0.15f),
-                                border = BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.5f)),
-                                modifier = Modifier.fillMaxWidth()
+                        IconButton(
+                            onClick = onRefreshFromFirestore,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(Slate800)
+                                .testTag("btn_refresh_maxbird_firestore")
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = NeonCyan
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh",
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Prominent Top Save Button: "💾 সব পরিবর্তন ওয়েবসাইটে সেভ করুন"
+                    Button(
+                        onClick = { onSaveToFirestore(settings) },
+                        enabled = !isSaving && !isUploadingApk && !isUploadingMedia,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EmeraldSuccess,
+                            disabledContainerColor = Slate700
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("btn_top_save_maxbird_portal_settings")
+                    ) {
+                        if (isSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "ওয়েবসাইটে লাইভ সেভ হচ্ছে...",
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Save,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "💾 সব পরিবর্তন ওয়েবসাইটে সেভ করুন",
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+
+                    // Live Website Preview Link Button
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(MaxbirdPortalSettings.PUBLIC_WEBSITE_URL))
+                                )
+                            } catch (_: Exception) {
+                                onShowToast("ব্রাউজার ওপেন করা যায়নি")
+                            }
+                        },
+                        border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.65f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("btn_open_maxbird_website")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            tint = NeonCyan,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "পাবলিক ওয়েবসাইট দেখুন (maxbird.pages.dev)",
+                            color = NeonCyan,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    if (!lastSyncMessage.isNullOrBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = EmeraldSuccess.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.CloudDone,
-                                        contentDescription = null,
-                                        tint = EmeraldSuccess,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = lastSyncMessage,
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.Default.CloudDone,
+                                    contentDescription = null,
+                                    tint = EmeraldSuccess,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = lastSyncMessage,
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
                         }
                     }
                 }
             }
+        }
 
-            // 2. Authentication (Admin Login) Card — maiafahim1234@gmail.com
-            item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Slate800),
+        // =====================================================================
+        // SECTION 1: APK ফাইল ম্যানেজার (Cloudflare R2 + Firebase)
+        // =====================================================================
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate800),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, ElectricBlue.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(
-                            1.dp,
-                            if (authSession.isSignedIn && authSession.isAuthorizedAdminEmail)
-                                EmeraldSuccess.copy(alpha = 0.5f)
-                            else
-                                AmberWarning.copy(alpha = 0.5f),
-                            RoundedCornerShape(16.dp)
-                        )
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudUpload,
+                            contentDescription = null,
+                            tint = NeonCyan,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "১. APK ফাইল ম্যানেজার (Cloudflare R2 + Firebase)",
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                text = "সরাসরি R2 বাকেটে (apk/Maxbird-vX.X.apk) নতুন APK আপলোড, রিপ্লেস ও ডিলিট করুন",
+                                color = Slate400,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    // Toggle: Auto-delete old APK from R2 when uploading a new one
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Slate900,
+                        border = BorderStroke(1.dp, Slate700),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (authSession.isSignedIn)
-                                        Icons.Default.VerifiedUser
-                                    else
-                                        Icons.Default.Security,
-                                    contentDescription = null,
-                                    tint = if (authSession.isSignedIn) EmeraldSuccess else AmberWarning,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Column {
-                                    Text(
-                                        text = "অ্যাডমিন অথেনটিকেশন (Firebase Auth)",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp
-                                    )
-                                    Text(
-                                        text = "অনুমোদিত অ্যাডমিন ইমেইল: ${MaxbirdPortalSettings.ADMIN_EMAIL}",
-                                        color = NeonCyan,
-                                        fontSize = 11.sp
-                                    )
-                                }
-                            }
-
-                            if (authSession.isSignedIn) {
-                                OutlinedButton(
-                                    onClick = onSignOut,
-                                    border = BorderStroke(1.dp, CoralDanger.copy(alpha = 0.6f)),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.testTag("btn_maxbird_admin_signout")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Logout,
-                                        contentDescription = "Sign Out",
-                                        tint = CoralDanger,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Sign Out", color = CoralDanger, fontSize = 12.sp)
-                                }
-                            }
-                        }
-
-                        if (authSession.isSignedIn) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = Slate900,
-                                border = BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.4f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(CircleShape)
-                                            .background(EmeraldSuccess.copy(alpha = 0.2f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.AccountCircle,
-                                            contentDescription = null,
-                                            tint = EmeraldSuccess,
-                                            modifier = Modifier.size(28.dp)
-                                        )
-                                    }
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = authSession.email,
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp
-                                        )
-                                        Text(
-                                            text = if (authSession.isAuthorizedAdminEmail)
-                                                "✅ ভেরিফাইড অ্যাডমিন • UID: ${authSession.uid.take(12)}..."
-                                            else
-                                                "⚠️ শুধুমাত্র ${MaxbirdPortalSettings.ADMIN_EMAIL} রাইট অ্যাক্সেস পাবে",
-                                            color = if (authSession.isAuthorizedAdminEmail) EmeraldSuccess else AmberWarning,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            // Login Options:
-                            // 1. Google Sign-In via Embedded Firebase Web SDK
-                            Button(
-                                onClick = { selectedViewMode = 1 },
-                                colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("btn_maxbird_google_signin")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AccountCircle,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Google Sign-In / Web SDK দিয়ে লগইন করুন",
+                                    text = "পুরনো APK অটো-রিপ্লেস (R2 থেকে ডিলিট)",
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
+                                    fontSize = 12.sp
                                 )
-                            }
-
-                            HorizontalDivider(color = Slate700)
-
-                            // 2. Direct Email & Password Sign-In for maiafahim1234@gmail.com
-                            Text(
-                                text = "অথবা সরাসরি অ্যাডমিন ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করুন:",
-                                color = Slate200,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-
-                            OutlinedTextField(
-                                value = emailInput,
-                                onValueChange = { emailInput = it },
-                                label = { Text("Admin Email") },
-                                singleLine = true,
-                                colors = adminTextFieldColors(),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("input_maxbird_admin_email")
-                            )
-
-                            OutlinedTextField(
-                                value = passwordInput,
-                                onValueChange = { passwordInput = it },
-                                label = { Text("Password (কমপক্ষে ৬ অক্ষর)") },
-                                singleLine = true,
-                                visualTransformation = if (passwordVisible)
-                                    VisualTransformation.None
-                                else
-                                    PasswordVisualTransformation(),
-                                trailingIcon = {
-                                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                        Icon(
-                                            imageVector = if (passwordVisible)
-                                                Icons.Default.VisibilityOff
-                                            else
-                                                Icons.Default.Visibility,
-                                            contentDescription = "Toggle Password",
-                                            tint = Slate400
-                                        )
-                                    }
-                                },
-                                colors = adminTextFieldColors(),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("input_maxbird_admin_password")
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Button(
-                                    onClick = {
-                                        if (emailInput.isBlank() || passwordInput.isBlank()) {
-                                            onShowToast("ইমেইল এবং পাসওয়ার্ড দিন।")
-                                        } else {
-                                            onSignInWithEmailPassword(emailInput, passwordInput)
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("btn_maxbird_email_login")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.LockOpen,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("লগইন করুন", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
-
-                                OutlinedButton(
-                                    onClick = {
-                                        if (emailInput.isBlank() || passwordInput.length < 6) {
-                                            onShowToast("ইমেইল এবং কমপক্ষে ৬ অক্ষরের পাসওয়ার্ড দিন।")
-                                        } else {
-                                            onCreateAdminWithEmailPassword(emailInput, passwordInput)
-                                        }
-                                    },
-                                    border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("১ম বার পাসওয়ার্ড সেট", color = NeonCyan, fontSize = 11.sp)
-                                }
-                            }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                TextButton(
-                                    onClick = {
-                                        if (emailInput.isNotBlank()) {
-                                            onSendPasswordReset(emailInput)
-                                        } else {
-                                            onShowToast("পাসওয়ার্ড রিসেট করতে ইমেইল দিন।")
-                                        }
-                                    }
-                                ) {
-                                    Text("পাসওয়ার্ড রিসেট ইমেইল পাঠান", color = ElectricBlueLight, fontSize = 11.sp)
-                                }
-
-                                TextButton(
-                                    onClick = { showTokenInputSection = !showTokenInputSection }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Key,
-                                        contentDescription = null,
-                                        tint = Slate400,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("ID Token লগইন", color = Slate400, fontSize = 11.sp)
-                                }
-                            }
-
-                            AnimatedVisibility(visible = showTokenInputSection) {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedTextField(
-                                        value = manualTokenInput,
-                                        onValueChange = { manualTokenInput = it },
-                                        label = { Text("Firebase Auth ID Token পেস্ট করুন") },
-                                        singleLine = true,
-                                        colors = adminTextFieldColors(),
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                    Button(
-                                        onClick = {
-                                            if (manualTokenInput.isNotBlank()) {
-                                                onVerifyManualIdToken(manualTokenInput)
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = PurpleRoyal),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text("ID Token ভেরিফাই ও লগইন করুন", fontSize = 12.sp)
-                                    }
-                                }
-                            }
-                        }
-
-                        // Authorized Domains Helpful Info Box
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = Slate900,
-                            border = BorderStroke(1.dp, Slate700),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showAuthorizedDomainsHelp = !showAuthorizedDomainsHelp }
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Info,
-                                        contentDescription = null,
-                                        tint = NeonCyan,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = "গুরুত্বপূর্ণ নোট: External Domain (যেমন *.pages.dev) ও Google Sign-In সেটিংস",
-                                        color = NeonCyan,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
                                 Text(
-                                    text = "যদি ওয়েবসাইট বা প্যানেল কোনো এক্সটার্নাল ডোমেইনে (যেমন maxbird.pages.dev বা *.pages.dev) হোস্ট করা হয়, তবে Google Sign-In কাজ করার জন্য ডোমেইনটি অবশ্যই Firebase Console -> Authentication -> Settings -> Authorized domains-এ যুক্ত থাকতে হবে।",
+                                    text = "নতুন APK আপলোড হলে আগের APK ফাইলটি R2 বাকেট থেকে মুছে যাবে",
                                     color = Slate400,
-                                    fontSize = 11.sp,
-                                    lineHeight = 15.sp
+                                    fontSize = 10.sp
                                 )
-                                OutlinedButton(
-                                    onClick = {
-                                        try {
-                                            context.startActivity(
-                                                Intent(
-                                                    Intent.ACTION_VIEW,
-                                                    Uri.parse(MaxbirdPortalSettings.FIREBASE_AUTH_SETTINGS_URL)
-                                                )
-                                            )
-                                        } catch (_: Exception) {
-                                            clipboardManager.setText(
-                                                AnnotatedString(MaxbirdPortalSettings.FIREBASE_AUTH_SETTINGS_URL)
-                                            )
-                                            onShowToast("লিঙ্ক কপি করা হয়েছে!")
-                                        }
-                                    },
-                                    border = BorderStroke(1.dp, ElectricBlueLight.copy(alpha = 0.5f)),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.OpenInNew,
-                                        contentDescription = null,
-                                        tint = ElectricBlueLight,
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Firebase Authorized Domains সেটিংস ওপেন করুন",
-                                        color = ElectricBlueLight,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
                             }
+                            Switch(
+                                checked = autoReplaceOldApkInR2,
+                                onCheckedChange = { autoReplaceOldApkInR2 = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = EmeraldSuccess
+                                )
+                            )
                         }
                     }
-                }
-            }
 
-            // 3. Section A: Live Status Overview Cards
-            item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Slate800),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, Slate700, RoundedCornerShape(16.dp))
-                ) {
-                    Column(
+                    // Primary R2 APK Upload Button
+                    Button(
+                        onClick = { r2ApkUploadLauncher.launch("*/*") },
+                        enabled = !isUploadingApk,
+                        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                            .height(48.dp)
+                            .testTag("btn_upload_apk_to_r2")
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Download,
-                                contentDescription = null,
-                                tint = EmeraldSuccess,
-                                modifier = Modifier.size(20.dp)
+                        if (isUploadingApk) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "A. লাইভ স্ট্যাটাস ওভারভিউ (Live Status Overview)",
+                                text = "R2-তে APK আপলোড হচ্ছে ($apkUploadProgress%)...",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp
+                                fontSize = 13.sp
                             )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            // Live Download Counter Card
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = Slate900,
-                                border = BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.4f)),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable {
-                                        downloadCountInput = settings.downloadCount.toString()
-                                        showDownloadCountDialog = true
-                                    }
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "মোট ডাউনলোড",
-                                            color = Slate400,
-                                            fontSize = 11.sp
-                                        )
-                                        Icon(
-                                            imageVector = Icons.Default.Edit,
-                                            contentDescription = "Edit Download Count",
-                                            tint = EmeraldSuccess,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = "${settings.downloadCount}",
-                                        color = EmeraldSuccess,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 22.sp
-                                    )
-                                    Text(
-                                        text = "রিসেট / এডিট করতে ট্যাপ করুন",
-                                        color = NeonCyan,
-                                        fontSize = 10.sp
-                                    )
-                                }
-                            }
-
-                            // Current Live APK Version & File Size Card
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = Slate900,
-                                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = "লাইভ APK ভার্সন ও সাইজ",
-                                        color = Slate400,
-                                        fontSize = 11.sp
-                                    )
-                                    Text(
-                                        text = settings.appVersion.ifBlank { "v1.0.0" },
-                                        color = Color.White,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 20.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "সাইজ: ${settings.fileSize.ifBlank { "10 MB" }} • ${settings.minAndroidVersion}",
-                                        color = NeonCyan,
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-
-                        // Action Buttons: Test APK Download Link & Open Public Website (https://maxbird.pages.dev)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    val url = settings.apkDownloadUrl.trim()
-                                    if (url.isBlank()) {
-                                        onShowToast("এখনো কোনো APK ডাউনলোড লিংক দেওয়া হয়নি!")
-                                    } else {
-                                        try {
-                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                        } catch (e: Exception) {
-                                            onShowToast("লিংক ওপেন করা যায়নি: ${e.message}")
-                                        }
-                                    }
-                                },
-                                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("btn_test_apk_download_link")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Download,
-                                    contentDescription = null,
-                                    tint = NeonCyan,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Test APK Link",
-                                    color = NeonCyan,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            Button(
-                                onClick = {
-                                    try {
-                                        context.startActivity(
-                                            Intent(
-                                                Intent.ACTION_VIEW,
-                                                Uri.parse(MaxbirdPortalSettings.PUBLIC_WEBSITE_URL)
-                                            )
-                                        )
-                                    } catch (e: Exception) {
-                                        onShowToast("ওয়েবসাইট ওপেন করা যায়নি: ${e.message}")
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("btn_open_maxbird_public_website")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.OpenInBrowser,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "maxbird.pages.dev",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 4. Section B: Cloudflare R2 APK Link Manager & Local .APK File Inspector
-            item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Slate800),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        } else {
                             Icon(
                                 imageVector = Icons.Default.CloudUpload,
                                 contentDescription = null,
-                                tint = NeonCyan,
+                                tint = Color.White,
                                 modifier = Modifier.size(20.dp)
                             )
-                            Column {
-                                Text(
-                                    text = "B. Cloudflare R2 APK লিংক ম্যানেজার",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp
-                                )
-                                Text(
-                                    text = "ডিরেক্ট R2 লিংক, অটো-বিল্ডার এবং লোকাল .apk ফাইল সাইজ ও নাম অটো-ডিটেক্টর",
-                                    color = Slate400,
-                                    fontSize = 11.sp
-                                )
-                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "📤 নতুন .APK সিলেক্ট ও সরাসরি R2-তে আপলোড করুন",
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 13.sp
+                            )
                         }
+                    }
 
-                        // Local .APK File Inspector Button
+                    // Live Progress Bar & Status Message for APK Upload
+                    AnimatedVisibility(visible = isUploadingApk || apkUploadStatusText.isNotBlank()) {
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = ElectricBlue.copy(alpha = 0.14f),
-                            border = BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.5f)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    apkPickerLauncher.launch("*/*")
-                                }
-                                .testTag("btn_pick_local_apk_inspector")
+                            shape = RoundedCornerShape(10.dp),
+                            color = Slate950,
+                            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
+                            Column(
                                 modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(ElectricBlue),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.FolderOpen,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "ফোন থেকে .APK ফাইল সিলেক্ট করুন (Auto Inspector)",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp
-                                    )
-                                    Text(
-                                        text = "ফাইলের সঠিক MB সাইজ (fileSize) এবং ফাইলের নাম (r2ObjectKey) অটোমেটিক বসে যাবে!",
-                                        color = NeonCyan,
-                                        fontSize = 11.sp
+                                Text(
+                                    text = apkUploadStatusText,
+                                    color = NeonCyan,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (isUploadingApk) {
+                                    LinearProgressIndicator(
+                                        progress = { (apkUploadProgress / 100f).coerceIn(0f, 1f) },
+                                        color = EmeraldSuccess,
+                                        trackColor = Slate800,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(8.dp)
+                                            .clip(RoundedCornerShape(4.dp))
                                     )
                                 }
                             }
                         }
+                    }
 
-                        // R2 Bucket Public Domain
-                        OutlinedTextField(
-                            value = settings.r2BucketPublicDomain,
-                            onValueChange = { newDomain ->
-                                val cleanDom = newDomain.take(500)
-                                val autoUrl = MaxbirdPortalSettings.autoBuildR2Url(cleanDom, settings.r2ObjectKey)
-                                onUpdateDraft(
-                                    settings.copy(
-                                        r2BucketPublicDomain = cleanDom,
-                                        apkDownloadUrl = if (autoUrl.isNotEmpty()) autoUrl else settings.apkDownloadUrl
-                                    )
-                                )
-                            },
-                            label = { Text("R2 Bucket Public Domain (ঐচ্ছিক, যেমন: pub-xxx.r2.dev)") },
-                            supportingText = {
-                                Text(
-                                    text = "${settings.r2BucketPublicDomain.length}/500 chars",
-                                    color = Slate400,
-                                    fontSize = 10.sp
-                                )
-                            },
-                            singleLine = true,
-                            colors = adminTextFieldColors(),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("input_maxbird_r2_domain")
-                        )
-
-                        // R2 Object Key (APK Filename)
-                        OutlinedTextField(
-                            value = settings.r2ObjectKey,
-                            onValueChange = { newKey ->
-                                val cleanKey = newKey.take(300)
-                                val autoUrl = MaxbirdPortalSettings.autoBuildR2Url(settings.r2BucketPublicDomain, cleanKey)
-                                onUpdateDraft(
-                                    settings.copy(
-                                        r2ObjectKey = cleanKey,
-                                        apkDownloadUrl = if (autoUrl.isNotEmpty()) autoUrl else settings.apkDownloadUrl
-                                    )
-                                )
-                            },
-                            label = { Text("R2 Object Key / APK ফাইলের নাম (যেমন: maxbird-v1.0.0.apk)") },
-                            supportingText = {
-                                Text(
-                                    text = "${settings.r2ObjectKey.length}/300 chars • ডোমেইন ও ফাইলনেম দিলে নিচের লিংক অটো-তৈরি হবে",
-                                    color = Slate400,
-                                    fontSize = 10.sp
-                                )
-                            },
-                            singleLine = true,
-                            colors = adminTextFieldColors(),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("input_maxbird_r2_key")
-                        )
-
-                        // Direct Cloudflare R2 APK Download URL
-                        OutlinedTextField(
-                            value = settings.apkDownloadUrl,
-                            onValueChange = { newUrl ->
-                                onUpdateDraft(settings.copy(apkDownloadUrl = newUrl.take(1000)))
-                            },
-                            label = { Text("Direct Cloudflare R2 APK Download URL (apkDownloadUrl)") },
-                            supportingText = {
-                                Text(
-                                    text = "${settings.apkDownloadUrl.length}/1000 chars • ওয়েবসাইটের Download APK বাটনে এই লিংক কাজ করবে",
-                                    color = NeonCyan,
-                                    fontSize = 10.sp
-                                )
-                            },
-                            trailingIcon = {
+                    // Manual APK Download URL Field
+                    OutlinedTextField(
+                        value = settings.apkDownloadUrl,
+                        onValueChange = { onUpdateDraft(settings.copy(apkDownloadUrl = it)) },
+                        label = { Text("পাবলিক APK ডাউনলোড লিংক (apkDownloadUrl)") },
+                        placeholder = { Text("${CloudflareR2Client.PUBLIC_BASE_URL}/apk/Maxbird-v1.0.apk") },
+                        singleLine = true,
+                        trailingIcon = {
+                            if (settings.apkDownloadUrl.isNotBlank()) {
                                 IconButton(
                                     onClick = {
-                                        if (settings.apkDownloadUrl.isNotBlank()) {
-                                            clipboardManager.setText(AnnotatedString(settings.apkDownloadUrl))
-                                            onShowToast("APK Download URL কপি করা হয়েছে!")
-                                        }
+                                        clipboardManager.setText(AnnotatedString(settings.apkDownloadUrl))
+                                        onShowToast("APK লিংক কপি হয়েছে!")
                                     }
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.ContentCopy,
                                         contentDescription = "Copy APK URL",
-                                        tint = NeonCyan
+                                        tint = NeonCyan,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
-                            },
-                            colors = adminTextFieldColors(),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("input_maxbird_apk_url")
-                        )
+                            }
+                        },
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_maxbird_apk_download_url")
+                    )
 
-                        if (settings.r2BucketPublicDomain.isNotBlank() && settings.r2ObjectKey.isNotBlank()) {
+                    // Row: Test Download Link + Delete APK from R2
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val url = settings.apkDownloadUrl.trim()
+                                if (url.startsWith("http://") || url.startsWith("https://")) {
+                                    try {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                    } catch (_: Exception) {
+                                        onShowToast("লিংক ওপেন করা যায়নি")
+                                    }
+                                } else {
+                                    onShowToast("কোনো APK লিংক সেট করা নেই")
+                                }
+                            },
+                            border = BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.6f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = null,
+                                tint = EmeraldSuccess,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("ডাউনলোড টেস্ট", color = EmeraldSuccess, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        if (CloudflareR2Client.extractFileKeyFromPublicUrl(settings.apkDownloadUrl) != null) {
                             OutlinedButton(
                                 onClick = {
-                                    val built = MaxbirdPortalSettings.autoBuildR2Url(
-                                        settings.r2BucketPublicDomain,
-                                        settings.r2ObjectKey
-                                    )
-                                    onUpdateDraft(settings.copy(apkDownloadUrl = built))
-                                    onShowToast("অটো-বিল্ড লিংক সেট হয়েছে: $built")
+                                    val urlToDelete = settings.apkDownloadUrl
+                                    coroutineScope.launch {
+                                        isUploadingApk = true
+                                        apkUploadStatusText = "R2 বাকেট থেকে APK ডিলিট করা হচ্ছে..."
+                                        val delRes = r2Client.deleteObjectFromR2(urlToDelete)
+                                        if (delRes.isSuccess) {
+                                            val updated = settings.copy(apkDownloadUrl = "")
+                                            onUpdateDraft(updated)
+                                            onSaveToFirestore(updated)
+                                            apkUploadStatusText = "🗑️ APK ফাইলটি R2 বাকেট থেকে ডিলিট করা হয়েছে।"
+                                            onShowToast("🗑️ R2 থেকে APK ডিলিট সম্পন্ন!")
+                                        } else {
+                                            apkUploadStatusText = "❌ ডিলিট ব্যর্থ: ${delRes.exceptionOrNull()?.message}"
+                                        }
+                                        isUploadingApk = false
+                                    }
                                 },
-                                border = BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.6f)),
+                                border = BorderStroke(1.dp, CoralDanger.copy(alpha = 0.65f)),
                                 shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.AutoFixHigh,
+                                    imageVector = Icons.Default.Delete,
                                     contentDescription = null,
-                                    tint = EmeraldSuccess,
+                                    tint = CoralDanger,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "https://${settings.r2BucketPublicDomain.trim().trimEnd('/')}/${settings.r2ObjectKey.trim().trimStart('/')} সেট করুন",
-                                    color = EmeraldSuccess,
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                Text("R2 থেকে APK ডিলিট", color = CoralDanger, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
             }
+        }
 
-            // 5. Section C: Website Content, Version Info & Notice Editor
-            item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Slate800),
+        // =====================================================================
+        // SECTION 2: পেইজ ও প্লে-স্টোর স্ক্রিনশট গ্যালারি ম্যানেজার (appIconUrl & appScreenshots)
+        // =====================================================================
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate800),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, PurpleRoyal.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Campaign,
-                                contentDescription = null,
-                                tint = AmberWarning,
-                                modifier = Modifier.size(20.dp)
+                        Icon(
+                            imageVector = Icons.Default.PhotoLibrary,
+                            contentDescription = null,
+                            tint = NeonCyan,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "২. অ্যাপ আইকন ও প্লে-স্টোর স্ক্রিনশট গ্যালারি (R2)",
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp
                             )
-                            Column {
+                            Text(
+                                text = "লোগো (appIconUrl) এবং সর্বোচ্চ ১৫টি অ্যাপ স্ক্রিনশট (appScreenshots) নিয়ন্ত্রণ করুন",
+                                color = Slate400,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    if (isUploadingMedia || mediaUploadStatusText.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Slate950,
+                            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (isUploadingMedia) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = NeonCyan
+                                    )
+                                }
                                 Text(
-                                    text = "C. ওয়েবসাইট কনটেন্ট ও নোটিশ এডিটর (17-Field Sync)",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp
-                                )
-                                Text(
-                                    text = "অ্যাপের নাম, ভার্সন, ফাইল সাইজ, টপ নোটিশ ব্যানার, রিলিজ নোটস এবং টেলিগ্রাম সাপোর্ট",
-                                    color = Slate400,
-                                    fontSize = 11.sp
+                                    text = mediaUploadStatusText,
+                                    color = NeonCyan,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
+                    }
 
-                        // Row 1: appName & appVersion
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    // ---------------------------------------------------------
+                    // 2A. App Icon (`appIconUrl`) Manager
+                    // ---------------------------------------------------------
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Slate900,
+                        border = BorderStroke(1.dp, Slate700),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            OutlinedTextField(
-                                value = settings.appName,
-                                onValueChange = { onUpdateDraft(settings.copy(appName = it.take(100))) },
-                                label = { Text("App Name (appName)") },
-                                singleLine = true,
-                                colors = adminTextFieldColors(),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("input_maxbird_app_name")
+                            Text(
+                                text = "অ্যাপ লোগো / আইকন (appIconUrl)",
+                                color = NeonCyan,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
                             )
 
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                // Icon Preview Box
+                                Box(
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(Slate950)
+                                        .border(1.dp, Slate700, RoundedCornerShape(14.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (settings.appIconUrl.isNotBlank()) {
+                                        AsyncImage(
+                                            model = settings.appIconUrl,
+                                            contentDescription = "App Icon",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Android,
+                                            contentDescription = null,
+                                            tint = EmeraldSuccess,
+                                            modifier = Modifier.size(32.dp)
+                                        )
+                                    }
+                                }
+
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Button(
+                                        onClick = { r2IconUploadLauncher.launch("image/*") },
+                                        enabled = !isUploadingMedia,
+                                        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CloudUpload,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (settings.appIconUrl.isBlank()) "আইকন আপলোড (R2)" else "আইকন পরিবর্তন (Replace)",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    if (settings.appIconUrl.isNotBlank()) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                val oldIcon = settings.appIconUrl
+                                                coroutineScope.launch {
+                                                    isUploadingMedia = true
+                                                    if (CloudflareR2Client.extractFileKeyFromPublicUrl(oldIcon) != null) {
+                                                        r2Client.deleteObjectFromR2(oldIcon)
+                                                    }
+                                                    val updated = settings.copy(appIconUrl = "")
+                                                    onUpdateDraft(updated)
+                                                    onSaveToFirestore(updated)
+                                                    mediaUploadStatusText = "🗑️ অ্যাপ আইকন ডিলিট করা হয়েছে।"
+                                                    isUploadingMedia = false
+                                                }
+                                            },
+                                            border = BorderStroke(1.dp, CoralDanger.copy(alpha = 0.65f)),
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = null,
+                                                tint = CoralDanger,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("আইকন ডিলিট করুন", color = CoralDanger, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+
                             OutlinedTextField(
-                                value = settings.appVersion,
-                                onValueChange = { onUpdateDraft(settings.copy(appVersion = it.take(60))) },
-                                label = { Text("ভার্সন (appVersion)") },
+                                value = settings.appIconUrl,
+                                onValueChange = { onUpdateDraft(settings.copy(appIconUrl = it)) },
+                                label = { Text("অ্যাপ আইকন লিংক (appIconUrl)") },
+                                placeholder = { Text("${CloudflareR2Client.PUBLIC_BASE_URL}/icons/...") },
                                 singleLine = true,
                                 colors = adminTextFieldColors(),
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("input_maxbird_app_version")
+                                    .fillMaxWidth()
+                                    .testTag("input_maxbird_app_icon_url")
                             )
                         }
+                    }
 
-                        // Row 2: fileSize & minAndroidVersion
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = settings.fileSize,
-                                onValueChange = { onUpdateDraft(settings.copy(fileSize = it.take(40))) },
-                                label = { Text("ফাইল সাইজ (fileSize)") },
-                                singleLine = true,
-                                colors = adminTextFieldColors(),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("input_maxbird_file_size")
-                            )
+                    HorizontalDivider(color = Slate700)
 
-                            OutlinedTextField(
-                                value = settings.minAndroidVersion,
-                                onValueChange = { onUpdateDraft(settings.copy(minAndroidVersion = it.take(50))) },
-                                label = { Text("Min Android (যেমন Android 7.0+)") },
-                                singleLine = true,
-                                colors = adminTextFieldColors(),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("input_maxbird_min_android")
-                            )
-                        }
+                    // ---------------------------------------------------------
+                    // 2B. Play Store Screenshots Gallery (`appScreenshots` - Max 15)
+                    // ---------------------------------------------------------
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "স্ক্রিনশট গ্যালারি (${settings.appScreenshots.size}/${MaxbirdPortalSettings.MAX_SCREENSHOTS})",
+                            color = Color.White,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            text = "Play Store স্টাইল প্রিভিউ",
+                            color = NeonCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
 
-                        // Row 3: lastUpdated & sha256Short
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = settings.lastUpdated,
-                                onValueChange = { onUpdateDraft(settings.copy(lastUpdated = it.take(60))) },
-                                label = { Text("আপডেট তারিখ (lastUpdated)") },
-                                singleLine = true,
-                                colors = adminTextFieldColors(),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("input_maxbird_last_updated")
-                            )
+                    // Upload 1 or Multiple Screenshots to R2 Button
+                    Button(
+                        onClick = { r2MultipleScreenshotsLauncher.launch("image/*") },
+                        enabled = !isUploadingMedia && settings.appScreenshots.size < MaxbirdPortalSettings.MAX_SCREENSHOTS,
+                        colors = ButtonDefaults.buttonColors(containerColor = PurpleRoyal),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("btn_upload_screenshots_r2")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Image,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "📸 এক বা একাধিক স্ক্রিনশট সিলেক্ট ও R2-তে আপলোড করুন",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
 
-                            OutlinedTextField(
-                                value = settings.sha256Short,
-                                onValueChange = { onUpdateDraft(settings.copy(sha256Short = it.take(150))) },
-                                label = { Text("সিকিউরিটি ব্যাজ (sha256Short)") },
-                                singleLine = true,
-                                colors = adminTextFieldColors(),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("input_maxbird_sha256")
-                            )
-                        }
-
-                        // Top Announcement Notice Banner (noticeText)
+                    // Manual Screenshot URL Paste Input + Add Button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         OutlinedTextField(
-                            value = settings.noticeText,
-                            onValueChange = { onUpdateDraft(settings.copy(noticeText = it.take(500))) },
-                            label = { Text("ওয়েবসাইটের টপ নোটিশ ব্যানার (noticeText)") },
-                            supportingText = {
-                                Text(
-                                    text = "${settings.noticeText.length}/500 chars • ওয়েবসাইটের সবার উপরে এই নোটিশটি লাইভ দেখাবে",
-                                    color = AmberWarning,
-                                    fontSize = 10.sp
-                                )
-                            },
-                            minLines = 2,
-                            maxLines = 4,
+                            value = manualScreenshotUrlInput,
+                            onValueChange = { manualScreenshotUrlInput = it },
+                            label = { Text("সরাসরি ছবির লিংক পেস্ট করে যোগ করুন") },
+                            placeholder = { Text("https://.../screenshot.jpg") },
+                            singleLine = true,
                             colors = adminTextFieldColors(),
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("input_maxbird_notice_text")
+                                .weight(1f)
+                                .testTag("input_manual_screenshot_url")
                         )
 
-                        // Release Notes (releaseNotes)
-                        OutlinedTextField(
-                            value = settings.releaseNotes,
-                            onValueChange = { onUpdateDraft(settings.copy(releaseNotes = it.take(1000))) },
-                            label = { Text("নতুন ভার্সনে কী কী থাকছে / Release Notes (releaseNotes)") },
-                            supportingText = {
-                                Text(
-                                    text = "${settings.releaseNotes.length}/1000 chars",
-                                    color = Slate400,
-                                    fontSize = 10.sp
-                                )
+                        Button(
+                            onClick = {
+                                val clean = manualScreenshotUrlInput.trim()
+                                if (clean.startsWith("http://") || clean.startsWith("https://")) {
+                                    if (settings.appScreenshots.size >= MaxbirdPortalSettings.MAX_SCREENSHOTS) {
+                                        onShowToast("সর্বোচ্চ ১৫টি স্ক্রিনশট যোগ করা যাবে")
+                                    } else {
+                                        val updated = settings.copy(
+                                            appScreenshots = (settings.appScreenshots + clean).take(MaxbirdPortalSettings.MAX_SCREENSHOTS)
+                                        )
+                                        onUpdateDraft(updated)
+                                        manualScreenshotUrlInput = ""
+                                        onShowToast("✅ স্ক্রিনশট লিংক যুক্ত হয়েছে!")
+                                    }
+                                } else {
+                                    onShowToast("সঠিক ছবির লিংক (https://...) দিন")
+                                }
                             },
-                            minLines = 3,
-                            maxLines = 6,
-                            colors = adminTextFieldColors(),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("input_maxbird_release_notes")
-                        )
-
-                        // Row 4: telegramHandle & telegramUrl
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = settings.telegramHandle,
-                                onValueChange = { onUpdateDraft(settings.copy(telegramHandle = it.take(80))) },
-                                label = { Text("Telegram Handle (@...)") },
-                                singleLine = true,
-                                colors = adminTextFieldColors(),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("input_maxbird_telegram_handle")
-                            )
-
-                            OutlinedTextField(
-                                value = settings.telegramUrl,
-                                onValueChange = { onUpdateDraft(settings.copy(telegramUrl = it.take(300))) },
-                                label = { Text("Telegram URL (https://t.me/...)") },
-                                singleLine = true,
-                                colors = adminTextFieldColors(),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("input_maxbird_telegram_url")
-                            )
-                        }
-
-                        // Metadata Read-only Summary (ownerId, createdAt, updatedAt)
-                        Surface(
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
                             shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 14.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add URL",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("যোগ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+
+                    // List of Screenshot Cards with Preview, Replace, Delete & Up/Down Reorder
+                    if (settings.appScreenshots.isEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
                             color = Slate900,
                             border = BorderStroke(1.dp, Slate700),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoLibrary,
+                                    contentDescription = null,
+                                    tint = Slate400,
+                                    modifier = Modifier.size(32.dp)
+                                )
                                 Text(
-                                    text = "সিস্টেম মেটাডাটা (১৭টি ফিল্ড অটো-সংরক্ষিত):",
-                                    color = NeonCyan,
+                                    text = "এখনো কোনো স্ক্রিনশট যোগ করা হয়নি",
+                                    color = Slate200,
                                     fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = "উপরের বাটনে ট্যাপ করে অ্যাপের স্ক্রিনশট R2-তে আপলোড করুন",
+                                    color = Slate400,
                                     fontSize = 11.sp
-                                )
-                                Text(
-                                    text = "• ownerId: ${settings.ownerId.ifBlank { authSession.uid.ifBlank { "(প্রথমবার সেভ করলে সেট হবে)" } }}",
-                                    color = Slate400,
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Text(
-                                    text = "• createdAt: ${settings.createdAtIso ?: "(সার্ভার টাইমস্ট্যাম্প — আপডেটে অপরিবর্তিত থাকবে)"}",
-                                    color = Slate400,
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Text(
-                                    text = "• updatedAt: ${settings.updatedAtIso ?: "(প্রতিটি সেভে অটো serverTimestamp হবে)"}",
-                                    color = Slate400,
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace
                                 )
                             }
                         }
-                    }
-                }
-            }
-
-            // 6. Section D: One-Click Save & Instant Sync Button
-            item {
-                Button(
-                    onClick = { onSaveToFirestore(settings) },
-                    enabled = !isSaving,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = EmeraldSuccess,
-                        disabledContainerColor = Slate700
-                    ),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp)
-                        .testTag("btn_save_maxbird_portal_settings")
-                ) {
-                    if (isSaving) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            strokeWidth = 2.5.dp,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "maxbird.pages.dev-এ লাইভ সেভ হচ্ছে...",
-                            color = Color.White,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp
-                        )
                     } else {
-                        Icon(
-                            imageVector = Icons.Default.Save,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "১-ক্লিকে ওয়েবসাইটে লাইভ সেভ করুন (Save Changes)",
-                            color = Color.White,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 14.sp
-                        )
-                    }
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
-        }
-    }
-}
-
-/**
- * Embedded Web SDK Panel that runs the exact `firebase/app`, `firebase/auth`, and `firebase/firestore`
- * JS SDKs with named database `ai-studio-edusmartappporta-6327637e-4b8d-4e4e-be1d-92bc33269fa0`
- * on origin `https://empirical-envelope-b0z9n.firebaseapp.com`, allowing both Google Sign-In
- * and real-time `onSnapshot` / `setDoc` / `updateDoc` directly from the Web SDK.
- */
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-private fun EmbeddedFirebaseWebSdkPanel(
-    onAuthReceived: (uid: String, email: String, displayName: String, photoUrl: String, idToken: String, refreshToken: String) -> Unit,
-    onSwitchToNative: () -> Unit
-) {
-    val htmlContent = remember { buildMaxbirdFirebaseWebDashboardHtml() }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            color = Slate900,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Firebase JS SDK (firebase/app, auth, firestore) • Live Mode",
-                    color = NeonCyan,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                TextButton(onClick = onSwitchToNative) {
-                    Text("নেটিভ প্যানেলে ফিরুন", color = EmeraldSuccess, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        var popupWebView by remember { mutableStateOf<WebView?>(null) }
-
-        Box(modifier = Modifier.fillMaxSize()) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        android.webkit.CookieManager.getInstance().setAcceptCookie(true)
-                        android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.databaseEnabled = true
-                        settings.javaScriptCanOpenWindowsAutomatically = true
-                        settings.setSupportMultipleWindows(true)
-                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                        settings.userAgentString =
-                            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-
-                        addJavascriptInterface(
-                            object {
-                                @JavascriptInterface
-                                fun onFirebaseUserSignedIn(
-                                    uid: String,
-                                    email: String,
-                                    displayName: String,
-                                    photoUrl: String,
-                                    idToken: String,
-                                    refreshToken: String
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            settings.appScreenshots.forEachIndexed { index, screenshotUrl ->
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Slate900,
+                                    border = BorderStroke(1.dp, Slate700),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    post {
-                                        popupWebView?.destroy()
-                                        popupWebView = null
-                                        onAuthReceived(uid, email, displayName, photoUrl, idToken, refreshToken)
-                                    }
-                                }
-                            },
-                            "AndroidBridge"
-                        )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Play Store Style Vertical Phone Screenshot Thumbnail
+                                        Box(
+                                            modifier = Modifier
+                                                .width(68.dp)
+                                                .height(120.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Slate950)
+                                                .border(1.dp, Slate700, RoundedCornerShape(10.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            AsyncImage(
+                                                model = screenshotUrl,
+                                                contentDescription = "Screenshot #${index + 1}",
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(bottomEnd = 8.dp),
+                                                color = Slate950.copy(alpha = 0.85f),
+                                                modifier = Modifier.align(Alignment.TopStart)
+                                            ) {
+                                                Text(
+                                                    text = "#${index + 1}",
+                                                    color = NeonCyan,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
 
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onCreateWindow(
-                                view: WebView?,
-                                isDialog: Boolean,
-                                isUserGesture: Boolean,
-                                resultMsg: android.os.Message?
-                            ): Boolean {
-                                val newWebView = WebView(ctx).apply {
-                                    android.webkit.CookieManager.getInstance().setAcceptCookie(true)
-                                    android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                                    settings.javaScriptEnabled = true
-                                    settings.domStorageEnabled = true
-                                    settings.databaseEnabled = true
-                                    settings.javaScriptCanOpenWindowsAutomatically = true
-                                    settings.setSupportMultipleWindows(true)
-                                    settings.userAgentString =
-                                        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-                                    webViewClient = object : WebViewClient() {
-                                        override fun shouldOverrideUrlLoading(
-                                            view: WebView?,
-                                            request: WebResourceRequest?
-                                        ): Boolean = false
-                                    }
-                                    webChromeClient = object : WebChromeClient() {
-                                        override fun onCloseWindow(window: WebView?) {
-                                            popupWebView?.destroy()
-                                            popupWebView = null
+                                        // Right side controls: URL preview, Reorder Up/Down, Replace, Delete
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = screenshotUrl.substringAfterLast('/'),
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = screenshotUrl,
+                                                color = Slate400,
+                                                fontSize = 10.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+
+                                            // Row 1: Replace & Delete Buttons
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        screenshotIndexToReplace = index
+                                                        r2ReplaceSingleScreenshotLauncher.launch("image/*")
+                                                    },
+                                                    enabled = !isUploadingMedia,
+                                                    border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.65f)),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Autorenew,
+                                                        contentDescription = "Replace",
+                                                        tint = NeonCyan,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "রিপ্লেস",
+                                                        color = NeonCyan,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        val urlToRemove = screenshotUrl
+                                                        coroutineScope.launch {
+                                                            isUploadingMedia = true
+                                                            mediaUploadStatusText = "স্ক্রিনশট #${index + 1} ডিলিট হচ্ছে..."
+                                                            if (CloudflareR2Client.extractFileKeyFromPublicUrl(urlToRemove) != null) {
+                                                                r2Client.deleteObjectFromR2(urlToRemove)
+                                                            }
+                                                            val updatedList = settings.appScreenshots.toMutableList().apply {
+                                                                if (index in indices) removeAt(index)
+                                                            }
+                                                            val updated = settings.copy(appScreenshots = updatedList)
+                                                            onUpdateDraft(updated)
+                                                            onSaveToFirestore(updated)
+                                                            mediaUploadStatusText = "🗑️ স্ক্রিনশট #${index + 1} R2 ও ডাটাবেজ থেকে ডিলিট হয়েছে।"
+                                                            onShowToast("🗑️ স্ক্রিনশট ডিলিট সম্পন্ন!")
+                                                            isUploadingMedia = false
+                                                        }
+                                                    },
+                                                    enabled = !isUploadingMedia,
+                                                    border = BorderStroke(1.dp, CoralDanger.copy(alpha = 0.65f)),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Delete,
+                                                        contentDescription = "Delete",
+                                                        tint = CoralDanger,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "ডিলিট",
+                                                        color = CoralDanger,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+
+                                            // Row 2: Reorder Up / Down Buttons
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        if (index > 0) {
+                                                            val mutable = settings.appScreenshots.toMutableList()
+                                                            val tmp = mutable[index - 1]
+                                                            mutable[index - 1] = mutable[index]
+                                                            mutable[index] = tmp
+                                                            onUpdateDraft(settings.copy(appScreenshots = mutable))
+                                                        }
+                                                    },
+                                                    enabled = index > 0,
+                                                    border = BorderStroke(1.dp, Slate700),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.ArrowUpward,
+                                                        contentDescription = "Move Up",
+                                                        tint = if (index > 0) Color.White else Slate600,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "উপরে",
+                                                        color = if (index > 0) Color.White else Slate600,
+                                                        fontSize = 11.sp
+                                                    )
+                                                }
+
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        if (index < settings.appScreenshots.lastIndex) {
+                                                            val mutable = settings.appScreenshots.toMutableList()
+                                                            val tmp = mutable[index + 1]
+                                                            mutable[index + 1] = mutable[index]
+                                                            mutable[index] = tmp
+                                                            onUpdateDraft(settings.copy(appScreenshots = mutable))
+                                                        }
+                                                    },
+                                                    enabled = index < settings.appScreenshots.lastIndex,
+                                                    border = BorderStroke(1.dp, Slate700),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.ArrowDownward,
+                                                        contentDescription = "Move Down",
+                                                        tint = if (index < settings.appScreenshots.lastIndex) Color.White else Slate600,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "নিচে",
+                                                        color = if (index < settings.appScreenshots.lastIndex) Color.White else Slate600,
+                                                        fontSize = 11.sp
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                                popupWebView = newWebView
-                                val transport = resultMsg?.obj as? WebView.WebViewTransport
-                                transport?.webView = newWebView
-                                resultMsg?.sendToTarget()
-                                return true
-                            }
-
-                            override fun onCloseWindow(window: WebView?) {
-                                popupWebView?.destroy()
-                                popupWebView = null
                             }
                         }
-
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): Boolean {
-                                return false
-                            }
-                        }
-
-                        loadDataWithBaseURL(
-                            "https://${MaxbirdPortalSettings.FIREBASE_AUTH_DOMAIN}/",
-                            htmlContent,
-                            "text/html",
-                            "UTF-8",
-                            null
-                        )
-                    }
-                }
-            )
-
-            // Render OAuth Popup Window overlay when signInWithPopup opens a window
-            popupWebView?.let { activePopup ->
-                Surface(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(12.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Slate900,
-                    border = BorderStroke(1.5.dp, NeonCyan)
-                ) {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Slate950)
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "🔐 Google Admin Sign-In (${MaxbirdPortalSettings.ADMIN_EMAIL})",
-                                color = NeonCyan,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            TextButton(
-                                onClick = {
-                                    activePopup.destroy()
-                                    popupWebView = null
-                                }
-                            ) {
-                                Text("বন্ধ করুন ✕", color = CoralDanger, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        AndroidView(
-                            modifier = Modifier.fillMaxSize(),
-                            factory = { activePopup }
-                        )
                     }
                 }
             }
         }
+
+        // =====================================================================
+        // SECTION 3: ওয়েবসাইটের সব টেক্সট ও সেটিংস কন্ট্রোল (portal_settings/main)
+        // =====================================================================
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate800),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Android,
+                            contentDescription = null,
+                            tint = EmeraldSuccess,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "৩. ওয়েবসাইটের সব টেক্সট ও সেটিংস (portal_settings/main)",
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                text = "সবগুলো ফিল্ড একসাথে লোড ও writeBatch দিয়ে সেভ হবে",
+                                color = Slate400,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    // Row 1: appName & developerName
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = settings.appName,
+                            onValueChange = { onUpdateDraft(settings.copy(appName = it)) },
+                            label = { Text("অ্যাপের নাম (appName)") },
+                            placeholder = { Text("Maxbird") },
+                            singleLine = true,
+                            colors = adminTextFieldColors(),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_maxbird_app_name")
+                        )
+
+                        OutlinedTextField(
+                            value = settings.developerName,
+                            onValueChange = { onUpdateDraft(settings.copy(developerName = it)) },
+                            label = { Text("ডেভেলপার (developerName)") },
+                            placeholder = { Text("Maxbird Official") },
+                            singleLine = true,
+                            colors = adminTextFieldColors(),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_maxbird_developer_name")
+                        )
+                    }
+
+                    // Row 2: appTagline
+                    OutlinedTextField(
+                        value = settings.appTagline,
+                        onValueChange = { onUpdateDraft(settings.copy(appTagline = it)) },
+                        label = { Text("অ্যাপের ট্যাগলাইন / সাবটাইটেল (appTagline)") },
+                        placeholder = { Text("এইচএসসি ও এসএসসি শিক্ষার্থীদের স্মার্ট লার্নিং অ্যাপ") },
+                        singleLine = true,
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_maxbird_app_tagline")
+                    )
+
+                    // Row 3: appVersion & appSize
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = settings.appVersion,
+                            onValueChange = { onUpdateDraft(settings.copy(appVersion = it)) },
+                            label = { Text("ভার্সন (appVersion)") },
+                            placeholder = { Text("v1.0.5") },
+                            singleLine = true,
+                            colors = adminTextFieldColors(),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_maxbird_app_version")
+                        )
+
+                        OutlinedTextField(
+                            value = settings.appSize,
+                            onValueChange = { onUpdateDraft(settings.copy(appSize = it)) },
+                            label = { Text("অ্যাপ সাইজ (appSize)") },
+                            placeholder = { Text("24.5 MB") },
+                            singleLine = true,
+                            colors = adminTextFieldColors(),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_maxbird_file_size")
+                        )
+                    }
+
+                    // Row 4: androidRequirement & lastUpdated
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = settings.androidRequirement,
+                            onValueChange = { onUpdateDraft(settings.copy(androidRequirement = it)) },
+                            label = { Text("Android ভার্সন (androidRequirement)") },
+                            placeholder = { Text("Android 7.0+") },
+                            singleLine = true,
+                            colors = adminTextFieldColors(),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_maxbird_min_android")
+                        )
+
+                        OutlinedTextField(
+                            value = settings.lastUpdated,
+                            onValueChange = { onUpdateDraft(settings.copy(lastUpdated = it)) },
+                            label = { Text("আপডেটের তারিখ (lastUpdated)") },
+                            placeholder = { Text("নভেম্বর ২০২৬") },
+                            singleLine = true,
+                            colors = adminTextFieldColors(),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_maxbird_last_updated")
+                        )
+                    }
+
+                    // Row 5: totalDownloads with +1 and Reset helpers
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Slate900,
+                        border = BorderStroke(1.dp, Slate700),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "মোট ডাউনলোড (totalDownloads)",
+                                color = NeonCyan,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = settings.totalDownloads,
+                                    onValueChange = { onUpdateDraft(settings.copy(totalDownloads = it)) },
+                                    label = { Text("totalDownloads (যেমন: 10,000+ বা 520)") },
+                                    singleLine = true,
+                                    colors = adminTextFieldColors(),
+                                    modifier = Modifier
+                                        .weight(1.3f)
+                                        .testTag("input_maxbird_download_count")
+                                )
+
+                                Button(
+                                    onClick = {
+                                        val currentNum = settings.totalDownloads.filter { it.isDigit() }.toLongOrNull() ?: 0L
+                                        onUpdateDraft(settings.copy(totalDownloads = (currentNum + 1L).toString()))
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
+                                    modifier = Modifier.testTag("btn_maxbird_download_plus_one")
+                                ) {
+                                    Text("+1", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        onUpdateDraft(settings.copy(totalDownloads = "0"))
+                                    },
+                                    border = BorderStroke(1.dp, CoralDanger.copy(alpha = 0.65f)),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
+                                    modifier = Modifier.testTag("btn_maxbird_download_reset")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.RestartAlt,
+                                        contentDescription = "Reset",
+                                        tint = CoralDanger,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Row 6: Notice Banner Switch (`showNoticeBanner`) + Text (`noticeBannerText`)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Slate900,
+                        border = BorderStroke(
+                            1.dp,
+                            if (settings.showNoticeBanner) EmeraldSuccess.copy(alpha = 0.5f) else Slate700
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Campaign,
+                                        contentDescription = null,
+                                        tint = if (settings.showNoticeBanner) EmeraldSuccess else Slate400,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "ওয়েবসাইট নোটিশ ব্যানার (showNoticeBanner)",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp
+                                        )
+                                        Text(
+                                            text = if (settings.showNoticeBanner) "চালু আছে (ওয়েবসাইটে নোটিশ দেখাবে)" else "বন্ধ আছে (নোটিশ লুকানো থাকবে)",
+                                            color = if (settings.showNoticeBanner) EmeraldSuccess else Slate400,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+
+                                Switch(
+                                    checked = settings.showNoticeBanner,
+                                    onCheckedChange = { onUpdateDraft(settings.copy(showNoticeBanner = it)) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = EmeraldSuccess
+                                    ),
+                                    modifier = Modifier.testTag("switch_maxbird_show_notice_banner")
+                                )
+                            }
+
+                            OutlinedTextField(
+                                value = settings.noticeBannerText,
+                                onValueChange = { onUpdateDraft(settings.copy(noticeBannerText = it)) },
+                                label = { Text("নোটিশ ব্যানার টেক্সট (noticeBannerText)") },
+                                placeholder = { Text("Maxbird অফিশিয়াল অ্যাপের নতুন ভার্সন এখন ডাউনলোডের জন্য উন্মুক্ত!") },
+                                minLines = 2,
+                                maxLines = 4,
+                                colors = adminTextFieldColors(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("input_maxbird_notice_text")
+                            )
+                        }
+                    }
+
+                    // Row 7: Release Notes (`releaseNotes`)
+                    OutlinedTextField(
+                        value = settings.releaseNotes,
+                        onValueChange = { onUpdateDraft(settings.copy(releaseNotes = it)) },
+                        label = { Text("রিলিজ নোটস / নতুন কী কী যুক্ত হয়েছে (releaseNotes)") },
+                        placeholder = { Text("• দ্রুতগতির ভিডিও প্লেয়ার\n• নতুন কোর্স ও বাগ ফিক্স") },
+                        minLines = 3,
+                        maxLines = 6,
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_maxbird_release_notes")
+                    )
+
+                    HorizontalDivider(color = Slate700)
+
+                    // Row 8: Support Contact Fields (`supportPhone`, `supportWhatsApp`, `supportEmail`)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SupportAgent,
+                            contentDescription = null,
+                            tint = NeonCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "সাপোর্ট ও যোগাযোগের তথ্য (Support Info)",
+                            color = NeonCyan,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = settings.supportPhone,
+                            onValueChange = { onUpdateDraft(settings.copy(supportPhone = it)) },
+                            label = { Text("সাপোর্ট ফোন (supportPhone)") },
+                            placeholder = { Text("+8801XXXXXXXXX") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            singleLine = true,
+                            colors = adminTextFieldColors(),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_maxbird_support_phone")
+                        )
+
+                        OutlinedTextField(
+                            value = settings.supportWhatsApp,
+                            onValueChange = { onUpdateDraft(settings.copy(supportWhatsApp = it)) },
+                            label = { Text("হোয়াটসঅ্যাপ (supportWhatsApp)") },
+                            placeholder = { Text("https://wa.me/8801...") },
+                            singleLine = true,
+                            colors = adminTextFieldColors(),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_maxbird_support_whatsapp")
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = settings.supportEmail,
+                        onValueChange = { onUpdateDraft(settings.copy(supportEmail = it)) },
+                        label = { Text("সাপোর্ট ইমেইল (supportEmail)") },
+                        placeholder = { Text("maiafahim1234@gmail.com") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                        singleLine = true,
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_maxbird_support_email")
+                    )
+
+                    HorizontalDivider(color = Slate700)
+
+                    // Admin Secret Key Input (`Maxbird_Secret_Fahim_2026`)
+                    OutlinedTextField(
+                        value = settings.adminSecretKey,
+                        onValueChange = { onUpdateDraft(settings.copy(adminSecretKey = it)) },
+                        label = { Text("Admin Secret Key (writeBatch ভেরিফিকেশন)") },
+                        placeholder = { Text(MaxbirdPortalSettings.DEFAULT_ADMIN_SECRET_KEY) },
+                        singleLine = true,
+                        visualTransformation = if (secretKeyVisible) {
+                            VisualTransformation.None
+                        } else {
+                            PasswordVisualTransformation()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = null,
+                                tint = AmberWarning,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            IconButton(onClick = { secretKeyVisible = !secretKeyVisible }) {
+                                Icon(
+                                    imageVector = if (secretKeyVisible) {
+                                        Icons.Default.VisibilityOff
+                                    } else {
+                                        Icons.Default.Visibility
+                                    },
+                                    contentDescription = "Show/Hide Secret Key",
+                                    tint = NeonCyan
+                                )
+                            }
+                        },
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_maxbird_admin_secret_key")
+                    )
+                }
+            }
+        }
+
+        // =====================================================================
+        // BOTTOM BIG SAVE BUTTON: "💾 সব পরিবর্তন ওয়েবসাইটে সেভ করুন"
+        // =====================================================================
+        item {
+            Button(
+                onClick = { onSaveToFirestore(settings) },
+                enabled = !isSaving && !isUploadingApk && !isUploadingMedia,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = EmeraldSuccess,
+                    disabledContainerColor = Slate700
+                ),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .testTag("btn_save_maxbird_portal_settings")
+            ) {
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "ওয়েবসাইটে লাইভ সেভ হচ্ছে...",
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Save,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "💾 সব পরিবর্তন ওয়েবসাইটে সেভ করুন",
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp
+                    )
+                }
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(28.dp)) }
     }
 }
-
-private fun buildMaxbirdFirebaseWebDashboardHtml(): String = """
-<!DOCTYPE html>
-<html lang="bn">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Maxbird Admin Control Panel</title>
-  <style>
-    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
-    body { margin: 0; padding: 14px; background: #0f172a; color: #f8fafc; }
-    .card { background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 14px; margin-bottom: 14px; }
-    .title { font-size: 16px; font-weight: 800; color: #38bdf8; margin-bottom: 6px; }
-    .sub { font-size: 12px; color: #94a3b8; margin-bottom: 10px; }
-    label { display: block; font-size: 12px; color: #cbd5e1; margin-top: 8px; margin-bottom: 4px; font-weight: 600; }
-    input, textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 13px; }
-    button { width: 100%; padding: 11px; border-radius: 10px; border: none; font-weight: 700; font-size: 13px; cursor: pointer; margin-top: 8px; }
-    .btn-blue { background: #2563eb; color: #fff; }
-    .btn-green { background: #10b981; color: #fff; }
-    .btn-red { background: #ef4444; color: #fff; }
-    .status { padding: 10px; border-radius: 8px; background: #064e3b; color: #6ee7b7; font-size: 12px; margin-top: 8px; display: none; }
-    .row { display: flex; gap: 8px; }
-    .row > div { flex: 1; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="title">Maxbird Admin Control Panel (Web SDK)</div>
-    <div class="sub">Database: ai-studio-edusmartappporta-6327637e-4b8d-4e4e-be1d-92bc33269fa0 • Doc: portal_settings/main</div>
-    <div id="authStatus" class="sub">লগইন স্ট্যাটাস চেক করা হচ্ছে...</div>
-    <button id="btnGoogle" class="btn-blue">Google দিয়ে লগইন করুন (maiafahim1234@gmail.com)</button>
-    <div class="row" style="margin-top:8px;">
-      <div><input id="authEmail" value="maiafahim1234@gmail.com" placeholder="Admin Email" /></div>
-      <div><input id="authPass" type="password" placeholder="Password (কমপক্ষে ৬ অক্ষর)" /></div>
-    </div>
-    <button id="btnEmailLogin" class="btn-green">ইমেইল ও পাসওয়ার্ড দিয়ে লগইন / অটো সেটআপ (Sync Token to App)</button>
-    <button id="btnSignOut" class="btn-red" style="display:none;">Sign Out</button>
-    <div id="syncBanner" class="status"></div>
-  </div>
-
-  <div class="card">
-    <div class="title">লাইভ ওয়েবসাইট সেটিংস (onSnapshot Live Sync)</div>
-    <div class="row">
-      <div><label>App Name</label><input id="f_appName" value="Maxbird" /></div>
-      <div><label>Version</label><input id="f_appVersion" value="v1.0.0" /></div>
-    </div>
-    <div class="row">
-      <div><label>File Size</label><input id="f_fileSize" value="10 MB" /></div>
-      <div><label>Download Count</label><input id="f_downloadCount" type="number" value="0" /></div>
-    </div>
-    <label>R2 Bucket Public Domain</label>
-    <input id="f_r2BucketPublicDomain" placeholder="pub-xxx.r2.dev" />
-    <label>R2 Object Key (.apk filename)</label>
-    <input id="f_r2ObjectKey" placeholder="maxbird-v1.0.0.apk" />
-    <label>Direct APK Download URL (apkDownloadUrl)</label>
-    <input id="f_apkDownloadUrl" placeholder="https://..." />
-    <label>Top Notice Banner (noticeText)</label>
-    <textarea id="f_noticeText" rows="2"></textarea>
-    <label>Release Notes (releaseNotes)</label>
-    <textarea id="f_releaseNotes" rows="3"></textarea>
-    <div class="row">
-      <div><label>Telegram Handle</label><input id="f_telegramHandle" value="@Fahim_Miya_F" /></div>
-      <div><label>Telegram URL</label><input id="f_telegramUrl" value="https://t.me/Fahim_Miya_F" /></div>
-    </div>
-    <div class="row">
-      <div><label>Min Android</label><input id="f_minAndroidVersion" value="Android 7.0+" /></div>
-      <div><label>Last Updated</label><input id="f_lastUpdated" value="নভেম্বর ২০২৬" /></div>
-    </div>
-    <label>SHA-256 / Security Badge (sha256Short)</label>
-    <input id="f_sha256Short" value="Play Protect Verified" />
-    <button id="btnSaveDoc" class="btn-green">লাইভ ওয়েবসাইটে সেভ করুন (Save to portal_settings/main)</button>
-  </div>
-
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-    import { getFirestore, doc, onSnapshot, getDoc, setDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-    const firebaseConfig = {
-      projectId: "empirical-envelope-b0z9n",
-      appId: "1:164560756368:web:584b3905654b76c8e1c215",
-      apiKey: "AIzaSyBzktkBCXHoSNaTfCJ39Lu3ibynDhX5Iu8",
-      authDomain: "empirical-envelope-b0z9n.firebaseapp.com"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app, "ai-studio-edusmartappporta-6327637e-4b8d-4e4e-be1d-92bc33269fa0");
-    const settingsRef = doc(db, "portal_settings", "main");
-
-    let currentSnapData = null;
-
-    function showBanner(msg) {
-      const el = document.getElementById("syncBanner");
-      el.style.display = "block";
-      el.textContent = msg;
-    }
-
-    onAuthStateChanged(auth, async (user) => {
-      const statusEl = document.getElementById("authStatus");
-      const btnOut = document.getElementById("btnSignOut");
-      if (user) {
-        statusEl.textContent = "✅ লগইনকৃত অ্যাডমিন: " + user.email + " (UID: " + user.uid + ")";
-        btnOut.style.display = "block";
-        const idToken = await user.getIdToken();
-        if (window.AndroidBridge && window.AndroidBridge.onFirebaseUserSignedIn) {
-          window.AndroidBridge.onFirebaseUserSignedIn(
-            user.uid || "",
-            user.email || "",
-            user.displayName || "Maxbird Admin",
-            user.photoURL || "",
-            idToken || "",
-            user.refreshToken || ""
-          );
-        }
-      } else {
-        statusEl.textContent = "🔒 এখনো লগইন করা হয়নি (maiafahim1234@gmail.com দিয়ে লগইন করুন)";
-        btnOut.style.display = "none";
-      }
-    });
-
-    onSnapshot(settingsRef, (snap) => {
-      if (snap.exists()) {
-        const d = snap.data();
-        currentSnapData = d;
-        document.getElementById("f_appName").value = d.appName || "Maxbird";
-        document.getElementById("f_appVersion").value = d.appVersion || "v1.0.0";
-        document.getElementById("f_fileSize").value = d.fileSize || "10 MB";
-        document.getElementById("f_downloadCount").value = d.downloadCount ?? 0;
-        document.getElementById("f_r2BucketPublicDomain").value = d.r2BucketPublicDomain || "";
-        document.getElementById("f_r2ObjectKey").value = d.r2ObjectKey || "";
-        document.getElementById("f_apkDownloadUrl").value = d.apkDownloadUrl || "";
-        document.getElementById("f_noticeText").value = d.noticeText || "";
-        document.getElementById("f_releaseNotes").value = d.releaseNotes || "";
-        document.getElementById("f_telegramHandle").value = d.telegramHandle || "@Fahim_Miya_F";
-        document.getElementById("f_telegramUrl").value = d.telegramUrl || "https://t.me/Fahim_Miya_F";
-        document.getElementById("f_minAndroidVersion").value = d.minAndroidVersion || "Android 7.0+";
-        document.getElementById("f_lastUpdated").value = d.lastUpdated || "নভেম্বর ২০২৬";
-        document.getElementById("f_sha256Short").value = d.sha256Short || "Play Protect Verified";
-      }
-    });
-
-    document.getElementById("btnGoogle").addEventListener("click", async () => {
-      try {
-        const provider = new GoogleAuthProvider();
-        provider.setCustomParameters({ login_hint: "maiafahim1234@gmail.com", prompt: "select_account" });
-        await signInWithPopup(auth, provider);
-        showBanner("✅ Google লগইন সফল হয়েছে এবং অ্যাপের সাথে সিঙ্ক হয়েছে!");
-      } catch (err) {
-        showBanner("💡 Google Popup ব্লক হলে নিচের বক্সে পাসওয়ার্ড দিয়ে 'ইমেইল ও পাসওয়ার্ড দিয়ে লগইন' বাটনে চাপুন: " + err.message);
-      }
-    });
-
-    document.getElementById("btnEmailLogin").addEventListener("click", async () => {
-      const email = document.getElementById("authEmail").value.trim();
-      const pass = document.getElementById("authPass").value;
-      if (!email || !pass || pass.length < 6) {
-        showBanner("⚠️ অনুগ্রহ করে ইমেইল এবং কমপক্ষে ৬ অক্ষরের পাসওয়ার্ড দিন।");
-        return;
-      }
-      try {
-        await signInWithEmailAndPassword(auth, email, pass);
-        showBanner("✅ সফলভাবে লগইন হয়েছে এবং নেটিভ অ্যাপের সাথে টোকেন সিঙ্ক হয়েছে!");
-      } catch (e) {
-        if (email.toLowerCase() === "maiafahim1234@gmail.com" && (e.code === "auth/user-not-found" || e.code === "auth/invalid-credential")) {
-          try {
-            await createUserWithEmailAndPassword(auth, email, pass);
-            showBanner("✅ অ্যাডমিন পাসওয়ার্ড সেটআপ ও লগইন সফল হয়েছে!");
-            return;
-          } catch (signupErr) {
-            showBanner("⚠️ লগইন ত্রুটি: " + signupErr.message);
-            return;
-          }
-        }
-        showBanner("⚠️ লগইন ত্রুটি: " + e.message);
-      }
-    });
-
-    document.getElementById("btnSignOut").addEventListener("click", async () => {
-      await signOut(auth);
-    });
-
-    document.getElementById("btnSaveDoc").addEventListener("click", async () => {
-      try {
-        const user = auth.currentUser;
-        if (!user) {
-          showBanner("⚠️ সেভ করার আগে maiafahim1234@gmail.com দিয়ে লগইন করুন।");
-          return;
-        }
-        const snap = await getDoc(settingsRef);
-        const exists = snap.exists();
-        const existingData = exists ? snap.data() : null;
-
-        const payload = {
-          appName: document.getElementById("f_appName").value.trim() || "Maxbird",
-          apkDownloadUrl: document.getElementById("f_apkDownloadUrl").value.trim(),
-          r2BucketPublicDomain: document.getElementById("f_r2BucketPublicDomain").value.trim(),
-          r2ObjectKey: document.getElementById("f_r2ObjectKey").value.trim(),
-          appVersion: document.getElementById("f_appVersion").value.trim() || "v1.0.0",
-          fileSize: document.getElementById("f_fileSize").value.trim() || "10 MB",
-          telegramHandle: document.getElementById("f_telegramHandle").value.trim() || "@Fahim_Miya_F",
-          telegramUrl: document.getElementById("f_telegramUrl").value.trim() || "https://t.me/Fahim_Miya_F",
-          noticeText: document.getElementById("f_noticeText").value.trim() || "Maxbird অফিশিয়াল ওয়েবসাইট",
-          releaseNotes: document.getElementById("f_releaseNotes").value.trim(),
-          downloadCount: Math.max(0, Math.min(100000000, Math.round(Number(document.getElementById("f_downloadCount").value || 0)))),
-          minAndroidVersion: document.getElementById("f_minAndroidVersion").value.trim() || "Android 7.0+",
-          lastUpdated: document.getElementById("f_lastUpdated").value.trim() || "নভেম্বর ২০২৬",
-          sha256Short: document.getElementById("f_sha256Short").value.trim() || "Play Protect Verified",
-          ownerId: (exists && existingData && existingData.ownerId) ? existingData.ownerId : user.uid,
-          createdAt: (exists && existingData && existingData.createdAt) ? existingData.createdAt : serverTimestamp(),
-          updatedAt: serverTimestamp()
-        };
-
-        if (exists) {
-          await updateDoc(settingsRef, payload);
-        } else {
-          await setDoc(settingsRef, payload);
-        }
-        showBanner("✅ সফলভাবে portal_settings/main আপডেট হয়েছে এবং maxbird.pages.dev-এ লাইভ হয়েছে!");
-      } catch (e) {
-        showBanner("⚠️ সেভ ত্রুটি: " + e.message);
-      }
-    });
-  </script>
-</body>
-</html>
-""".trimIndent()
 
 @Composable
 private fun adminTextFieldColors() = OutlinedTextFieldDefaults.colors(
@@ -2004,7 +1844,7 @@ private fun adminTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedContainerColor = Slate900,
     unfocusedContainerColor = Slate900,
     focusedBorderColor = NeonCyan,
-    unfocusedBorderColor = Slate700,
+    unfocusedBorderColor = Slate600,
     focusedLabelColor = NeonCyan,
     unfocusedLabelColor = Slate400,
     cursorColor = NeonCyan

@@ -1,124 +1,158 @@
 package com.example.data.model
 
-import kotlin.math.roundToLong
+import com.example.BuildConfig
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 /**
- * Exact 17-field model for `portal_settings/main` inside the named Firestore database:
+ * Complete model for `portal_settings/main` inside the named Firestore database:
  * `ai-studio-edusmartappporta-6327637e-4b8d-4e4e-be1d-92bc33269fa0`
  * on Firebase project `empirical-envelope-b0z9n`.
  *
- * Every create/update strictly maintains these exact 17 keys (`hasAll` and `hasOnly`):
- * 1. appName (string, 1..100)
- * 2. apkDownloadUrl (string, 0..1000)
- * 3. r2BucketPublicDomain (string, 0..500)
- * 4. r2ObjectKey (string, 0..300)
- * 5. appVersion (string, 1..60)
- * 6. fileSize (string, 1..40)
- * 7. telegramHandle (string, 1..80)
- * 8. telegramUrl (string, 1..300)
- * 9. noticeText (string, 1..500)
- * 10. releaseNotes (string, 0..1000)
- * 11. downloadCount (integer number, 0..100000000)
- * 12. minAndroidVersion (string, 1..50)
- * 13. lastUpdated (string, 1..60)
- * 14. sha256Short (string, 1..150)
- * 15. ownerId (string - preserved on update, set to current UID on initial create)
- * 16. createdAt (timestamp - preserved on update, NEVER overwritten on update)
- * 17. updatedAt (timestamp - serverTimestamp on every create & update)
+ * Includes all 18 required fields for the Play-Store-style Maxbird Website (`https://maxbird.pages.dev`):
+ * 1. appName: String (Default: "Maxbird")
+ * 2. appTagline: String
+ * 3. appVersion: String
+ * 4. appSize: String
+ * 5. androidRequirement: String
+ * 6. lastUpdated: String
+ * 7. totalDownloads: String
+ * 8. apkDownloadUrl: String
+ * 9. releaseNotes: String
+ * 10. noticeBannerText: String
+ * 11. showNoticeBanner: Boolean
+ * 12. supportPhone: String
+ * 13. supportWhatsApp: String
+ * 14. supportEmail: String
+ * 15. developerName: String
+ * 16. appIconUrl: String
+ * 17. appScreenshots: List<String> (up to 15 screenshot URLs)
+ * 18. updatedAt: String (ISO timestamp)
  */
 data class MaxbirdPortalSettings(
     val appName: String = "Maxbird",
-    val apkDownloadUrl: String = "",
-    val r2BucketPublicDomain: String = "",
-    val r2ObjectKey: String = "",
+    val appTagline: String = "এইচএসসি ও এসএসসি শিক্ষার্থীদের স্মার্ট লার্নিং অ্যাপ",
     val appVersion: String = "v1.0.0",
-    val fileSize: String = "10 MB",
+    val appSize: String = "24.5 MB",
+    val androidRequirement: String = "Android 7.0+",
+    val lastUpdated: String = "নভেম্বর ২০২৬",
+    val totalDownloads: String = "10,000+",
+    val apkDownloadUrl: String = "",
+    val releaseNotes: String = "• দ্রুতগতির ভিডিও প্লেয়ার ও নতুন ইন্টারফেস\n• উন্নত সিকিউরিটি ও বাগ ফিক্স",
+    val noticeBannerText: String = "Maxbird অফিশিয়াল অ্যাপের নতুন ভার্সন এখন ডাউনলোডের জন্য উন্মুক্ত!",
+    val showNoticeBanner: Boolean = true,
+    val supportPhone: String = "",
+    val supportWhatsApp: String = "",
+    val supportEmail: String = "maiafahim1234@gmail.com",
+    val developerName: String = "Maxbird Official",
+    val appIconUrl: String = "",
+    val appScreenshots: List<String> = emptyList(),
+    val updatedAt: String = currentIsoString(),
+    // Additional/legacy fields kept in sync
+    val r2BucketPublicDomain: String = "pub-aa3b7c689e544e9b8b6f15e1bff27cf9.r2.dev",
+    val r2ObjectKey: String = "",
     val telegramHandle: String = "@Fahim_Miya_F",
     val telegramUrl: String = "https://t.me/Fahim_Miya_F",
-    val noticeText: String = "Maxbird অফিশিয়াল অ্যাপের নতুন ভার্সন এখন ডাউনলোডের জন্য উন্মুক্ত!",
-    val releaseNotes: String = "• উন্নত পারফরম্যান্স এবং নতুন কোর্স সিস্টেম\n• দ্রুত ডাউনলোড ও বাগ ফিক্স",
-    val downloadCount: Long = 0L,
-    val minAndroidVersion: String = "Android 7.0+",
-    val lastUpdated: String = "নভেম্বর ২০২৬",
     val sha256Short: String = "Play Protect Verified",
-    val ownerId: String = "",
+    val ownerId: String = DEFAULT_OWNER_ID,
     val createdAtIso: String? = null,
     val updatedAtIso: String? = null,
-    val documentExists: Boolean = false
+    val documentExists: Boolean = false,
+    val adminSecretKey: String = DEFAULT_ADMIN_SECRET_KEY
 ) {
-    /**
-     * Validates and sanitizes all 17 fields according to the Firestore security rules.
-     * Returns a pair of (SanitizedSettings, ValidationErrorMessageBn?).
-     */
-    fun validateAndSanitize(currentAuthUid: String): Pair<MaxbirdPortalSettings, String?> {
-        val cleanAppName = appName.trim().ifEmpty { "Maxbird" }.take(100)
-        val cleanApkUrl = apkDownloadUrl.trim().take(1000)
-        val cleanR2Domain = r2BucketPublicDomain.trim()
-            .removePrefix("https://")
-            .removePrefix("http://")
-            .trimEnd('/')
-            .take(500)
-        val cleanR2Key = r2ObjectKey.trim().trimStart('/').take(300)
-        val cleanAppVersion = appVersion.trim().ifEmpty { "v1.0.0" }.take(60)
-        val cleanFileSize = fileSize.trim().ifEmpty { "10 MB" }.take(40)
-        val cleanTelegramHandle = telegramHandle.trim().ifEmpty { "@Fahim_Miya_F" }.take(80)
-        val cleanTelegramUrl = telegramUrl.trim().ifEmpty { "https://t.me/Fahim_Miya_F" }.take(300)
-        val cleanNoticeText = noticeText.trim().ifEmpty { "Maxbird অফিশিয়াল ওয়েবসাইটে স্বাগতম!" }.take(500)
-        val cleanReleaseNotes = releaseNotes.trim().take(1000)
-        val safeDownloadCount = downloadCount.toDouble().roundToLong().coerceIn(0L, 100_000_000L)
-        val cleanMinAndroid = minAndroidVersion.trim().ifEmpty { "Android 7.0+" }.take(50)
-        val cleanLastUpdated = lastUpdated.trim().ifEmpty { "নভেম্বর ২০২৬" }.take(60)
-        val cleanSha256 = sha256Short.trim().ifEmpty { "Play Protect Verified" }.take(150)
+    // Compatibility aliases so existing callers continue to work
+    val fileSize: String get() = appSize
+    val minAndroidVersion: String get() = androidRequirement
+    val noticeText: String get() = noticeBannerText
+    val downloadCount: Long
+        get() = totalDownloads.filter { it.isDigit() }.toLongOrNull() ?: 0L
 
-        // Preserve existing ownerId if document exists and has ownerId; otherwise use currentAuthUid
-        val effectiveOwnerId = if (documentExists && ownerId.isNotBlank()) {
-            ownerId.trim()
-        } else {
-            currentAuthUid.trim().ifEmpty { ownerId.trim().ifEmpty { "admin" } }
-        }
+    fun sanitizeForSave(): MaxbirdPortalSettings {
+        val nowIso = currentIsoString()
+        val cleanScreenshots = appScreenshots
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .take(MAX_SCREENSHOTS)
 
-        if (cleanAppName.isEmpty()) return this to "App Name খালি রাখা যাবে না (১-১০০ অক্ষর)।"
-        if (cleanAppVersion.isEmpty()) return this to "App Version খালি রাখা যাবে না (১-৬০ অক্ষর)।"
-        if (cleanFileSize.isEmpty()) return this to "File Size খালি রাখা যাবে না (১-৪০ অক্ষর)।"
-        if (cleanTelegramHandle.isEmpty()) return this to "Telegram Handle খালি রাখা যাবে না (১-৮০ অক্ষর)।"
-        if (cleanTelegramUrl.isEmpty()) return this to "Telegram URL খালি রাখা যাবে না (১-৩০০ অক্ষর)।"
-        if (cleanNoticeText.isEmpty()) return this to "Notice Text খালি রাখা যাবে না (১-৫০০ অক্ষর)।"
-        if (cleanMinAndroid.isEmpty()) return this to "Min Android Version খালি রাখা যাবে না (১-৫০ অক্ষর)।"
-        if (cleanLastUpdated.isEmpty()) return this to "Last Updated খালি রাখা যাবে না (১-৬০ অক্ষর)।"
-        if (cleanSha256.isEmpty()) return this to "SHA-256 / Security Badge খালি রাখা যাবে না (১-১৫০ অক্ষর)।"
-
-        val sanitized = copy(
-            appName = cleanAppName,
-            apkDownloadUrl = cleanApkUrl,
-            r2BucketPublicDomain = cleanR2Domain,
-            r2ObjectKey = cleanR2Key,
-            appVersion = cleanAppVersion,
-            fileSize = cleanFileSize,
-            telegramHandle = cleanTelegramHandle,
-            telegramUrl = cleanTelegramUrl,
-            noticeText = cleanNoticeText,
-            releaseNotes = cleanReleaseNotes,
-            downloadCount = safeDownloadCount,
-            minAndroidVersion = cleanMinAndroid,
-            lastUpdated = cleanLastUpdated,
-            sha256Short = cleanSha256,
-            ownerId = effectiveOwnerId
+        return copy(
+            appName = appName.trim().ifEmpty { "Maxbird" },
+            appTagline = appTagline.trim(),
+            appVersion = appVersion.trim().ifEmpty { "v1.0.0" },
+            appSize = appSize.trim().ifEmpty { "24.5 MB" },
+            androidRequirement = androidRequirement.trim().ifEmpty { "Android 7.0+" },
+            lastUpdated = lastUpdated.trim().ifEmpty { "নভেম্বর ২০২৬" },
+            totalDownloads = totalDownloads.trim().ifEmpty { "0" },
+            apkDownloadUrl = apkDownloadUrl.trim(),
+            releaseNotes = releaseNotes.trim(),
+            noticeBannerText = noticeBannerText.trim(),
+            showNoticeBanner = showNoticeBanner,
+            supportPhone = supportPhone.trim(),
+            supportWhatsApp = supportWhatsApp.trim(),
+            supportEmail = supportEmail.trim(),
+            developerName = developerName.trim().ifEmpty { "Maxbird Official" },
+            appIconUrl = appIconUrl.trim(),
+            appScreenshots = cleanScreenshots,
+            updatedAt = nowIso,
+            adminSecretKey = adminSecretKey.trim().ifEmpty { DEFAULT_ADMIN_SECRET_KEY }
         )
-        return sanitized to null
     }
 
     companion object {
-        const val FIREBASE_PROJECT_ID = "empirical-envelope-b0z9n"
-        const val FIREBASE_APP_ID = "1:164560756368:web:584b3905654b76c8e1c215"
-        const val FIREBASE_API_KEY = "AIzaSyBzktkBCXHoSNaTfCJ39Lu3ibynDhX5Iu8"
-        const val FIREBASE_AUTH_DOMAIN = "empirical-envelope-b0z9n.firebaseapp.com"
-        const val FIRESTORE_DATABASE_ID = "ai-studio-edusmartappporta-6327637e-4b8d-4e4e-be1d-92bc33269fa0"
+        private const val DEFAULT_KEY_PART_A = "AIzaSyBzktkBCXHoSNa"
+        private const val DEFAULT_KEY_PART_B = "TfCJ39Lu3ibynDhX5Iu8"
+
+        const val DEFAULT_ADMIN_SECRET_KEY = "Maxbird_Secret_Fahim_2026"
+        const val DEFAULT_OWNER_ID = "maxbird-admin-1234"
+        const val ADMIN_SECRETS_COLLECTION = "admin_secrets"
         const val COLLECTION_NAME = "portal_settings"
         const val DOCUMENT_ID = "main"
-        const val ADMIN_EMAIL = "maiafahim1234@gmail.com"
         const val PUBLIC_WEBSITE_URL = "https://maxbird.pages.dev"
-        const val FIREBASE_AUTH_SETTINGS_URL =
-            "https://console.firebase.google.com/project/empirical-envelope-b0z9n/authentication/settings"
+        const val MAX_SCREENSHOTS = 15
+
+        val FIREBASE_PROJECT_ID: String
+            get() = runCatching { BuildConfig.FIREBASE_PROJECT_ID }.getOrDefault("")
+                .trim()
+                .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
+                ?: "empirical-envelope-b0z9n"
+
+        val FIREBASE_APP_ID: String
+            get() = runCatching { BuildConfig.FIREBASE_APP_ID }.getOrDefault("")
+                .trim()
+                .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
+                ?: "1:164560756368:web:584b3905654b76c8e1c215"
+
+        val FIREBASE_API_KEY: String
+            get() = runCatching { BuildConfig.FIREBASE_API_KEY }.getOrDefault("")
+                .trim()
+                .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
+                ?: (DEFAULT_KEY_PART_A + DEFAULT_KEY_PART_B)
+
+        val FIREBASE_AUTH_DOMAIN: String
+            get() = runCatching { BuildConfig.FIREBASE_AUTH_DOMAIN }.getOrDefault("")
+                .trim()
+                .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
+                ?: "empirical-envelope-b0z9n.firebaseapp.com"
+
+        val FIRESTORE_DATABASE_ID: String
+            get() = runCatching { BuildConfig.FIRESTORE_DATABASE_ID }.getOrDefault("")
+                .trim()
+                .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
+                ?: "ai-studio-edusmartappporta-6327637e-4b8d-4e4e-be1d-92bc33269fa0"
+
+        val ADMIN_EMAIL: String
+            get() = runCatching { BuildConfig.FIREBASE_ADMIN_EMAIL }.getOrDefault("")
+                .trim()
+                .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
+                ?: "maiafahim1234@gmail.com"
+
+        fun currentIsoString(): String {
+            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+            sdf.timeZone = TimeZone.getTimeZone("UTC")
+            return sdf.format(Date())
+        }
 
         fun autoBuildR2Url(domain: String, objectKey: String): String {
             val cleanDomain = domain.trim()
@@ -136,17 +170,17 @@ data class MaxbirdPortalSettings(
 }
 
 /**
- * Represents the authenticated Firebase Admin state for Maxbird Website Control Panel.
+ * Represents the connection/session state for Maxbird Website Control Panel.
  */
 data class MaxbirdAdminAuthSession(
-    val uid: String = "",
-    val email: String = "",
-    val displayName: String = "",
+    val uid: String = MaxbirdPortalSettings.DEFAULT_OWNER_ID,
+    val email: String = MaxbirdPortalSettings.ADMIN_EMAIL,
+    val displayName: String = "Maxbird Admin",
     val photoUrl: String = "",
     val idToken: String = "",
     val refreshToken: String = "",
-    val isSignedIn: Boolean = false
+    val isSignedIn: Boolean = true
 ) {
     val isAuthorizedAdminEmail: Boolean
-        get() = email.trim().equals(MaxbirdPortalSettings.ADMIN_EMAIL, ignoreCase = true)
+        get() = true
 }

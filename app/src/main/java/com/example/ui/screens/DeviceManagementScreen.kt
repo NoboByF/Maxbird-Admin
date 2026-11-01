@@ -1419,11 +1419,11 @@ private fun StudentVerificationDeviceCard(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // 1. Clean Top Header Row: Avatar + Student Name (with full weight) + Edit Icon + Status Pill
+            // 1. Clean Top Header: Avatar + Student Name & Device Model + Status Pill
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -1431,7 +1431,7 @@ private fun StudentVerificationDeviceCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(42.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(statusColor.copy(alpha = 0.18f)),
                         contentAlignment = Alignment.Center
@@ -1456,9 +1456,10 @@ private fun StudentVerificationDeviceCard(
                                 },
                                 fontSize = 15.sp
                             ),
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "📱 ${device.fullPhoneModel} • ${device.androidVersion ?: "Android"} (v${device.appVersion ?: "1.0"})",
                             style = MaterialTheme.typography.bodySmall.copy(
@@ -1466,33 +1467,13 @@ private fun StudentVerificationDeviceCard(
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 11.sp
                             ),
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.width(6.dp))
-
-                // Compact Edit Note Icon Button (Never squashed!)
-                IconButton(
-                    onClick = onEditNoteClick,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(Slate950)
-                        .border(1.dp, NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
-                        .testTag("btn_edit_note_${device.effectiveKey}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = "Edit Student Note",
-                        tint = NeonCyan,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
                 // Clean Single-Icon Status Badge
                 Surface(
@@ -1501,7 +1482,7 @@ private fun StudentVerificationDeviceCard(
                     border = BorderStroke(1.dp, statusColor)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -1695,7 +1676,75 @@ private fun StudentVerificationDeviceCard(
                 }
             }
 
-            // 4. Display Device ID + Student Note Quick Edit Bar
+            // 4. Full-Width Display Device ID Box (Never squished!)
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Slate950,
+                border = BorderStroke(1.dp, Slate700),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onCopyId() }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "DISPLAY DEVICE ID",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Slate400,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = device.displayDeviceId.ifBlank { device.deviceHash.take(18) },
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = NeonCyan,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Slate800,
+                        border = BorderStroke(1.dp, Slate700)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copy ID",
+                                tint = NeonCyan,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "কপি",
+                                fontSize = 11.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 4b. Clean 2-Column Action Row: Student Note/Phone Link + Course Permissions
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1704,97 +1753,39 @@ private fun StudentVerificationDeviceCard(
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = Slate950,
-                    border = BorderStroke(1.dp, Slate700),
+                    border = BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.55f)),
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { onCopyId() }
+                        .clickable { onEditNoteClick() }
+                        .testTag("btn_edit_note_${device.effectiveKey}")
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "DISPLAY DEVICE ID",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = Slate400,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            )
-                            Text(
-                                text = device.displayDeviceId.ifBlank { device.deviceHash.take(16) },
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    color = NeonCyan,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
-                                ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Slate800,
-                            border = BorderStroke(0.5.dp, Slate700)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentCopy,
-                                    contentDescription = "Copy ID",
-                                    tint = NeonCyan,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text(
-                                    text = "কপি",
-                                    fontSize = 10.sp,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Quick Student Note / Link Button
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Slate950,
-                    border = BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.5f)),
-                    modifier = Modifier.clickable { onEditNoteClick() }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 11.dp),
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Link,
+                            imageVector = Icons.Default.Edit,
                             contentDescription = null,
                             tint = NeonCyan,
                             modifier = Modifier.size(15.dp)
                         )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (device.studentNote.isNullOrBlank()) "নাম/নম্বর লিংক" else "নোট এডিট",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = NeonCyan,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 11.sp
-                            )
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
-                // Course & Account Permissions Button (`admin_set_device_course_permissions` / `admin_set_account_course_permissions`)
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = Slate950,
@@ -1802,12 +1793,16 @@ private fun StudentVerificationDeviceCard(
                         1.dp,
                         if (device.isAccessRestricted || boundAccounts.any { it.isAccessRestricted }) AmberWarning else Slate700
                     ),
-                    modifier = Modifier.clickable { onOpenCoursePermissionsClick() }
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onOpenCoursePermissionsClick() }
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 11.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.School,
@@ -1815,13 +1810,16 @@ private fun StudentVerificationDeviceCard(
                             tint = if (device.isAccessRestricted) AmberWarning else EmeraldSuccess,
                             modifier = Modifier.size(15.dp)
                         )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "কোর্স পারমিশন",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp
-                            )
+                                fontSize = 11.sp
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
