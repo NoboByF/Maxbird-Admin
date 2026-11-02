@@ -26,7 +26,11 @@ import kotlin.math.roundToLong
  *
  * Uses atomic `writeBatch` (`documents:commit`) with Secret Key verification:
  * - Write 1: `/admin_secrets/{adminSecretKey}` -> `{ verifiedAt: serverTimestamp() }`
- * - Write 2: `/portal_settings/main` -> all 18 required fields + `updatedAt: new Date().toISOString()`
+ * - Write 2: `/portal_settings/main` -> verified live schema (`appName`, `appVersion`, `fileSize`,
+ *   `minAndroidVersion`, `lastUpdated`, `apkDownloadUrl`, `r2BucketPublicDomain`, `r2ObjectKey`,
+ *   `noticeText`, `releaseNotes`, `telegramHandle`, `telegramUrl`, `sha256Short`, `downloadCount`,
+ *   `ownerId`, `createdAt`, `updatedAt`, `appIconUrl`, `appScreenshots`) with automatic fallback
+ *   to the 18-field schema if `firestore.rules` is later switched.
  */
 class MaxbirdFirestoreClient(private val context: Context) {
 
@@ -68,6 +72,18 @@ class MaxbirdFirestoreClient(private val context: Context) {
     fun saveAdminSecretKey(secretKey: String) {
         val clean = secretKey.trim().ifBlank { MaxbirdPortalSettings.DEFAULT_ADMIN_SECRET_KEY }
         prefs.edit().putString("admin_secret_key", clean).apply()
+    }
+
+    private fun saveLocalExtraFields(draft: MaxbirdPortalSettings) {
+        prefs.edit()
+            .putString("local_app_tagline", draft.appTagline)
+            .putBoolean("local_show_notice_banner", draft.showNoticeBanner)
+            .putString("local_notice_banner_text", draft.noticeBannerText)
+            .putString("local_support_phone", draft.supportPhone)
+            .putString("local_support_whatsapp", draft.supportWhatsApp)
+            .putString("local_support_email", draft.supportEmail)
+            .putString("local_developer_name", draft.developerName)
+            .apply()
     }
 
     fun getSavedAuthSession(): MaxbirdAdminAuthSession {
@@ -140,32 +156,47 @@ class MaxbirdFirestoreClient(private val context: Context) {
 
         val legacyFileSize = readStringField(fields, "fileSize", "24.5 MB")
         val legacyMinAndroid = readStringField(fields, "minAndroidVersion", "Android 7.0+")
-        val legacyNotice = readStringField(
-            fields,
-            "noticeText",
-            "Maxbird অফিশিয়াল অ্যাপের নতুন ভার্সন এখন ডাউনলোডের জন্য উন্মুক্ত!"
-        )
-        val legacyDownloadCount = readLongField(fields, "downloadCount", 0L)
+        val legacyNotice = readStringField(fields, "noticeText", "")
+        val legacyDownloadCount = readLongField(fields, "downloadCount", 5L)
 
         val resolvedAppSize = readStringField(fields, "appSize", "").ifBlank { legacyFileSize }
         val resolvedAndroidReq = readStringField(fields, "androidRequirement", "").ifBlank { legacyMinAndroid }
-        val resolvedNoticeBanner = readStringField(fields, "noticeBannerText", "").ifBlank { legacyNotice }
+
+        val savedLocalNotice = prefs.getString(
+            "local_notice_banner_text",
+            "Maxbird অফিশিয়াল অ্যাপের নতুন ভার্সন এখন ডাউনলোডের জন্য উন্মুক্ত!"
+        ).orEmpty()
+        val savedShowNotice = prefs.getBoolean("local_show_notice_banner", true)
+
+        val rawNoticeFromDb = readStringField(fields, "noticeBannerText", "").ifBlank { legacyNotice }
+        val resolvedNoticeBanner = rawNoticeFromDb.ifBlank { savedLocalNotice }
+        val resolvedShowNotice = if (fields.has("showNoticeBanner")) {
+            readBooleanField(fields, "showNoticeBanner", true)
+        } else {
+            if (legacyNotice.isNotBlank()) true else savedShowNotice
+        }
+
         val resolvedTotalDownloads = readStringOrNumberField(
             fields,
             "totalDownloads",
-            if (legacyDownloadCount > 0L) legacyDownloadCount.toString() else "10,000+"
+            legacyDownloadCount.toString()
         )
 
         val updatedAtStr = readStringField(fields, "updatedAt", "")
             .ifBlank { readTimestampField(fields, "updatedAt") ?: MaxbirdPortalSettings.currentIsoString() }
 
+        val savedTagline = prefs.getString(
+            "local_app_tagline",
+            "এইচএসসি ও এসএসসি শিক্ষার্থীদের স্মার্ট লার্নিং অ্যাপ"
+        ).orEmpty()
+        val savedPhone = prefs.getString("local_support_phone", "").orEmpty()
+        val savedWhatsApp = prefs.getString("local_support_whatsapp", "").orEmpty()
+        val savedEmail = prefs.getString("local_support_email", "maiafahim1234@gmail.com").orEmpty()
+        val savedDeveloper = prefs.getString("local_developer_name", "Maxbird Official").orEmpty()
+
         return MaxbirdPortalSettings(
             appName = readStringField(fields, "appName", "Maxbird"),
-            appTagline = readStringField(
-                fields,
-                "appTagline",
-                "এইচএসসি ও এসএসসি শিক্ষার্থীদের স্মার্ট লার্নিং অ্যাপ"
-            ),
+            appTagline = readStringField(fields, "appTagline", savedTagline),
             appVersion = readStringField(fields, "appVersion", "v1.0.0"),
             appSize = resolvedAppSize,
             androidRequirement = resolvedAndroidReq,
@@ -174,11 +205,11 @@ class MaxbirdFirestoreClient(private val context: Context) {
             apkDownloadUrl = readStringField(fields, "apkDownloadUrl", ""),
             releaseNotes = readStringField(fields, "releaseNotes", ""),
             noticeBannerText = resolvedNoticeBanner,
-            showNoticeBanner = readBooleanField(fields, "showNoticeBanner", true),
-            supportPhone = readStringField(fields, "supportPhone", ""),
-            supportWhatsApp = readStringField(fields, "supportWhatsApp", ""),
-            supportEmail = readStringField(fields, "supportEmail", "maiafahim1234@gmail.com"),
-            developerName = readStringField(fields, "developerName", "Maxbird Official"),
+            showNoticeBanner = resolvedShowNotice,
+            supportPhone = readStringField(fields, "supportPhone", savedPhone),
+            supportWhatsApp = readStringField(fields, "supportWhatsApp", savedWhatsApp),
+            supportEmail = readStringField(fields, "supportEmail", savedEmail),
+            developerName = readStringField(fields, "developerName", savedDeveloper),
             appIconUrl = readStringField(fields, "appIconUrl", ""),
             appScreenshots = readStringArrayField(fields, "appScreenshots"),
             updatedAt = updatedAtStr,
@@ -203,32 +234,23 @@ class MaxbirdFirestoreClient(private val context: Context) {
     // Firestore Atomic `writeBatch` Save (`admin_secrets` + `portal_settings/main`)
     // =========================================================================
 
-    /**
-     * Executes the exact `writeBatch` specified by the user:
-     * ```ts
-     * const batch = writeBatch(db);
-     * const secretRef = doc(db, "admin_secrets", adminSecretKey.trim());
-     * batch.set(secretRef, { verifiedAt: serverTimestamp() });
-     *
-     * const mainRef = doc(db, "portal_settings", "main");
-     * batch.set(mainRef, {
-     *   ...data,
-     *   updatedAt: new Date().toISOString()
-     * });
-     * await batch.commit();
-     * ```
-     */
     suspend fun savePortalSettings(
         draft: MaxbirdPortalSettings
     ): Result<MaxbirdPortalSettings> = withContext(Dispatchers.IO) {
         try {
             val secretKey = draft.adminSecretKey.trim().ifBlank { getSavedAdminSecretKey() }
-            if (secretKey.isBlank()) {
-                return@withContext Result.failure(Exception("দয়া করে Admin Secret Key দিন।"))
-            }
+                .ifBlank { MaxbirdPortalSettings.DEFAULT_ADMIN_SECRET_KEY }
             saveAdminSecretKey(secretKey)
+            saveLocalExtraFields(draft)
 
             val sanitized = draft.copy(adminSecretKey = secretKey).sanitizeForSave()
+
+            // Read existing document to preserve `createdAt` and `ownerId` required by live rules
+            val existingSettings = fetchPortalSettings().getOrNull()
+            val resolvedOwnerId = existingSettings?.ownerId
+                ?.takeIf { it.isNotBlank() }
+                ?: sanitized.ownerId.ifBlank { MaxbirdPortalSettings.DEFAULT_OWNER_ID }
+            val existingCreatedAtIso = existingSettings?.createdAtIso ?: sanitized.createdAtIso
 
             val encodedSecretDocId = URLEncoder.encode(secretKey, "UTF-8").replace("+", "%20")
             val secretDocResourceName =
@@ -256,9 +278,83 @@ class MaxbirdFirestoreClient(private val context: Context) {
                 )
             }
 
-            // Step 2 (Primary 18-field schema):
-            // batch.set(mainRef, { ...18 fields, updatedAt: new Date().toISOString() })
-            fun executePrimary18FieldBatch(): Pair<Boolean, String> {
+            // Attempt 1: Live Deployed Firestore Rules Schema (19 fields including appIconUrl & appScreenshots)
+            fun executeLiveDeployedSchemaBatch(): Pair<Boolean, String> {
+                val effectiveNotice = if (sanitized.showNoticeBanner) sanitized.noticeBannerText else ""
+                val mainFieldsObj = JSONObject().apply {
+                    put("appName", stringValue(sanitized.appName))
+                    put("appVersion", stringValue(sanitized.appVersion))
+                    put("fileSize", stringValue(sanitized.appSize))
+                    put("minAndroidVersion", stringValue(sanitized.androidRequirement))
+                    put("lastUpdated", stringValue(sanitized.lastUpdated))
+                    put("apkDownloadUrl", stringValue(sanitized.apkDownloadUrl))
+                    put("r2BucketPublicDomain", stringValue(sanitized.r2BucketPublicDomain))
+                    put("r2ObjectKey", stringValue(sanitized.r2ObjectKey))
+                    put("noticeText", stringValue(effectiveNotice))
+                    put("releaseNotes", stringValue(sanitized.releaseNotes))
+                    put("telegramHandle", stringValue(sanitized.telegramHandle))
+                    put("telegramUrl", stringValue(sanitized.telegramUrl))
+                    put("sha256Short", stringValue(sanitized.sha256Short))
+                    put("downloadCount", integerValue(sanitized.downloadCount))
+                    put("ownerId", stringValue(resolvedOwnerId))
+                    put("appIconUrl", stringValue(sanitized.appIconUrl))
+                    put("appScreenshots", stringArrayValue(sanitized.appScreenshots))
+                    if (!existingCreatedAtIso.isNullOrBlank()) {
+                        put("createdAt", timestampValue(existingCreatedAtIso))
+                    }
+                }
+
+                val mainTransforms = JSONArray().apply {
+                    if (existingCreatedAtIso.isNullOrBlank()) {
+                        put(
+                            JSONObject().apply {
+                                put("fieldPath", "createdAt")
+                                put("setToServerValue", "REQUEST_TIME")
+                            }
+                        )
+                    }
+                    put(
+                        JSONObject().apply {
+                            put("fieldPath", "updatedAt")
+                            put("setToServerValue", "REQUEST_TIME")
+                        }
+                    )
+                }
+
+                val mainWriteOp = JSONObject().apply {
+                    put(
+                        "update",
+                        JSONObject().apply {
+                            put("name", settingsDocumentResourceName)
+                            put("fields", mainFieldsObj)
+                        }
+                    )
+                    put("updateTransforms", mainTransforms)
+                }
+
+                val commitPayload = JSONObject().apply {
+                    put(
+                        "writes",
+                        JSONArray().apply {
+                            put(secretWriteOp)
+                            put(mainWriteOp)
+                        }
+                    )
+                }
+
+                val request = Request.Builder()
+                    .url(commitUrl)
+                    .post(commitPayload.toString().toRequestBody(jsonMediaType))
+                    .build()
+
+                httpClient.newCall(request).execute().use { response ->
+                    val bodyStr = response.body?.string().orEmpty()
+                    return Pair(response.isSuccessful, bodyStr)
+                }
+            }
+
+            // Attempt 2: Fallback 18-Field Schema (if user later updates firestore.rules)
+            fun execute18FieldSchemaBatch(): Pair<Boolean, String> {
                 val mainFieldsObj = JSONObject().apply {
                     put("appName", stringValue(sanitized.appName))
                     put("appTagline", stringValue(sanitized.appTagline))
@@ -311,9 +407,14 @@ class MaxbirdFirestoreClient(private val context: Context) {
                 }
             }
 
-            val (ok, errBody) = executePrimary18FieldBatch()
-            if (!ok) {
-                return@withContext Result.failure(Exception(parseFirestoreError(errBody)))
+            val (liveOk, liveErrBody) = executeLiveDeployedSchemaBatch()
+            if (!liveOk) {
+                val (fallbackOk, fallbackErrBody) = execute18FieldSchemaBatch()
+                if (!fallbackOk) {
+                    return@withContext Result.failure(
+                        Exception(parseFirestoreError(liveErrBody.ifBlank { fallbackErrBody }))
+                    )
+                }
             }
 
             val refreshed = fetchPortalSettings().getOrNull() ?: sanitized.copy(documentExists = true)
@@ -388,8 +489,14 @@ class MaxbirdFirestoreClient(private val context: Context) {
     private fun stringValue(value: String): JSONObject =
         JSONObject().put("stringValue", value)
 
+    private fun integerValue(value: Long): JSONObject =
+        JSONObject().put("integerValue", value.coerceAtLeast(0L).toString())
+
     private fun booleanValue(value: Boolean): JSONObject =
         JSONObject().put("booleanValue", value)
+
+    private fun timestampValue(isoString: String): JSONObject =
+        JSONObject().put("timestampValue", isoString)
 
     private fun stringArrayValue(items: List<String>): JSONObject {
         val valuesArray = JSONArray()

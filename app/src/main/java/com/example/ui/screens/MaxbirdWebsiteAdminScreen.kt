@@ -1698,35 +1698,30 @@ fun MaxbirdWebsiteAdminScreen(
                         )
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = settings.supportPhone,
-                            onValueChange = { onUpdateDraft(settings.copy(supportPhone = it)) },
-                            label = { Text("সাপোর্ট ফোন (supportPhone)") },
-                            placeholder = { Text("+8801XXXXXXXXX") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                            singleLine = true,
-                            colors = adminTextFieldColors(),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("input_maxbird_support_phone")
-                        )
+                    OutlinedTextField(
+                        value = settings.supportPhone,
+                        onValueChange = { onUpdateDraft(settings.copy(supportPhone = it)) },
+                        label = { Text("সাপোর্ট ফোন নম্বর (supportPhone)") },
+                        placeholder = { Text("+8801XXXXXXXXX") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        singleLine = true,
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_maxbird_support_phone")
+                    )
 
-                        OutlinedTextField(
-                            value = settings.supportWhatsApp,
-                            onValueChange = { onUpdateDraft(settings.copy(supportWhatsApp = it)) },
-                            label = { Text("হোয়াটসঅ্যাপ (supportWhatsApp)") },
-                            placeholder = { Text("https://wa.me/8801...") },
-                            singleLine = true,
-                            colors = adminTextFieldColors(),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("input_maxbird_support_whatsapp")
-                        )
-                    }
+                    OutlinedTextField(
+                        value = settings.supportWhatsApp,
+                        onValueChange = { onUpdateDraft(settings.copy(supportWhatsApp = it)) },
+                        label = { Text("হোয়াটসঅ্যাপ লিংক বা নম্বর (supportWhatsApp)") },
+                        placeholder = { Text("https://wa.me/8801XXXXXXXXX") },
+                        singleLine = true,
+                        colors = adminTextFieldColors(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_maxbird_support_whatsapp")
+                    )
 
                     OutlinedTextField(
                         value = settings.supportEmail,
@@ -1741,13 +1736,42 @@ fun MaxbirdWebsiteAdminScreen(
                             .testTag("input_maxbird_support_email")
                     )
 
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = settings.telegramHandle,
+                            onValueChange = { onUpdateDraft(settings.copy(telegramHandle = it)) },
+                            label = { Text("Telegram ID") },
+                            placeholder = { Text("@Fahim_Miya_F") },
+                            singleLine = true,
+                            colors = adminTextFieldColors(),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_maxbird_telegram_handle")
+                        )
+
+                        OutlinedTextField(
+                            value = settings.telegramUrl,
+                            onValueChange = { onUpdateDraft(settings.copy(telegramUrl = it)) },
+                            label = { Text("Telegram লিংক") },
+                            placeholder = { Text("https://t.me/Fahim_Miya_F") },
+                            singleLine = true,
+                            colors = adminTextFieldColors(),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_maxbird_telegram_url")
+                        )
+                    }
+
                     HorizontalDivider(color = Slate700)
 
-                    // Admin Secret Key Input (`Maxbird_Secret_Fahim_2026`)
+                    // Admin Secret Key Input (`Maxbird_Secret_Fahim_2026` pre-filled by default)
                     OutlinedTextField(
                         value = settings.adminSecretKey,
                         onValueChange = { onUpdateDraft(settings.copy(adminSecretKey = it)) },
-                        label = { Text("Admin Secret Key (writeBatch ভেরিফিকেশন)") },
+                        label = { Text("Admin Secret Key (স্বয়ংক্রিয়ভাবে সেট করা আছে)") },
                         placeholder = { Text(MaxbirdPortalSettings.DEFAULT_ADMIN_SECRET_KEY) },
                         singleLine = true,
                         visualTransformation = if (secretKeyVisible) {

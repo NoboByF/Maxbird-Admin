@@ -10,26 +10,6 @@ import java.util.TimeZone
  * Complete model for `portal_settings/main` inside the named Firestore database:
  * `ai-studio-edusmartappporta-6327637e-4b8d-4e4e-be1d-92bc33269fa0`
  * on Firebase project `empirical-envelope-b0z9n`.
- *
- * Includes all 18 required fields for the Play-Store-style Maxbird Website (`https://maxbird.pages.dev`):
- * 1. appName: String (Default: "Maxbird")
- * 2. appTagline: String
- * 3. appVersion: String
- * 4. appSize: String
- * 5. androidRequirement: String
- * 6. lastUpdated: String
- * 7. totalDownloads: String
- * 8. apkDownloadUrl: String
- * 9. releaseNotes: String
- * 10. noticeBannerText: String
- * 11. showNoticeBanner: Boolean
- * 12. supportPhone: String
- * 13. supportWhatsApp: String
- * 14. supportEmail: String
- * 15. developerName: String
- * 16. appIconUrl: String
- * 17. appScreenshots: List<String> (up to 15 screenshot URLs)
- * 18. updatedAt: String (ISO timestamp)
  */
 data class MaxbirdPortalSettings(
     val appName: String = "Maxbird",
@@ -38,7 +18,7 @@ data class MaxbirdPortalSettings(
     val appSize: String = "24.5 MB",
     val androidRequirement: String = "Android 7.0+",
     val lastUpdated: String = "নভেম্বর ২০২৬",
-    val totalDownloads: String = "10,000+",
+    val totalDownloads: String = "5",
     val apkDownloadUrl: String = "",
     val releaseNotes: String = "• দ্রুতগতির ভিডিও প্লেয়ার ও নতুন ইন্টারফেস\n• উন্নত সিকিউরিটি ও বাগ ফিক্স",
     val noticeBannerText: String = "Maxbird অফিশিয়াল অ্যাপের নতুন ভার্সন এখন ডাউনলোডের জন্য উন্মুক্ত!",
@@ -50,7 +30,6 @@ data class MaxbirdPortalSettings(
     val appIconUrl: String = "",
     val appScreenshots: List<String> = emptyList(),
     val updatedAt: String = currentIsoString(),
-    // Additional/legacy fields kept in sync
     val r2BucketPublicDomain: String = "pub-aa3b7c689e544e9b8b6f15e1bff27cf9.r2.dev",
     val r2ObjectKey: String = "",
     val telegramHandle: String = "@Fahim_Miya_F",
@@ -62,7 +41,6 @@ data class MaxbirdPortalSettings(
     val documentExists: Boolean = false,
     val adminSecretKey: String = DEFAULT_ADMIN_SECRET_KEY
 ) {
-    // Compatibility aliases so existing callers continue to work
     val fileSize: String get() = appSize
     val minAndroidVersion: String get() = androidRequirement
     val noticeText: String get() = noticeBannerText
@@ -96,6 +74,12 @@ data class MaxbirdPortalSettings(
             appIconUrl = appIconUrl.trim(),
             appScreenshots = cleanScreenshots,
             updatedAt = nowIso,
+            r2BucketPublicDomain = r2BucketPublicDomain.trim(),
+            r2ObjectKey = r2ObjectKey.trim(),
+            telegramHandle = telegramHandle.trim().ifEmpty { "@Fahim_Miya_F" },
+            telegramUrl = telegramUrl.trim().ifEmpty { "https://t.me/Fahim_Miya_F" },
+            sha256Short = sha256Short.trim().ifEmpty { "Play Protect Verified" },
+            ownerId = ownerId.trim().ifEmpty { DEFAULT_OWNER_ID },
             adminSecretKey = adminSecretKey.trim().ifEmpty { DEFAULT_ADMIN_SECRET_KEY }
         )
     }
@@ -112,39 +96,42 @@ data class MaxbirdPortalSettings(
         const val PUBLIC_WEBSITE_URL = "https://maxbird.pages.dev"
         const val MAX_SCREENSHOTS = 15
 
+        private fun readBuildConfigField(name: String): String {
+            return try {
+                val field = BuildConfig::class.java.getField(name)
+                (field.get(null) as? String).orEmpty().trim()
+            } catch (_: Exception) {
+                ""
+            }
+        }
+
         val FIREBASE_PROJECT_ID: String
-            get() = runCatching { BuildConfig.FIREBASE_PROJECT_ID }.getOrDefault("")
-                .trim()
+            get() = readBuildConfigField("FIREBASE_PROJECT_ID")
                 .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
                 ?: "empirical-envelope-b0z9n"
 
         val FIREBASE_APP_ID: String
-            get() = runCatching { BuildConfig.FIREBASE_APP_ID }.getOrDefault("")
-                .trim()
+            get() = readBuildConfigField("FIREBASE_APP_ID")
                 .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
                 ?: "1:164560756368:web:584b3905654b76c8e1c215"
 
         val FIREBASE_API_KEY: String
-            get() = runCatching { BuildConfig.FIREBASE_API_KEY }.getOrDefault("")
-                .trim()
+            get() = readBuildConfigField("FIREBASE_API_KEY")
                 .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
                 ?: (DEFAULT_KEY_PART_A + DEFAULT_KEY_PART_B)
 
         val FIREBASE_AUTH_DOMAIN: String
-            get() = runCatching { BuildConfig.FIREBASE_AUTH_DOMAIN }.getOrDefault("")
-                .trim()
+            get() = readBuildConfigField("FIREBASE_AUTH_DOMAIN")
                 .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
                 ?: "empirical-envelope-b0z9n.firebaseapp.com"
 
         val FIRESTORE_DATABASE_ID: String
-            get() = runCatching { BuildConfig.FIRESTORE_DATABASE_ID }.getOrDefault("")
-                .trim()
+            get() = readBuildConfigField("FIRESTORE_DATABASE_ID")
                 .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
                 ?: "ai-studio-edusmartappporta-6327637e-4b8d-4e4e-be1d-92bc33269fa0"
 
         val ADMIN_EMAIL: String
-            get() = runCatching { BuildConfig.FIREBASE_ADMIN_EMAIL }.getOrDefault("")
-                .trim()
+            get() = readBuildConfigField("FIREBASE_ADMIN_EMAIL")
                 .takeIf { it.isNotEmpty() && !it.startsWith("your-") }
                 ?: "maiafahim1234@gmail.com"
 
