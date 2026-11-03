@@ -55,7 +55,12 @@ data class ActivatedDevice(
     @Json(name = "activated_at") val activatedAt: String = "",
     @Json(name = "last_seen") val lastSeen: String? = null,
     @Json(name = "last_active_at") val lastActiveAt: String? = null,
-    @Json(name = "can_view_profiles") val canViewProfiles: Boolean = false
+    @Json(name = "can_view_profiles") val canViewProfiles: Boolean = false,
+    @Json(name = "is_access_restricted") val isAccessRestricted: Boolean = false,
+    @Json(name = "allowed_classes") val allowedClasses: List<String>? = emptyList(),
+    @Json(name = "allowed_groups") val allowedGroups: List<String>? = emptyList(),
+    @Json(name = "allowed_batches") val allowedBatches: List<String>? = emptyList(),
+    @Json(name = "allowed_programs") val allowedPrograms: List<String>? = emptyList()
 ) {
     val effectiveDeviceId: String
         get() = deviceId.trim().ifBlank { deviceHash.trim() }
@@ -360,12 +365,15 @@ data class UserDevice(
 
 /**
  * Row model for `public.device_shikho_accounts`.
- * Matches live Supabase schema 100%.
+ * Matches live Supabase schema 100% (`id`, `device_hash`, `display_device_id`, `shikho_user_id`,
+ * `user_phone`, `allowed_classes`, `allowed_groups`, `allowed_batches`, `allowed_programs`,
+ * `is_access_restricted`, `is_access_granted`, `created_at`, `last_seen_at`).
  */
 @JsonClass(generateAdapter = true)
 data class DeviceShikhoAccount(
     @Json(name = "id") val id: Long = 0L,
     @Json(name = "device_hash") val deviceHash: String = "",
+    @Json(name = "display_device_id") val displayDeviceId: String? = "",
     @Json(name = "shikho_user_id") val shikhoUserId: String? = "",
     @Json(name = "user_phone") val userPhone: String = "",
     @Json(name = "student_name") val studentName: String? = "",
@@ -382,7 +390,11 @@ data class DeviceShikhoAccount(
     @Json(name = "last_seen_at") val lastSeenAt: String? = null,
     @Json(name = "created_at") val createdAt: String? = null,
     @Json(name = "updated_at") val updatedAt: String? = null
-)
+) {
+    val effectiveShikhoUserId: String
+        get() = shikhoUserId?.trim()?.takeIf { it.isNotEmpty() }
+            ?: userPhone.trim()
+}
 
 /**
  * Request payload to update device ban/block status in `public.devices`.

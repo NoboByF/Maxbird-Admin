@@ -163,8 +163,20 @@ interface MaxBirdRepository {
         adminNote: String? = null
     ): Result<Unit>
 
-    // OneSignal + FCM Admin Push & Student Push RPC
+    suspend fun deleteCourseAccessEnrollment(
+        enrollmentId: Long,
+        studentPhone: String? = null,
+        programId: String? = null
+    ): Result<Unit> = Result.success(Unit)
+
+    // OneSignal + FCM Admin Push & Student Push RPC (SECURITY DEFINER)
     suspend fun fetchOneSignalPublicAppId(): Result<String>
+
+    suspend fun updateOneSignalConfigSecure(
+        appId: String,
+        restApiKey: String,
+        isEnabled: Boolean = true
+    ): Result<Unit> = Result.success(Unit)
 
     suspend fun upsertAdminPushDevice(
         adminDeviceId: String,
@@ -183,6 +195,13 @@ interface MaxBirdRepository {
         eventType: String,
         extraData: Map<String, Any?> = emptyMap()
     ): Result<Unit>
+
+    suspend fun notifyAdminViaOneSignal(
+        title: String,
+        message: String,
+        eventType: String = "ADMIN_TEST",
+        extraData: Map<String, Any?> = emptyMap()
+    ): Result<Unit> = Result.success(Unit)
 }
 
 

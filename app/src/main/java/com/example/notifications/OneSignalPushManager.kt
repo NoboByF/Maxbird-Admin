@@ -537,11 +537,14 @@ object OneSignalPushManager {
     }
 
     /**
-     * Generates the complete Supabase PostgreSQL Trigger + `pg_net` script that automatically pushes
-     * real OneSignal notifications whenever a student submits:
-     * 1) A Device Verification Request (`public.devices`)
-     * 2) A Course Access Request (`public.course_access_enrollments`)
-     * 3) A Payment / Installment Verification Request (`public.course_payment_transactions`)
+     * Generates the complete Supabase PostgreSQL Security + `SECURITY DEFINER` RPC + Trigger script:
+     * 1) Protects `public.onesignal_config` with RLS (`REVOKE SELECT, UPDATE ON public.onesignal_config FROM anon`)
+     * 2) Provides `SECURITY DEFINER` RPCs (`get_onesignal_public_app_id`, `update_onesignal_config_secure`,
+     *    `send_student_push_via_onesignal`, `notify_student_via_onesignal`, `notify_admin_via_onesignal`)
+     * 3) Provides `SECURITY DEFINER` Admin Delete & Permission RPCs (`admin_delete_device`,
+     *    `admin_delete_activated_device`, `admin_delete_access_code`, `admin_delete_app_notice`,
+     *    `admin_delete_app_update`, `admin_delete_support_link`, `admin_delete_course_enrollment`,
+     *    `admin_set_device_can_view_profiles`, `admin_revoke_device_to_pending`) so `anon` never needs direct `DELETE` privileges.
      */
     fun buildSupabaseOneSignalTriggerSql(
         appId: String = "",
@@ -553,124 +556,321 @@ object OneSignalPushManager {
             .removePrefix("Key ")
             .trim()
             .ifBlank { "YOUR_ONESIGNAL_REST_API_KEY" }
-        val authPrefix = if (cleanKey.startsWith("os_v2_")) "Key" else "Basic"
 
         return """
 -- ============================================================================
--- MaxBird Admin: 24/7 Real OneSignal Push Notification Triggers (Supabase SQL)
--- এই SQL কোডটি আপনার Supabase Dashboard -> SQL Editor-এ Run করলেই
--- আপনার Admin App সম্পূর্ণ বন্ধ (Force Closed / Killed) থাকলেও সাথে সাথে
--- OneSignal-এর মাধ্যমে ফোনে রিয়েল পুশ নোটিফিকেশন চলে আসবে!
+-- MaxBird Admin & Student App: Hardened Security + OneSignal Push RPCs (SQL)
 -- ============================================================================
 
--- ১. pg_net এক্সটেনশন চালু করুন (Supabase থেকে OneSignal API কল করার জন্য)
+-- ১. pg_net এক্সটেনশন চালু করুন (সার্ভার-সাইড থেকে OneSignal API কল করার জন্য)
 CREATE EXTENSION IF NOT EXISTS pg_net;
 
--- ২. OneSignal-এ পুশ পাঠানোর কমন ফাংশন
-CREATE OR REPLACE FUNCTION public.fn_send_onesignal_admin_push(
-    p_title TEXT,
-    p_body TEXT,
-    p_target_screen TEXT DEFAULT 'course_sales',
-    p_sub_tab INT DEFAULT 0,
-    p_device_id TEXT DEFAULT ''
-) RETURNS VOID AS $$
+-- ২. public.onesignal_config টেবিল তৈরি (লাইভ ডাটাবেজের ৪টি আসল কলাম: id, onesignal_app_id, onesignal_rest_api_key, updated_at)
+CREATE TABLE IF NOT EXISTS public.onesignal_config (
+    id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    onesignal_app_id TEXT NOT NULL DEFAULT '$safeAppId',
+    onesignal_rest_api_key TEXT NOT NULL DEFAULT '$cleanKey',
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE public.onesignal_config ENABLE ROW LEVEL SECURITY;
+
+-- শুধু পাবলিক App ID পড়ার জন্য নিরাপদ SECURITY DEFINER RPC (JSONB রিটার্ন করে)
+CREATE OR REPLACE FUNCTION public.get_onesignal_public_app_id()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
-    v_app_id TEXT := '$safeAppId';
-    v_api_key TEXT := '$authPrefix $cleanKey';
+    v_app_id TEXT := '';
 BEGIN
-    PERFORM net.http_post(
-        url := 'https://onesignal.com/api/v1/notifications',
-        headers := jsonb_build_object(
-            'Content-Type', 'application/json; charset=utf-8',
-            'Authorization', v_api_key
-        ),
-        body := jsonb_build_object(
-            'app_id', v_app_id,
-            'included_segments', jsonb_build_array('Total Subscriptions'),
-            'priority', 10,
-            'android_visibility', 1,
-            'headings', jsonb_build_object('en', p_title, 'bn', p_title),
-            'contents', jsonb_build_object('en', p_body, 'bn', p_body),
-            'data', jsonb_build_object(
-                'target_screen', p_target_screen,
-                'course_sales_tab', p_sub_tab,
-                'device_id', p_device_id
-            )
-        )
+    SELECT COALESCE(onesignal_app_id, '')
+    INTO v_app_id
+    FROM public.onesignal_config
+    WHERE id = 1
+    LIMIT 1;
+
+    RETURN jsonb_build_object(
+        'onesignal_app_id', COALESCE(v_app_id, '')
     );
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.get_onesignal_public_app_id() TO anon, authenticated, service_role;
+
+-- Admin App থেকে নিরাপদে OneSignal কনফিগারেশন আপডেট করার RPC
+CREATE OR REPLACE FUNCTION public.update_onesignal_config_secure(
+    p_onesignal_app_id TEXT,
+    p_onesignal_rest_api_key TEXT DEFAULT '',
+    p_is_enabled BOOLEAN DEFAULT TRUE
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    INSERT INTO public.onesignal_config (id, onesignal_app_id, onesignal_rest_api_key, updated_at)
+    VALUES (
+        1,
+        COALESCE(NULLIF(BTRIM(p_onesignal_app_id), ''), '$safeAppId'),
+        COALESCE(NULLIF(BTRIM(p_onesignal_rest_api_key), ''), '$cleanKey'),
+        now()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        onesignal_app_id = COALESCE(NULLIF(BTRIM(EXCLUDED.onesignal_app_id), ''), public.onesignal_config.onesignal_app_id),
+        onesignal_rest_api_key = CASE
+            WHEN NULLIF(BTRIM(p_onesignal_rest_api_key), '') IS NOT NULL THEN BTRIM(p_onesignal_rest_api_key)
+            ELSE public.onesignal_config.onesignal_rest_api_key
+        END,
+        updated_at = now();
+
+    RETURN jsonb_build_object('success', true);
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.update_onesignal_config_secure(TEXT, TEXT, BOOLEAN) TO anon, authenticated, service_role;
+
+-- ৩. স্টুডেন্টকে সার্ভার-সাইড থেকে OneSignal পুশ পাঠানোর SECURITY DEFINER RPC
+CREATE OR REPLACE FUNCTION public.send_student_push_via_onesignal(
+    p_onesignal_player_id TEXT DEFAULT '',
+    p_device_hash TEXT DEFAULT '',
+    p_student_phone TEXT DEFAULT '',
+    p_title TEXT DEFAULT '',
+    p_message TEXT DEFAULT '',
+    p_event_type TEXT DEFAULT 'STUDENT_UPDATE',
+    p_extra_data JSONB DEFAULT '{}'::JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    PERFORM public.notify_student_via_onesignal(
+        p_onesignal_player_id := p_onesignal_player_id,
+        p_device_hash := p_device_hash,
+        p_student_phone := p_student_phone,
+        p_title := p_title,
+        p_message := p_message,
+        p_event_type := p_event_type,
+        p_extra_data := p_extra_data
+    );
+    RETURN jsonb_build_object('success', true);
 EXCEPTION WHEN OTHERS THEN
-    -- Ignore HTTP errors so student database transactions never fail
-    NULL;
+    RETURN jsonb_build_object('success', false, 'error', SQLERRM);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
+GRANT EXECUTE ON FUNCTION public.send_student_push_via_onesignal(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB) TO anon, authenticated, service_role;
 
--- ৩. নতুন ডিভাইস ভেরিফিকেশন রিকোয়েস্ট ট্রিগার (public.devices)
-CREATE OR REPLACE FUNCTION public.trg_fn_onesignal_device_request()
-RETURNS TRIGGER AS $$
+-- ৪. ডিভাইস ও কনটেন্ট ডিলিট এবং পারমিশন ম্যানেজমেন্টের SECURITY DEFINER RPCs
+CREATE OR REPLACE FUNCTION public.admin_delete_device(
+    p_device_hash TEXT DEFAULT '',
+    p_device_id TEXT DEFAULT ''
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
-    IF (TG_OP = 'INSERT' AND LOWER(COALESCE(NEW.status, 'pending')) = 'pending') OR
-       (TG_OP = 'UPDATE' AND LOWER(COALESCE(OLD.status, '')) <> 'pending' AND LOWER(COALESCE(NEW.status, '')) = 'pending') THEN
-        PERFORM public.fn_send_onesignal_admin_push(
-            '📱 নতুন ডিভাইস ভেরিফিকেশন রিকোয়েস্ট!',
-            COALESCE(NULLIF(NEW.student_note, ''), 'নতুন শিক্ষার্থী') || ' (' || COALESCE(NEW.device_model, 'Phone') || ') • ID: ' || COALESCE(NEW.display_device_id, LEFT(NEW.device_hash, 10)),
-            'devices',
-            0,
-            COALESCE(NEW.display_device_id, NEW.device_hash)
-        );
-    END IF;
-    RETURN NEW;
+    DELETE FROM public.devices
+    WHERE (NULLIF(BTRIM(p_device_hash), '') IS NOT NULL AND (device_hash = BTRIM(p_device_hash) OR display_device_id = BTRIM(p_device_hash) OR device_id = BTRIM(p_device_hash)))
+       OR (NULLIF(BTRIM(p_device_id), '') IS NOT NULL AND id::TEXT = BTRIM(p_device_id));
+
+    DELETE FROM public.activated_devices
+    WHERE (NULLIF(BTRIM(p_device_hash), '') IS NOT NULL AND (device_hash = BTRIM(p_device_hash) OR device_id = BTRIM(p_device_hash)))
+       OR (NULLIF(BTRIM(p_device_id), '') IS NOT NULL AND id::TEXT = BTRIM(p_device_id));
+
+    RETURN jsonb_build_object('success', true);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_delete_device(TEXT, TEXT) TO anon, authenticated, service_role;
 
-DROP TRIGGER IF EXISTS trg_onesignal_device_request ON public.devices;
-CREATE TRIGGER trg_onesignal_device_request
-AFTER INSERT OR UPDATE ON public.devices
-FOR EACH ROW EXECUTE FUNCTION public.trg_fn_onesignal_device_request();
-
--- ৪. নতুন কোর্স এক্সেস রিকোয়েস্ট ট্রিগার (public.course_access_enrollments)
-CREATE OR REPLACE FUNCTION public.trg_fn_onesignal_course_request()
-RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION public.admin_set_device_can_view_profiles(
+    p_device_hash TEXT,
+    p_can_view_profiles BOOLEAN
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
-    IF (TG_OP = 'INSERT' AND UPPER(COALESCE(NEW.status, '')) IN ('REQUESTED', 'ACCESS_REQUESTED')) OR
-       (TG_OP = 'UPDATE' AND UPPER(COALESCE(OLD.status, '')) NOT IN ('REQUESTED', 'ACCESS_REQUESTED') AND UPPER(COALESCE(NEW.status, '')) IN ('REQUESTED', 'ACCESS_REQUESTED')) THEN
-        PERFORM public.fn_send_onesignal_admin_push(
-            '📚 নতুন কোর্স এক্সেস রিকোয়েস্ট!',
-            COALESCE(NULLIF(NEW.student_name, ''), 'শিক্ষার্থী') || ' (' || COALESCE(NEW.student_phone, NEW.shikho_account_key, '') || ') - ' || COALESCE(NEW.program_title, NEW.program_id, 'কোর্স'),
-            'course_sales',
-            0,
-            COALESCE(NEW.display_device_id, NEW.device_id, NEW.student_phone, '')
-        );
-    END IF;
-    RETURN NEW;
+    UPDATE public.devices
+    SET can_view_profiles = COALESCE(p_can_view_profiles, FALSE),
+        updated_at = now()
+    WHERE device_hash = BTRIM(p_device_hash)
+       OR display_device_id = BTRIM(p_device_hash)
+       OR device_id = BTRIM(p_device_hash)
+       OR id::TEXT = BTRIM(p_device_hash);
+
+    UPDATE public.activated_devices
+    SET can_view_profiles = COALESCE(p_can_view_profiles, FALSE)
+    WHERE device_hash = BTRIM(p_device_hash)
+       OR device_id = BTRIM(p_device_hash);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_set_device_can_view_profiles(TEXT, BOOLEAN) TO anon, authenticated, service_role;
 
-DROP TRIGGER IF EXISTS trg_onesignal_course_request ON public.course_access_enrollments;
-CREATE TRIGGER trg_onesignal_course_request
-AFTER INSERT OR UPDATE ON public.course_access_enrollments
-FOR EACH ROW EXECUTE FUNCTION public.trg_fn_onesignal_course_request();
-
--- ৫. নতুন পেমেন্ট / কিস্তি ভেরিফিকেশন রিকোয়েস্ট ট্রিগার (public.course_payment_transactions)
-CREATE OR REPLACE FUNCTION public.trg_fn_onesignal_payment_request()
-RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION public.admin_revoke_device_to_pending(
+    p_device_hash TEXT
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
-    IF (TG_OP = 'INSERT' AND UPPER(COALESCE(NEW.status, 'PENDING')) = 'PENDING') THEN
-        PERFORM public.fn_send_onesignal_admin_push(
-            '💰 নতুন পেমেন্ট ভেরিফিকেশন! (৳' || COALESCE(NEW.amount::TEXT, '0') || ' - ' || COALESCE(NEW.payment_method, 'Payment') || ')',
-            COALESCE(NULLIF(NEW.student_name, ''), COALESCE(NEW.student_phone, 'শিক্ষার্থী')) || ' • TrxID: ' || COALESCE(NEW.transaction_id, 'N/A') || ' • প্রেরক: ' || COALESCE(NEW.sender_mobile, 'N/A'),
-            'course_sales',
-            1,
-            COALESCE(NEW.display_device_id, NEW.device_id, NEW.student_phone, '')
-        );
-    END IF;
-    RETURN NEW;
+    UPDATE public.devices
+    SET status = 'pending',
+        is_banned = FALSE,
+        is_blocked = FALSE,
+        ban_reason = '',
+        rejection_reason = '',
+        updated_at = now()
+    WHERE device_hash = BTRIM(p_device_hash)
+       OR display_device_id = BTRIM(p_device_hash)
+       OR device_id = BTRIM(p_device_hash)
+       OR id::TEXT = BTRIM(p_device_hash);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_revoke_device_to_pending(TEXT) TO anon, authenticated, service_role;
 
-DROP TRIGGER IF EXISTS trg_onesignal_payment_request ON public.course_payment_transactions;
-CREATE TRIGGER trg_onesignal_payment_request
-AFTER INSERT ON public.course_payment_transactions
-FOR EACH ROW EXECUTE FUNCTION public.trg_fn_onesignal_payment_request();
+CREATE OR REPLACE FUNCTION public.admin_delete_activated_device(
+    p_device_id TEXT DEFAULT '',
+    p_id TEXT DEFAULT ''
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_target TEXT := COALESCE(NULLIF(BTRIM(p_device_id), ''), NULLIF(BTRIM(p_id), ''));
+BEGIN
+    IF v_target IS NOT NULL THEN
+        DELETE FROM public.activated_devices WHERE id::TEXT = v_target OR device_id = v_target OR device_hash = v_target;
+    END IF;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_delete_activated_device(TEXT, TEXT) TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.admin_reset_devices_for_code(
+    p_code_id TEXT DEFAULT '',
+    p_code TEXT DEFAULT ''
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    IF NULLIF(BTRIM(p_code_id), '') IS NOT NULL THEN
+        DELETE FROM public.activated_devices WHERE code_id::TEXT = BTRIM(p_code_id);
+    END IF;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_reset_devices_for_code(TEXT, TEXT) TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.admin_delete_access_code(
+    p_code_id TEXT DEFAULT '',
+    p_id TEXT DEFAULT ''
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_target TEXT := COALESCE(NULLIF(BTRIM(p_code_id), ''), NULLIF(BTRIM(p_id), ''));
+BEGIN
+    IF v_target IS NOT NULL THEN
+        DELETE FROM public.activated_devices WHERE code_id::TEXT = v_target;
+        DELETE FROM public.access_codes WHERE id::TEXT = v_target OR code = v_target;
+    END IF;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_delete_access_code(TEXT, TEXT) TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.admin_delete_app_notice(
+    p_id TEXT DEFAULT '',
+    p_notice_id TEXT DEFAULT ''
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_target TEXT := COALESCE(NULLIF(BTRIM(p_id), ''), NULLIF(BTRIM(p_notice_id), ''));
+BEGIN
+    IF v_target IS NOT NULL THEN
+        DELETE FROM public.app_notices WHERE id::TEXT = v_target;
+    END IF;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_delete_app_notice(TEXT, TEXT) TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.admin_delete_app_update(
+    p_id TEXT DEFAULT '',
+    p_update_id TEXT DEFAULT ''
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_target TEXT := COALESCE(NULLIF(BTRIM(p_id), ''), NULLIF(BTRIM(p_update_id), ''));
+BEGIN
+    IF v_target IS NOT NULL THEN
+        DELETE FROM public.app_updates WHERE id::TEXT = v_target;
+    END IF;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_delete_app_update(TEXT, TEXT) TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.admin_delete_support_link(
+    p_id TEXT DEFAULT '',
+    p_link_id TEXT DEFAULT ''
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_target TEXT := COALESCE(NULLIF(BTRIM(p_id), ''), NULLIF(BTRIM(p_link_id), ''));
+BEGIN
+    IF v_target IS NOT NULL THEN
+        DELETE FROM public.activation_support_links WHERE id::TEXT = v_target;
+    END IF;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_delete_support_link(TEXT, TEXT) TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.admin_delete_course_enrollment(
+    p_enrollment_id BIGINT DEFAULT 0,
+    p_student_phone TEXT DEFAULT '',
+    p_program_id TEXT DEFAULT ''
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    IF COALESCE(p_enrollment_id, 0) > 0 THEN
+        DELETE FROM public.course_access_enrollments WHERE id = p_enrollment_id;
+    ELSIF NULLIF(BTRIM(p_student_phone), '') IS NOT NULL AND NULLIF(BTRIM(p_program_id), '') IS NOT NULL THEN
+        DELETE FROM public.course_access_enrollments
+        WHERE (student_phone = BTRIM(p_student_phone) OR user_phone = BTRIM(p_student_phone) OR shikho_account_key = BTRIM(p_student_phone))
+          AND program_id = BTRIM(p_program_id);
+    END IF;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_delete_course_enrollment(BIGINT, TEXT, TEXT) TO anon, authenticated, service_role;
 """.trimIndent()
     }
 }
+

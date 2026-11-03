@@ -168,7 +168,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateMinVersionCode = MutableStateFlow("60000")
     val updateMinVersionCode: StateFlow<String> = _updateMinVersionCode.asStateFlow()
 
-    private val _updateIsForce = MutableStateFlow(false)
+    private val _updateIsForce = MutableStateFlow(true)
     val updateIsForce: StateFlow<Boolean> = _updateIsForce.asStateFlow()
 
     private val _updateTitle = MutableStateFlow("নতুন আপডেট উপলভ্য!")
@@ -420,6 +420,19 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             _oneSignalAppId.value = adminPreferences.getOneSignalAppId()
             _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
         }
+        // Sync to Supabase via SECURITY DEFINER RPC `update_onesignal_config_secure` (never touches /rest/v1/onesignal_config directly)
+        if (cleanAppId.isNotBlank() && cleanRestKey.isNotBlank()) {
+            viewModelScope.launch {
+                try {
+                    repository.updateOneSignalConfigSecure(
+                        appId = cleanAppId,
+                        restApiKey = cleanRestKey,
+                        isEnabled = true
+                    )
+                } catch (_: Throwable) {
+                }
+            }
+        }
         _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
         if (initialized) {
             showToast("✅ OneSignal App ID সংরক্ষিত ও সক্রিয় করা হয়েছে!")
@@ -458,17 +471,31 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         // Always fire immediate local notification
         notificationHelper.sendTestNotification()
 
-        // Also dispatch real OneSignal Cloud REST API push if App ID + REST API Key are configured
+        // Also dispatch real OneSignal Cloud Push (via Supabase SECURITY DEFINER RPC first, or local REST API Key if provided)
         val appId = _oneSignalAppId.value.trim()
         val restKey = _oneSignalRestApiKey.value.trim()
-        if (appId.isNotBlank() && restKey.isNotBlank()) {
-            viewModelScope.launch {
-                try {
-                    _isSendingOneSignalTest.value = true
+        viewModelScope.launch {
+            try {
+                _isSendingOneSignalTest.value = true
+                val title = "🚀 MaxBird OneSignal ক্লাউড পুশ সচল!"
+                val message = "অ্যাপ সম্পূর্ণ বন্ধ থাকলেও নতুন ডিভাইস রিকোয়েস্ট, কোর্স আবেদন ও পেমেন্ট আসলে এভাবেই পুশ নোটিফিকেশন আসবে।"
+                val rpcRes = repository.notifyAdminViaOneSignal(
+                    title = title,
+                    message = message,
+                    eventType = "ADMIN_TEST_PUSH",
+                    extraData = mapOf(
+                        "target_screen" to "course_sales",
+                        "course_sales_tab" to 0
+                    )
+                )
+                if (rpcRes.isSuccess) {
+                    _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
+                    showToast("✅ লোকাল + Supabase OneSignal সার্ভার পুশ পাঠানো হয়েছে!")
+                } else if (appId.isNotBlank() && restKey.isNotBlank()) {
                     val res = OneSignalPushManager.sendCloudPushNotification(
                         context = app,
-                        title = "🚀 MaxBird OneSignal ক্লাউড পুশ সচল!",
-                        message = "অ্যাপ সম্পূর্ণ বন্ধ থাকলেও নতুন ডিভাইস রিকোয়েস্ট, কোর্স আবেদন ও পেমেন্ট আসলে এভাবেই পুশ নোটিফিকেশন আসবে।",
+                        title = title,
+                        message = message,
                         targetScreen = "course_sales",
                         courseSalesTab = 0
                     )
@@ -478,12 +505,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         showToast("✅ লোকাল টেস্ট নোটিফিকেশন পাঠানো হয়েছে! (OneSignal: ${res.exceptionOrNull()?.message})")
                     }
-                } finally {
-                    _isSendingOneSignalTest.value = false
+                } else {
+                    showToast("✅ টেস্ট নোটিফিকেশন পাঠানো হয়েছে! স্ট্যাটাস বার চেক করুন।")
                 }
+            } finally {
+                _isSendingOneSignalTest.value = false
             }
-        } else {
-            showToast("✅ টেস্ট নোটিফিকেশন পাঠানো হয়েছে! স্ট্যাটাস বার চেক করুন।")
         }
     }
 
@@ -1263,7 +1290,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         _updateVersionName.value = "v6.1.0"
         _updateVersionCode.value = "60100"
         _updateMinVersionCode.value = "60000"
-        _updateIsForce.value = false
+        _updateIsForce.value = true
         _updateTitle.value = "নতুন আপডেট উপলভ্য!"
         _updateChangelog.value = "• বাগ ফিক্স এবং পারফরম্যান্স উন্নতি\n• নতুন সিকিউরিটি ফিচার"
         _updateDownloadUrl.value = ""
@@ -2583,18 +2610,23 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
 
-                // 6. OneSignal + FCM Push Notification Sync
+                // 6. OneSignal + FCM Push Notification Sync (`get_onesignal_public_app_id` RPC + local config)
+                val rpcAppIdRes = repository.fetchOneSignalPublicAppId()
+                val rpcAppId = rpcAppIdRes.getOrNull().orEmpty()
+                if (rpcAppId.isNotBlank() && OneSignalPushManager.isValidOneSignalAppId(rpcAppId)) {
+                    _oneSignalAppId.value = rpcAppId
+                }
                 val hasAppId = OneSignalPushManager.isValidOneSignalAppId(_oneSignalAppId.value)
-                val hasRestKey = _oneSignalRestApiKey.value.isNotBlank()
+                val hasServerOrLocalKey = rpcAppIdRes.isSuccess || _oneSignalRestApiKey.value.isNotBlank()
                 checks.add(
                     SyncDiagnosticCheckItem(
                         id = "onesignal_fcm",
                         titleBn = "৬. OneSignal + FCM পুশ নোটিফিকেশন ও ট্রিগার সিঙ্ক",
-                        isSuccess = hasAppId && hasRestKey,
-                        detailBn = if (hasAppId && hasRestKey) {
-                            "✅ OneSignal App ID ও REST API Key সক্রিয় (${_oneSignalStatusSummary.value})"
+                        isSuccess = hasAppId && hasServerOrLocalKey,
+                        detailBn = if (hasAppId && hasServerOrLocalKey) {
+                            "✅ OneSignal সক্রিয় (Server RPC: ${if (rpcAppIdRes.isSuccess) "OK" else "Local"} • ${_oneSignalStatusSummary.value})"
                         } else {
-                            "⚠️ OneSignal App ID বা REST API Key সেট করা নেই"
+                            "⚠️ OneSignal App ID বা Server কনফিগারেশন সেট করা নেই"
                         }
                     )
                 )

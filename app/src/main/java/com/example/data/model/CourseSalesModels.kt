@@ -813,11 +813,15 @@ data class CourseAccessEnrollment(
 
     companion object {
         fun normalizeBdPhone(raw: String?): String {
-            val digits = raw?.filter { it.isDigit() }.orEmpty()
+            if (raw.isNullOrBlank()) return ""
+            val digits = raw.filter { it.isDigit() }
             return when {
                 digits.length == 13 && digits.startsWith("8801") -> digits.substring(2)
+                digits.length == 14 && digits.startsWith("008801") -> digits.substring(4)
                 digits.length == 11 && digits.startsWith("01") -> digits
-                else -> raw?.trim().orEmpty()
+                digits.length == 10 && digits.startsWith("1") -> "0$digits"
+                digits.length > 11 && digits.takeLast(11).startsWith("01") -> digits.takeLast(11)
+                else -> raw.trim()
             }
         }
 

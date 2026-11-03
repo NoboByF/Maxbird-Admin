@@ -96,6 +96,11 @@ interface SupabaseApi {
         @Query("id") idQuery: String // e.g. "eq.<uuid>"
     ): Response<Unit>
 
+    @DELETE("rest/v1/activated_devices")
+    suspend fun deleteActivatedDeviceByHash(
+        @Query("device_hash") deviceHashQuery: String // e.g. "eq.<hash>"
+    ): Response<Unit>
+
     @GET("rest/v1/access_codes")
     suspend fun testConnection(
         @Query("select") select: String = "id",
@@ -105,7 +110,7 @@ interface SupabaseApi {
     @GET("rest/v1/app_updates")
     suspend fun getAppUpdates(
         @Query("select") select: String = "*",
-        @Query("order") order: String = "latest_version_code.desc"
+        @Query("order") order: String = "created_at.desc"
     ): List<AppUpdate>
 
     @POST("rest/v1/app_updates")
@@ -439,13 +444,37 @@ interface SupabaseApi {
     ): Response<okhttp3.ResponseBody>
 
     // =========================================================================
-    // OneSignal + FCM Admin Push & Student Notification Endpoints
+    // OneSignal + FCM Admin Push & Student Notification Endpoints (SECURITY DEFINER RPCs)
     // =========================================================================
 
     @POST("rest/v1/rpc/get_onesignal_public_app_id")
     suspend fun getOneSignalPublicAppIdRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?> = emptyMap()
     ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/update_onesignal_config_secure")
+    suspend fun updateOneSignalConfigSecureRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @GET("rest/v1/onesignal_config")
+    suspend fun getOneSignalConfigRaw(
+        @Query("id") idQuery: String = "eq.1",
+        @Query("select") select: String = "id,onesignal_app_id,updated_at"
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/onesignal_config")
+    suspend fun upsertOneSignalConfigRaw(
+        @Query("on_conflict") onConflict: String = "id",
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "resolution=merge-duplicates,return=minimal"
+    ): Response<Unit>
+
+    @PATCH("rest/v1/onesignal_config")
+    suspend fun patchOneSignalConfigRaw(
+        @Query("id") idQuery: String = "eq.1",
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
 
     @POST("rest/v1/admin_push_devices")
     suspend fun upsertAdminPushDevice(
@@ -454,8 +483,78 @@ interface SupabaseApi {
         @Header("Prefer") prefer: String = "resolution=merge-duplicates,return=representation"
     ): Response<okhttp3.ResponseBody>
 
+    @POST("rest/v1/rpc/send_student_push_via_onesignal")
+    suspend fun sendStudentPushViaOneSignalRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
     @POST("rest/v1/rpc/notify_student_via_onesignal")
     suspend fun notifyStudentViaOneSignalRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/notify_admin_via_onesignal")
+    suspend fun notifyAdminViaOneSignalRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    // =========================================================================
+    // Secure Admin Delete & Permission Management RPCs (SECURITY DEFINER)
+    // Used when `REVOKE DELETE ON ALL TABLES FROM anon` is active on Supabase
+    // =========================================================================
+
+    @POST("rest/v1/rpc/admin_delete_device")
+    suspend fun adminDeleteDeviceRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/admin_delete_activated_device")
+    suspend fun adminDeleteActivatedDeviceRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/admin_reset_devices_for_code")
+    suspend fun adminResetDevicesForCodeRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/admin_delete_access_code")
+    suspend fun adminDeleteAccessCodeRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/admin_delete_app_notice")
+    suspend fun adminDeleteAppNoticeRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/admin_delete_app_update")
+    suspend fun adminDeleteAppUpdateRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/admin_delete_support_link")
+    suspend fun adminDeleteSupportLinkRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/admin_delete_course_enrollment")
+    suspend fun adminDeleteCourseEnrollmentRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @DELETE("rest/v1/course_access_enrollments")
+    suspend fun deleteCourseAccessEnrollment(
+        @Query("id") idQuery: String
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/admin_set_device_can_view_profiles")
+    suspend fun adminSetDeviceCanViewProfilesRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/admin_revoke_device_to_pending")
+    suspend fun adminRevokeDeviceToPendingRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<okhttp3.ResponseBody>
 }
