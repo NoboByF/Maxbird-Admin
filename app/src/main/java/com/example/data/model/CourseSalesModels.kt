@@ -739,9 +739,22 @@ data class CourseAccessEnrollment(
     val effectiveInstallmentsEnabled: Boolean
         get() = installmentEnabled && (allowInstallments ?: true)
 
+    val isAdminApproved: Boolean
+        get() = !approvedAt.isNullOrBlank() ||
+            effectiveStatus.equals("ACTIVE", ignoreCase = true) ||
+            effectiveStatus.equals("TRIAL_ACTIVE", ignoreCase = true)
+
     val isAccessRequestedStatus: Boolean
-        get() = effectiveStatus.equals("ACCESS_REQUESTED", ignoreCase = true) ||
-            effectiveStatus.equals("REQUESTED", ignoreCase = true)
+        get() {
+            val st = effectiveStatus.uppercase()
+            if (st in setOf("ACCESS_REQUESTED", "REQUESTED", "PENDING", "PENDING_APPROVAL", "WAITING_APPROVAL")) {
+                return true
+            }
+            // If `approved_at` is null and the student hasn't paid or been unlocked/rejected, treat as pending request
+            return approvedAt.isNullOrBlank() &&
+                paidAmount <= 0 &&
+                st !in setOf("ACTIVE", "TRIAL_ACTIVE", "REJECTED", "LOCKED", "REVOKED", "OVERDUE", "INSTALLMENT_OVERDUE")
+        }
 
     val isOverdueStatus: Boolean
         get() = effectiveStatus.equals("INSTALLMENT_OVERDUE", ignoreCase = true) ||

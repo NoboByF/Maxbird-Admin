@@ -1,14 +1,9 @@
 package com.example.data.api
 
-import com.example.data.model.AccessCode
-import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
-import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
-import com.example.data.model.UpdateCodeStatusPayload
-import com.example.data.model.UpdateDeviceBlockedPayload
 import com.example.data.model.UpdateAppUpdateStatusPayload
 import com.example.data.model.UpdateAppNoticeStatusPayload
 import com.example.data.model.ActivationSupportLink
@@ -23,7 +18,6 @@ import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.UpdateDeviceBanPayload
-import com.example.data.model.UserGeminiApiKey
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -38,70 +32,7 @@ import retrofit2.http.Query
  */
 interface SupabaseApi {
 
-    @GET("rest/v1/access_codes")
-    suspend fun getAccessCodes(
-        @Query("select") select: String = "*",
-        @Query("order") order: String = "created_at.desc"
-    ): List<AccessCode>
-
-    @POST("rest/v1/access_codes")
-    suspend fun createAccessCode(
-        @Body payload: CreateAccessCodePayload,
-        @Header("Prefer") prefer: String = "return=representation"
-    ): List<AccessCode>
-
-    @PATCH("rest/v1/access_codes")
-    suspend fun updateAccessCodeStatus(
-        @Query("id") idQuery: String, // e.g. "eq.<uuid>"
-        @Body payload: UpdateCodeStatusPayload
-    ): Response<Unit>
-
-    @PATCH("rest/v1/access_codes")
-    suspend fun patchAccessCode(
-        @Query("id") idQuery: String, // e.g. "eq.<uuid>"
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
-
-    @DELETE("rest/v1/access_codes")
-    suspend fun deleteAccessCode(
-        @Query("id") idQuery: String // e.g. "eq.<uuid>"
-    ): Response<Unit>
-
-    @GET("rest/v1/activated_devices")
-    suspend fun getActivatedDevices(
-        @Query("select") select: String = "*",
-        @Query("order") order: String = "activated_at.desc"
-    ): List<ActivatedDevice>
-
-    @GET("rest/v1/activated_devices")
-    suspend fun getDevicesForCode(
-        @Query("code_id") codeIdQuery: String, // e.g. "eq.<uuid>"
-        @Query("select") select: String = "*"
-    ): List<ActivatedDevice>
-
-    @PATCH("rest/v1/activated_devices")
-    suspend fun updateDeviceBlockedStatus(
-        @Query("id") idQuery: String, // e.g. "eq.<uuid>"
-        @Body payload: UpdateDeviceBlockedPayload
-    ): Response<Unit>
-
-    @PATCH("rest/v1/activated_devices")
-    suspend fun patchActivatedDeviceByHash(
-        @Query("device_hash") deviceHashQuery: String,
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
-
-    @DELETE("rest/v1/activated_devices")
-    suspend fun deleteDevice(
-        @Query("id") idQuery: String // e.g. "eq.<uuid>"
-    ): Response<Unit>
-
-    @DELETE("rest/v1/activated_devices")
-    suspend fun deleteActivatedDeviceByHash(
-        @Query("device_hash") deviceHashQuery: String // e.g. "eq.<hash>"
-    ): Response<Unit>
-
-    @GET("rest/v1/access_codes")
+    @GET("rest/v1/devices")
     suspend fun testConnection(
         @Query("select") select: String = "id",
         @Query("limit") limit: Int = 1
@@ -261,7 +192,7 @@ interface SupabaseApi {
     @POST("rest/v1/rpc/admin_approve_device_verification")
     suspend fun approveDeviceVerificationRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/admin_set_device_block_status")
     suspend fun setDeviceBlockStatusRpc(
@@ -276,12 +207,12 @@ interface SupabaseApi {
     @POST("rest/v1/rpc/admin_set_device_course_permissions")
     suspend fun setDeviceCoursePermissionsRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/admin_set_account_course_permissions")
     suspend fun setAccountCoursePermissionsRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @GET("rest/v1/device_shikho_accounts")
     suspend fun getDeviceShikhoAccounts(
@@ -379,12 +310,6 @@ interface SupabaseApi {
         @Query("program_id") programIdQuery: String, // e.g. "eq.prog_123"
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Unit>
-
-    @GET("rest/v1/user_gemini_api_keys")
-    suspend fun getUserGeminiApiKeys(
-        @Query("select") select: String = "*",
-        @Query("order") order: String = "updated_at.desc.nullslast"
-    ): List<UserGeminiApiKey>
 
     @GET("rest/v1/course_payment_transactions")
     suspend fun getCoursePaymentTransactions(
@@ -505,21 +430,6 @@ interface SupabaseApi {
 
     @POST("rest/v1/rpc/admin_delete_device")
     suspend fun adminDeleteDeviceRpc(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
-    @POST("rest/v1/rpc/admin_delete_activated_device")
-    suspend fun adminDeleteActivatedDeviceRpc(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
-    @POST("rest/v1/rpc/admin_reset_devices_for_code")
-    suspend fun adminResetDevicesForCodeRpc(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
-    @POST("rest/v1/rpc/admin_delete_access_code")
-    suspend fun adminDeleteAccessCodeRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<okhttp3.ResponseBody>
 

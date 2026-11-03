@@ -180,26 +180,25 @@ ALTER TABLE public.course_payment_settings
     ADD COLUMN IF NOT EXISTS upay_number text DEFAULT ''::text,
     ADD COLUMN IF NOT EXISTS upay_enabled boolean DEFAULT false;
 
-CREATE TABLE IF NOT EXISTS access_codes (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code TEXT UNIQUE NOT NULL,
-    student_name TEXT NOT NULL,
-    max_devices INT DEFAULT 1,
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT now(),
-    expires_at TIMESTAMPTZ,
-    note TEXT
-);
+-- ==========================================================
+-- পুরাতন ম্যানুয়াল অ্যাক্সেস কোড সিস্টেম (access_codes ও activated_devices) সম্পূর্ণ ক্লিনআপ
+-- ==========================================================
+DROP TRIGGER IF EXISTS trg_sync_device_ban ON public.devices;
+DROP FUNCTION IF EXISTS public.sync_device_ban_status();
+DROP FUNCTION IF EXISTS public.activate_device(text, text, text);
+DROP FUNCTION IF EXISTS public.activate_device(text, text, text, text);
+DROP FUNCTION IF EXISTS public.activate_device(text, text, text, text, text, text, text, text);
+DROP FUNCTION IF EXISTS public.admin_approve_device_verification(text);
+DROP TABLE IF EXISTS public.activated_devices CASCADE;
+DROP TABLE IF EXISTS public.access_codes CASCADE;
 
-CREATE TABLE IF NOT EXISTS activated_devices (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code_id UUID REFERENCES access_codes(id) ON DELETE CASCADE,
-    device_id TEXT NOT NULL,
-    device_model TEXT DEFAULT 'Unknown Device',
-    is_blocked BOOLEAN DEFAULT false,
-    activated_at TIMESTAMPTZ DEFAULT now(),
-    last_active_at TIMESTAMPTZ DEFAULT now()
-);
+-- সাপোর্ট লিংক টেবিলে শুধুমাত্র service_role-এর জন্য রাইট পলিসি এবং পাবলিকের জন্য শুধুমাত্র Read পলিসি
+DROP POLICY IF EXISTS "Allow admin full access for activation support links" ON public.activation_support_links;
+DROP POLICY IF EXISTS "Service role full activation_support_links" ON public.activation_support_links;
+CREATE POLICY "Service role full activation_support_links"
+ON public.activation_support_links
+FOR ALL TO service_role
+USING (true) WITH CHECK (true);
 
 -- App Updates Table
 CREATE TABLE IF NOT EXISTS app_updates (
@@ -257,26 +256,47 @@ CREATE TABLE IF NOT EXISTS devices (
     applied_code TEXT,
     is_banned BOOLEAN DEFAULT false,
     ban_reason TEXT,
-    status TEXT DEFAULT 'active',
+    status TEXT DEFAULT 'pending',
     can_view_profiles BOOLEAN DEFAULT false,
     last_seen TIMESTAMPTZ DEFAULT now()
 );
 
 -- Enable Row Level Security (RLS)
-ALTER TABLE access_codes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE activated_devices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_updates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_notices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activation_support_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
 
--- Allow Public/Admin Read and Write
-CREATE POLICY "Public Access access_codes" ON access_codes FOR ALL USING (true);
-CREATE POLICY "Public Access activated_devices" ON activated_devices FOR ALL USING (true);
-CREATE POLICY "Public Access app_updates" ON app_updates FOR ALL USING (true);
-CREATE POLICY "Public Access app_notices" ON app_notices FOR ALL USING (true);
-CREATE POLICY "Public Access activation_support_links" ON activation_support_links FOR ALL USING (true);
-CREATE POLICY "Public Access devices" ON devices FOR ALL USING (true);"""
+-- Zero-Trust Security Policies (Students Read-Only, Admin via service_role Full Access)
+DROP POLICY IF EXISTS "Allow all course_payment_settings" ON public.course_payment_settings;
+DROP POLICY IF EXISTS "Public read course_payment_settings" ON public.course_payment_settings;
+CREATE POLICY "Public read course_payment_settings" ON public.course_payment_settings FOR SELECT TO anon, authenticated USING (true);
+DROP POLICY IF EXISTS "Service role full course_payment_settings" ON public.course_payment_settings;
+CREATE POLICY "Service role full course_payment_settings" ON public.course_payment_settings FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow admin full access to app updates" ON public.app_updates;
+DROP POLICY IF EXISTS "Service role full app_updates" ON public.app_updates;
+CREATE POLICY "Service role full app_updates" ON public.app_updates FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow full access for admin operations" ON public.app_notices;
+DROP POLICY IF EXISTS "Service role full app_notices" ON public.app_notices;
+CREATE POLICY "Service role full app_notices" ON public.app_notices FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow manage admin_push_devices" ON public.admin_push_devices;
+DROP POLICY IF EXISTS "Service role only admin_push_devices" ON public.admin_push_devices;
+CREATE POLICY "Service role only admin_push_devices" ON public.admin_push_devices FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+REVOKE DELETE ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_approve_device_verification(text, text) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_set_device_block_status(text, boolean, text) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_toggle_device_ban(text, boolean, text) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_set_device_course_permissions(text, boolean, text[], text[], text[], text[]) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_set_account_course_permissions(text, text, text, boolean, boolean, text[], text[], text[], text[], boolean) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_approve_course_access_request(bigint, integer, boolean, jsonb, text, boolean) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_approve_course_access_with_trial(text, text, numeric, boolean, jsonb, boolean, integer, integer, boolean, text) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_manage_course_trial(text, text, text, integer, integer) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_review_course_payment(bigint, boolean, text, integer) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.update_onesignal_config_secure(text, text) FROM PUBLIC, anon, authenticated;"""
 
 @Composable
 fun SettingsScreen(
@@ -827,13 +847,32 @@ fun SettingsScreen(
 
                     // API Key
                     Column {
-                        Text(
-                            text = "Supabase Anon / Service Role Key",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
+                        val isServiceRole = supabaseKey.contains("InJvbGUiOiJzZXJ2aWNlX3JvbGUi")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Supabase Service Role Key (অ্যাডমিন)",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
                             )
-                        )
+                            Surface(
+                                color = if (isServiceRole) EmeraldSuccess.copy(alpha = 0.15f) else AmberWarning.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = if (isServiceRole) "SERVICE_ROLE সক্রিয় ✅" else "SERVICE_ROLE প্রয়োজন ⚠️",
+                                    color = if (isServiceRole) EmeraldSuccess else AmberWarning,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                         Spacer(modifier = Modifier.height(6.dp))
                         OutlinedTextField(
                             value = supabaseKey,
@@ -927,6 +966,124 @@ fun SettingsScreen(
                             Text("সেভ করুন", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
+
+                    // 1-Click Zero-Trust Database Security Lock SQL
+                    Surface(
+                        color = Slate900,
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.45f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "🛡️ Service Role Key সেভ করার পর নিচের বাটনে ক্লিক করে Zero-Trust Security Lock SQL কপি করুন এবং Supabase SQL Editor-এ Run করুন। এতে স্টুডেন্ট অ্যাপের anon key দিয়ে কেউ হ্যাক বা অ্যাডমিন ফাংশন কল করতে পারবে না:",
+                                color = Slate200,
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp
+                            )
+                            Button(
+                                onClick = {
+                                    val securitySql = """
+                                        -- ============================================================================
+                                        -- 100% EXACT ZERO-TRUST SECURITY LOCK (MATCHED TO LIVE SCHEMA)
+                                        -- ============================================================================
+
+                                        -- ১. সব admin_* এবং সেনসিটিভ ফাংশন থেকে PUBLIC/anon অ্যাক্সেস বাতিল (শুধুমাত্র service_role কল করতে পারবে)
+                                        REVOKE ALL ON FUNCTION public.admin_approve_device_verification(text, text) FROM PUBLIC, anon, authenticated;
+                                        REVOKE ALL ON FUNCTION public.admin_set_device_block_status(text, boolean, text) FROM PUBLIC, anon, authenticated;
+                                        REVOKE ALL ON FUNCTION public.admin_toggle_device_ban(text, boolean, text) FROM PUBLIC, anon, authenticated;
+                                        REVOKE ALL ON FUNCTION public.admin_set_device_course_permissions(text, boolean, text[], text[], text[], text[]) FROM PUBLIC, anon, authenticated;
+                                        REVOKE ALL ON FUNCTION public.admin_set_account_course_permissions(text, text, text, boolean, boolean, text[], text[], text[], text[], boolean) FROM PUBLIC, anon, authenticated;
+                                        REVOKE ALL ON FUNCTION public.admin_approve_course_access_request(bigint, integer, boolean, jsonb, text, boolean) FROM PUBLIC, anon, authenticated;
+                                        REVOKE ALL ON FUNCTION public.admin_approve_course_access_with_trial(text, text, numeric, boolean, jsonb, boolean, integer, integer, boolean, text) FROM PUBLIC, anon, authenticated;
+                                        REVOKE ALL ON FUNCTION public.admin_manage_course_trial(text, text, text, integer, integer) FROM PUBLIC, anon, authenticated;
+                                        REVOKE ALL ON FUNCTION public.admin_review_course_payment(bigint, boolean, text, integer) FROM PUBLIC, anon, authenticated;
+                                        REVOKE ALL ON FUNCTION public.update_onesignal_config_secure(text, text) FROM PUBLIC, anon, authenticated;
+
+                                        GRANT EXECUTE ON FUNCTION public.admin_approve_device_verification(text, text) TO service_role;
+                                        GRANT EXECUTE ON FUNCTION public.admin_set_device_block_status(text, boolean, text) TO service_role;
+                                        GRANT EXECUTE ON FUNCTION public.admin_toggle_device_ban(text, boolean, text) TO service_role;
+                                        GRANT EXECUTE ON FUNCTION public.admin_set_device_course_permissions(text, boolean, text[], text[], text[], text[]) TO service_role;
+                                        GRANT EXECUTE ON FUNCTION public.admin_set_account_course_permissions(text, text, text, boolean, boolean, text[], text[], text[], text[], boolean) TO service_role;
+                                        GRANT EXECUTE ON FUNCTION public.admin_approve_course_access_request(bigint, integer, boolean, jsonb, text, boolean) TO service_role;
+                                        GRANT EXECUTE ON FUNCTION public.admin_approve_course_access_with_trial(text, text, numeric, boolean, jsonb, boolean, integer, integer, boolean, text) TO service_role;
+                                        GRANT EXECUTE ON FUNCTION public.admin_manage_course_trial(text, text, text, integer, integer) TO service_role;
+                                        GRANT EXECUTE ON FUNCTION public.admin_review_course_payment(bigint, boolean, text, integer) TO service_role;
+                                        GRANT EXECUTE ON FUNCTION public.update_onesignal_config_secure(text, text) TO service_role;
+
+                                        -- ২. পেমেন্ট নাম্বার, অ্যাপ আপডেট, নোটিশ, সাপোর্ট লিংক ও অ্যাডমিন পুশ ডিভাইসে anon Write/Delete বন্ধ করা
+                                        DROP POLICY IF EXISTS "Allow all course_payment_settings" ON public.course_payment_settings;
+                                        DROP POLICY IF EXISTS "Public read course_payment_settings" ON public.course_payment_settings;
+                                        CREATE POLICY "Public read course_payment_settings" ON public.course_payment_settings FOR SELECT TO public USING (true);
+                                        DROP POLICY IF EXISTS "Service role full course_payment_settings" ON public.course_payment_settings;
+                                        CREATE POLICY "Service role full course_payment_settings" ON public.course_payment_settings FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+                                        DROP POLICY IF EXISTS "Allow admin full access to app updates" ON public.app_updates;
+                                        DROP POLICY IF EXISTS "Service role full app_updates" ON public.app_updates;
+                                        CREATE POLICY "Service role full app_updates" ON public.app_updates FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+                                        DROP POLICY IF EXISTS "Allow full access for admin operations" ON public.app_notices;
+                                        DROP POLICY IF EXISTS "Service role full app_notices" ON public.app_notices;
+                                        CREATE POLICY "Service role full app_notices" ON public.app_notices FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+                                        DROP POLICY IF EXISTS "Allow admin full access for activation support links" ON public.activation_support_links;
+                                        DROP POLICY IF EXISTS "Service role full activation_support_links" ON public.activation_support_links;
+                                        CREATE POLICY "Service role full activation_support_links" ON public.activation_support_links FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+                                        DROP POLICY IF EXISTS "Allow manage admin_push_devices" ON public.admin_push_devices;
+                                        DROP POLICY IF EXISTS "Service role full admin_push_devices" ON public.admin_push_devices;
+                                        CREATE POLICY "Service role full admin_push_devices" ON public.admin_push_devices FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+                                        -- ৩. devices, enrollments ও transactions টেবিলে স্টুডেন্টদের DELETE ক্ষমতা বন্ধ করা (Tamper Trigger ইতোমধ্যে INSERT/UPDATE সুরক্ষিত রাখছে)
+                                        DROP POLICY IF EXISTS "Allow full admin operations on devices" ON public.devices;
+                                        DROP POLICY IF EXISTS "Allow student insert devices" ON public.devices;
+                                        CREATE POLICY "Allow student insert devices" ON public.devices FOR INSERT TO anon, authenticated WITH CHECK (true);
+                                        DROP POLICY IF EXISTS "Allow student update devices" ON public.devices;
+                                        CREATE POLICY "Allow student update devices" ON public.devices FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+                                        DROP POLICY IF EXISTS "Service role full devices" ON public.devices;
+                                        CREATE POLICY "Service role full devices" ON public.devices FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+                                        DROP POLICY IF EXISTS "Allow all course_access_enrollments" ON public.course_access_enrollments;
+                                        DROP POLICY IF EXISTS "Allow student read enrollments" ON public.course_access_enrollments;
+                                        CREATE POLICY "Allow student read enrollments" ON public.course_access_enrollments FOR SELECT TO anon, authenticated USING (true);
+                                        DROP POLICY IF EXISTS "Allow student insert enrollments" ON public.course_access_enrollments;
+                                        CREATE POLICY "Allow student insert enrollments" ON public.course_access_enrollments FOR INSERT TO anon, authenticated WITH CHECK (true);
+                                        DROP POLICY IF EXISTS "Allow student update enrollments" ON public.course_access_enrollments;
+                                        CREATE POLICY "Allow student update enrollments" ON public.course_access_enrollments FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+                                        DROP POLICY IF EXISTS "Service role full enrollments" ON public.course_access_enrollments;
+                                        CREATE POLICY "Service role full enrollments" ON public.course_access_enrollments FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+                                        DROP POLICY IF EXISTS "Allow all course_payment_transactions" ON public.course_payment_transactions;
+                                        DROP POLICY IF EXISTS "Allow student read payment_tx" ON public.course_payment_transactions;
+                                        CREATE POLICY "Allow student read payment_tx" ON public.course_payment_transactions FOR SELECT TO anon, authenticated USING (true);
+                                        DROP POLICY IF EXISTS "Allow student insert payment_tx" ON public.course_payment_transactions;
+                                        CREATE POLICY "Allow student insert payment_tx" ON public.course_payment_transactions FOR INSERT TO anon, authenticated WITH CHECK (true);
+                                        DROP POLICY IF EXISTS "Service role full payment_tx" ON public.course_payment_transactions;
+                                        CREATE POLICY "Service role full payment_tx" ON public.course_payment_transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
+                                    """.trimIndent()
+                                    clipboardManager.setText(AnnotatedString(securitySql))
+                                    onShowToast("✅ Zero-Trust Security Lock SQL কপি হয়েছে! এখন Supabase SQL Editor-এ Run করুন।")
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("btn_copy_security_lock_sql")
+                            ) {
+                                Icon(Icons.Default.Security, contentDescription = null, tint = Slate950, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Zero-Trust Security Lock SQL কপি করুন",
+                                    color = Slate950,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -995,7 +1152,7 @@ fun SettingsScreen(
                     }
 
                     Text(
-                        text = "আপনার Supabase প্রজেক্টে access_codes, devices ও অন্যান্য টেবিল না থাকলে উপরের বাটন দিয়ে কপি করে Supabase SQL Editor এ রান করুন।",
+                        text = "আপনার Supabase প্রজেক্টে পুরাতন access_codes/activated_devices ডিলিট করতে এবং devices ও অন্যান্য টেবিল সেটআপ করতে উপরের বাটন দিয়ে কপি করে Supabase SQL Editor এ রান করুন।",
                         style = MaterialTheme.typography.bodySmall.copy(color = Slate400, lineHeight = 18.sp)
                     )
 

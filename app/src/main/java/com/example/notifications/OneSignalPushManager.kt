@@ -565,6 +565,224 @@ object OneSignalPushManager {
 -- ১. pg_net এক্সটেনশন চালু করুন (সার্ভার-সাইড থেকে OneSignal API কল করার জন্য)
 CREATE EXTENSION IF NOT EXISTS pg_net;
 
+-- ১.ক. স্টুডেন্ট অ্যাপ থেকে কোর্স এক্সেস রিকোয়েস্ট পাঠালে যেন অটো-এপ্রুভ না দেখায় তার ফিক্স:
+-- course_access_enrollments টেবিলের ডিফল্ট মানগুলো 0 / false / '[]' করা যাতে অ্যাডমিন এপ্রুভ করার আগে দাম ও কিস্তি না দেখায়
+ALTER TABLE public.course_access_enrollments
+    ALTER COLUMN status SET DEFAULT 'REQUESTED',
+    ALTER COLUMN access_status SET DEFAULT 'REQUESTED',
+    ALTER COLUMN total_price SET DEFAULT 0,
+    ALTER COLUMN total_fee SET DEFAULT 0,
+    ALTER COLUMN due_amount SET DEFAULT 0,
+    ALTER COLUMN next_installment_amount SET DEFAULT 0,
+    ALTER COLUMN installment_enabled SET DEFAULT false,
+    ALTER COLUMN allow_installments SET DEFAULT false,
+    ALTER COLUMN installment_plans_json SET DEFAULT '[]'::jsonb,
+    ALTER COLUMN installment_plans SET DEFAULT '[]'::jsonb;
+
+-- ১.খ. fn_sync_course_enrollment_columns ট্রিগার ফাংশন আপডেট করা (সব মিরর কলাম সিঙ্ক রেখে REQUESTED অবস্থায় approved_at না থাকলে total_price = 0 রাখা):
+CREATE OR REPLACE FUNCTION public.fn_sync_course_enrollment_columns()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    -- Sync device_id <-> device_hash
+    NEW.device_id := COALESCE(NULLIF(btrim(NEW.device_id), ''), NULLIF(btrim(NEW.device_hash), ''), '');
+    NEW.device_hash := COALESCE(NULLIF(btrim(NEW.device_hash), ''), NULLIF(btrim(NEW.device_id), ''), '');
+
+    -- Sync student_phone <-> user_phone
+    NEW.student_phone := public.normalize_bd_phone(COALESCE(NULLIF(btrim(NEW.student_phone), ''), NULLIF(btrim(NEW.user_phone), ''), ''));
+    NEW.user_phone := COALESCE(NULLIF(btrim(NEW.user_phone), ''), NEW.student_phone);
+
+    -- Sync shikho_account_key <-> shikho_user_id <-> student_key
+    NEW.shikho_account_key := COALESCE(
+        NULLIF(public.normalize_bd_phone(NEW.shikho_account_key), ''),
+        NULLIF(btrim(NEW.shikho_account_key), ''),
+        NULLIF(btrim(NEW.shikho_user_id), ''),
+        NULLIF(btrim(NEW.student_key), ''),
+        NULLIF(NEW.student_phone, ''),
+        NEW.device_id
+    );
+    NEW.shikho_user_id := COALESCE(NULLIF(btrim(NEW.shikho_user_id), ''), NEW.shikho_account_key);
+    NEW.student_key := COALESCE(NULLIF(btrim(NEW.student_key), ''), NEW.shikho_account_key);
+
+    -- Sync student_class <-> class_code & student_group <-> group_code
+    NEW.student_class := COALESCE(NULLIF(btrim(NEW.student_class), ''), NULLIF(btrim(NEW.class_code), ''), '');
+    NEW.class_code := COALESCE(NULLIF(btrim(NEW.class_code), ''), NEW.student_class);
+    NEW.student_group := COALESCE(NULLIF(btrim(NEW.student_group), ''), NULLIF(btrim(NEW.group_code), ''), '');
+    NEW.group_code := COALESCE(NULLIF(btrim(NEW.group_code), ''), NEW.student_group);
+
+    -- Sync program_id <-> course_id & program_title <-> course_title
+    NEW.program_id := COALESCE(NULLIF(btrim(NEW.program_id), ''), NULLIF(btrim(NEW.course_id), ''), '');
+    NEW.course_id := COALESCE(NULLIF(btrim(NEW.course_id), ''), NEW.program_id);
+    NEW.program_title := COALESCE(NULLIF(btrim(NEW.program_title), ''), NULLIF(btrim(NEW.course_title), ''), '');
+    NEW.course_title := COALESCE(NULLIF(btrim(NEW.course_title), ''), NEW.program_title);
+
+    -- Sync status <-> access_status
+    IF TG_OP = 'UPDATE' AND NEW.access_status IS DISTINCT FROM OLD.access_status AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
+        NEW.status := UPPER(COALESCE(NULLIF(btrim(NEW.access_status), ''), 'REQUESTED'));
+    ELSE
+        NEW.status := UPPER(COALESCE(NULLIF(btrim(NEW.status), ''), NULLIF(btrim(NEW.access_status), ''), 'REQUESTED'));
+    END IF;
+    NEW.access_status := NEW.status;
+
+    -- Sync selected_plan <-> active_plan
+    NEW.selected_plan_id := COALESCE(NULLIF(btrim(NEW.selected_plan_id), ''), NULLIF(btrim(NEW.active_plan_id), ''), 'FULL');
+    NEW.active_plan_id := COALESCE(NULLIF(btrim(NEW.active_plan_id), ''), NEW.selected_plan_id);
+    NEW.selected_plan_title := COALESCE(NULLIF(btrim(NEW.selected_plan_title), ''), NULLIF(btrim(NEW.active_plan_title), ''), 'এককালীন সম্পূর্ণ পেমেন্ট');
+    NEW.active_plan_title := COALESCE(NULLIF(btrim(NEW.active_plan_title), ''), NEW.selected_plan_title);
+
+    -- Sync trial & due dates
+    NEW.next_installment_due_at := NEW.next_due_date;
+    NEW.trial_used := COALESCE(NEW.is_trial_used, false);
+    NEW.trial_days_granted := COALESCE(NEW.trial_days, 0);
+    NEW.trial_expires_at := NEW.trial_ends_at;
+
+    -- যদি রিকোয়েস্টটি এখনো অ্যাডমিন এপ্রুভ না করে থাকেন (REQUESTED এবং approved_at IS NULL), তবে প্রাইস 0 ও কিস্তি false থাকবে
+    IF NEW.status IN ('REQUESTED', 'ACCESS_REQUESTED') AND NEW.approved_at IS NULL AND COALESCE(NEW.paid_amount, 0) = 0 THEN
+        NEW.total_price := 0;
+        NEW.total_fee := 0;
+        NEW.paid_amount := 0;
+        NEW.due_amount := 0;
+        NEW.next_installment_amount := 0;
+        NEW.installment_enabled := false;
+        NEW.allow_installments := false;
+        NEW.installment_plans_json := '[]'::jsonb;
+        NEW.installment_plans := '[]'::jsonb;
+    ELSE
+        IF NEW.installment_enabled IS DISTINCT FROM NEW.allow_installments THEN
+            IF TG_OP = 'UPDATE' AND NEW.allow_installments IS DISTINCT FROM OLD.allow_installments THEN
+                NEW.installment_enabled := NEW.allow_installments;
+            ELSE
+                NEW.allow_installments := COALESCE(NEW.installment_enabled, true);
+                NEW.installment_enabled := COALESCE(NEW.installment_enabled, true);
+            END IF;
+        END IF;
+
+        IF NEW.installment_plans IS DISTINCT FROM NEW.installment_plans_json THEN
+            IF TG_OP = 'UPDATE' AND NEW.installment_plans IS DISTINCT FROM OLD.installment_plans THEN
+                NEW.installment_plans_json := NEW.installment_plans;
+            ELSE
+                NEW.installment_plans := COALESCE(NEW.installment_plans_json, '[]'::jsonb);
+            END IF;
+        END IF;
+
+        NEW.total_price := COALESCE(NEW.total_price, 1000);
+        NEW.total_fee := NEW.total_price;
+        NEW.paid_amount := COALESCE(NEW.paid_amount, 0);
+        NEW.due_amount := GREATEST(0, NEW.total_price - NEW.paid_amount);
+    END IF;
+
+    NEW.updated_at := now();
+    RETURN NEW;
+END;
+$$;
+
+-- যেসব রিকোয়েস্ট ইতিমধ্যে REQUESTED অবস্থায় আছে কিন্তু অ্যাডমিন এখনো এপ্রুভ করেননি (approved_at IS NULL), সেগুলোর ডিফল্ট ১০০০ টাকা ও প্ল্যান ক্লিয়ার করা
+UPDATE public.course_access_enrollments
+SET total_price = 0,
+    total_fee = 0,
+    due_amount = 0,
+    next_installment_amount = 0,
+    installment_enabled = false,
+    allow_installments = false,
+    installment_plans_json = '[]'::jsonb,
+    installment_plans = '[]'::jsonb
+WHERE UPPER(COALESCE(status, 'REQUESTED')) IN ('REQUESTED', 'ACCESS_REQUESTED')
+  AND approved_at IS NULL
+  AND COALESCE(paid_amount, 0) = 0;
+
+CREATE OR REPLACE FUNCTION public.request_course_purchase_access(
+    p_device_id text,
+    p_shikho_account_key text,
+    p_student_name text,
+    p_student_phone text,
+    p_student_class text,
+    p_student_group text,
+    p_program_id text,
+    p_program_title text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_phone text;
+    v_account_key text;
+    v_real_dev_id text;
+    v_player_id text;
+    v_existing_id bigint;
+    v_existing_status text;
+BEGIN
+    v_phone := public.normalize_bd_phone(COALESCE(NULLIF(btrim(p_student_phone), ''), btrim(p_shikho_account_key)));
+    v_account_key := COALESCE(NULLIF(v_phone, ''), NULLIF(btrim(p_shikho_account_key), ''), btrim(p_device_id));
+    v_real_dev_id := COALESCE(NULLIF(btrim(p_device_id), ''), v_account_key);
+
+    SELECT onesignal_player_id INTO v_player_id
+    FROM public.devices
+    WHERE device_hash = v_real_dev_id OR device_id = v_real_dev_id OR display_device_id = v_real_dev_id
+    LIMIT 1;
+
+    SELECT id, status INTO v_existing_id, v_existing_status
+    FROM public.course_access_enrollments
+    WHERE (
+        shikho_account_key = v_account_key
+        OR device_hash = v_real_dev_id
+        OR (v_phone <> '' AND public.normalize_bd_phone(student_phone) = v_phone)
+    ) AND program_id = p_program_id
+    ORDER BY updated_at DESC
+    LIMIT 1;
+
+    IF v_existing_id IS NOT NULL THEN
+        -- যদি কোর্সটি ইতিমধ্যে ACTIVE বা TRIAL_ACTIVE না থাকে, তবে নতুন রিকোয়েস্ট পাঠালে অবশ্যই REQUESTED হবে (অ্যাডমিন অনুমোদনের অপেক্ষায়)
+        UPDATE public.course_access_enrollments
+        SET
+            device_id = v_real_dev_id,
+            device_hash = v_real_dev_id,
+            shikho_account_key = v_account_key,
+            onesignal_player_id = COALESCE(NULLIF(v_player_id, ''), onesignal_player_id),
+            student_name = COALESCE(NULLIF(btrim(p_student_name), ''), student_name),
+            student_phone = COALESCE(NULLIF(v_phone, ''), student_phone),
+            student_class = COALESCE(NULLIF(btrim(p_student_class), ''), student_class),
+            student_group = COALESCE(NULLIF(btrim(p_student_group), ''), student_group),
+            program_title = COALESCE(NULLIF(btrim(p_program_title), ''), program_title),
+            status = CASE WHEN UPPER(COALESCE(v_existing_status, '')) IN ('ACTIVE', 'TRIAL_ACTIVE') THEN v_existing_status ELSE 'REQUESTED' END,
+            access_status = CASE WHEN UPPER(COALESCE(v_existing_status, '')) IN ('ACTIVE', 'TRIAL_ACTIVE') THEN v_existing_status ELSE 'REQUESTED' END,
+            approved_at = CASE WHEN UPPER(COALESCE(v_existing_status, '')) IN ('ACTIVE', 'TRIAL_ACTIVE') THEN approved_at ELSE NULL END,
+            total_price = CASE WHEN UPPER(COALESCE(v_existing_status, '')) IN ('ACTIVE', 'TRIAL_ACTIVE') THEN total_price ELSE 0 END,
+            total_fee = CASE WHEN UPPER(COALESCE(v_existing_status, '')) IN ('ACTIVE', 'TRIAL_ACTIVE') THEN total_fee ELSE 0 END,
+            due_amount = CASE WHEN UPPER(COALESCE(v_existing_status, '')) IN ('ACTIVE', 'TRIAL_ACTIVE') THEN due_amount ELSE 0 END,
+            installment_enabled = CASE WHEN UPPER(COALESCE(v_existing_status, '')) IN ('ACTIVE', 'TRIAL_ACTIVE') THEN installment_enabled ELSE false END,
+            allow_installments = CASE WHEN UPPER(COALESCE(v_existing_status, '')) IN ('ACTIVE', 'TRIAL_ACTIVE') THEN allow_installments ELSE false END,
+            installment_plans_json = CASE WHEN UPPER(COALESCE(v_existing_status, '')) IN ('ACTIVE', 'TRIAL_ACTIVE') THEN installment_plans_json ELSE '[]'::jsonb END,
+            installment_plans = CASE WHEN UPPER(COALESCE(v_existing_status, '')) IN ('ACTIVE', 'TRIAL_ACTIVE') THEN installment_plans ELSE '[]'::jsonb END,
+            requested_at = now(),
+            updated_at = now()
+        WHERE id = v_existing_id;
+    ELSE
+        INSERT INTO public.course_access_enrollments (
+            device_id, device_hash, shikho_account_key, onesignal_player_id, student_name, student_phone,
+            student_class, student_group, program_id, program_title,
+            status, access_status, total_price, total_fee, due_amount, next_installment_amount,
+            installment_enabled, allow_installments, installment_plans_json, installment_plans,
+            approved_at, requested_at, updated_at
+        ) VALUES (
+            v_real_dev_id, v_real_dev_id, v_account_key, v_player_id, COALESCE(NULLIF(btrim(p_student_name), ''), 'শিক্ষার্থী'), v_phone,
+            COALESCE(p_student_class, ''), COALESCE(p_student_group, ''), p_program_id, p_program_title,
+            'REQUESTED', 'REQUESTED', 0, 0, 0, 0,
+            false, false, '[]'::jsonb, '[]'::jsonb,
+            NULL, now(), now()
+        );
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'status', 'REQUESTED',
+        'message', 'অ্যাডমিনের কাছে কোর্সে এক্সেস রিকোয়েস্ট পাঠানো হয়েছে! অ্যাডমিন দাম সেট করে এক্সেস দিলে এখানে দেখতে পাবেন।'
+    );
+END;
+$$;
+
 -- ২. public.onesignal_config টেবিল তৈরি (লাইভ ডাটাবেজের ৪টি আসল কলাম: id, onesignal_app_id, onesignal_rest_api_key, updated_at)
 CREATE TABLE IF NOT EXISTS public.onesignal_config (
     id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
@@ -600,9 +818,8 @@ GRANT EXECUTE ON FUNCTION public.get_onesignal_public_app_id() TO anon, authenti
 
 -- Admin App থেকে নিরাপদে OneSignal কনফিগারেশন আপডেট করার RPC
 CREATE OR REPLACE FUNCTION public.update_onesignal_config_secure(
-    p_onesignal_app_id TEXT,
-    p_onesignal_rest_api_key TEXT DEFAULT '',
-    p_is_enabled BOOLEAN DEFAULT TRUE
+    p_app_id TEXT,
+    p_rest_api_key TEXT DEFAULT ''
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -613,14 +830,14 @@ BEGIN
     INSERT INTO public.onesignal_config (id, onesignal_app_id, onesignal_rest_api_key, updated_at)
     VALUES (
         1,
-        COALESCE(NULLIF(BTRIM(p_onesignal_app_id), ''), '$safeAppId'),
-        COALESCE(NULLIF(BTRIM(p_onesignal_rest_api_key), ''), '$cleanKey'),
+        COALESCE(NULLIF(BTRIM(p_app_id), ''), '$safeAppId'),
+        COALESCE(NULLIF(BTRIM(p_rest_api_key), ''), '$cleanKey'),
         now()
     )
     ON CONFLICT (id) DO UPDATE SET
         onesignal_app_id = COALESCE(NULLIF(BTRIM(EXCLUDED.onesignal_app_id), ''), public.onesignal_config.onesignal_app_id),
         onesignal_rest_api_key = CASE
-            WHEN NULLIF(BTRIM(p_onesignal_rest_api_key), '') IS NOT NULL THEN BTRIM(p_onesignal_rest_api_key)
+            WHEN NULLIF(BTRIM(p_rest_api_key), '') IS NOT NULL THEN BTRIM(p_rest_api_key)
             ELSE public.onesignal_config.onesignal_rest_api_key
         END,
         updated_at = now();
@@ -628,9 +845,10 @@ BEGIN
     RETURN jsonb_build_object('success', true);
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.update_onesignal_config_secure(TEXT, TEXT, BOOLEAN) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.update_onesignal_config_secure(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.update_onesignal_config_secure(TEXT, TEXT) TO service_role;
 
--- ৩. স্টুডেন্টকে সার্ভার-সাইড থেকে OneSignal পুশ পাঠানোর SECURITY DEFINER RPC
+-- ৩. স্টুডেন্টকে সার্ভার-সাইড থেকে OneSignal পুশ পাঠানোর SECURITY DEFINER RPC (শুধুমাত্র service_role)
 CREATE OR REPLACE FUNCTION public.send_student_push_via_onesignal(
     p_onesignal_player_id TEXT DEFAULT '',
     p_device_hash TEXT DEFAULT '',
@@ -660,9 +878,10 @@ EXCEPTION WHEN OTHERS THEN
     RETURN jsonb_build_object('success', false, 'error', SQLERRM);
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.send_student_push_via_onesignal(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.send_student_push_via_onesignal(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.send_student_push_via_onesignal(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB) TO service_role;
 
--- ৪. ডিভাইস ও কনটেন্ট ডিলিট এবং পারমিশন ম্যানেজমেন্টের SECURITY DEFINER RPCs
+-- ৪. ডিভাইস ও কনটেন্ট ডিলিট এবং পারমিশন ম্যানেজমেন্টের SECURITY DEFINER RPCs (শুধুমাত্র service_role)
 CREATE OR REPLACE FUNCTION public.admin_delete_device(
     p_device_hash TEXT DEFAULT '',
     p_device_id TEXT DEFAULT ''
@@ -677,14 +896,11 @@ BEGIN
     WHERE (NULLIF(BTRIM(p_device_hash), '') IS NOT NULL AND (device_hash = BTRIM(p_device_hash) OR display_device_id = BTRIM(p_device_hash) OR device_id = BTRIM(p_device_hash)))
        OR (NULLIF(BTRIM(p_device_id), '') IS NOT NULL AND id::TEXT = BTRIM(p_device_id));
 
-    DELETE FROM public.activated_devices
-    WHERE (NULLIF(BTRIM(p_device_hash), '') IS NOT NULL AND (device_hash = BTRIM(p_device_hash) OR device_id = BTRIM(p_device_hash)))
-       OR (NULLIF(BTRIM(p_device_id), '') IS NOT NULL AND id::TEXT = BTRIM(p_device_id));
-
     RETURN jsonb_build_object('success', true);
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.admin_delete_device(TEXT, TEXT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.admin_delete_device(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_delete_device(TEXT, TEXT) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.admin_set_device_can_view_profiles(
     p_device_hash TEXT,
@@ -703,14 +919,10 @@ BEGIN
        OR display_device_id = BTRIM(p_device_hash)
        OR device_id = BTRIM(p_device_hash)
        OR id::TEXT = BTRIM(p_device_hash);
-
-    UPDATE public.activated_devices
-    SET can_view_profiles = COALESCE(p_can_view_profiles, FALSE)
-    WHERE device_hash = BTRIM(p_device_hash)
-       OR device_id = BTRIM(p_device_hash);
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.admin_set_device_can_view_profiles(TEXT, BOOLEAN) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.admin_set_device_can_view_profiles(TEXT, BOOLEAN) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_set_device_can_view_profiles(TEXT, BOOLEAN) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.admin_revoke_device_to_pending(
     p_device_hash TEXT
@@ -734,63 +946,8 @@ BEGIN
        OR id::TEXT = BTRIM(p_device_hash);
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.admin_revoke_device_to_pending(TEXT) TO anon, authenticated, service_role;
-
-CREATE OR REPLACE FUNCTION public.admin_delete_activated_device(
-    p_device_id TEXT DEFAULT '',
-    p_id TEXT DEFAULT ''
-)
-RETURNS VOID
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-    v_target TEXT := COALESCE(NULLIF(BTRIM(p_device_id), ''), NULLIF(BTRIM(p_id), ''));
-BEGIN
-    IF v_target IS NOT NULL THEN
-        DELETE FROM public.activated_devices WHERE id::TEXT = v_target OR device_id = v_target OR device_hash = v_target;
-    END IF;
-END;
-$$;
-GRANT EXECUTE ON FUNCTION public.admin_delete_activated_device(TEXT, TEXT) TO anon, authenticated, service_role;
-
-CREATE OR REPLACE FUNCTION public.admin_reset_devices_for_code(
-    p_code_id TEXT DEFAULT '',
-    p_code TEXT DEFAULT ''
-)
-RETURNS VOID
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-    IF NULLIF(BTRIM(p_code_id), '') IS NOT NULL THEN
-        DELETE FROM public.activated_devices WHERE code_id::TEXT = BTRIM(p_code_id);
-    END IF;
-END;
-$$;
-GRANT EXECUTE ON FUNCTION public.admin_reset_devices_for_code(TEXT, TEXT) TO anon, authenticated, service_role;
-
-CREATE OR REPLACE FUNCTION public.admin_delete_access_code(
-    p_code_id TEXT DEFAULT '',
-    p_id TEXT DEFAULT ''
-)
-RETURNS VOID
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-    v_target TEXT := COALESCE(NULLIF(BTRIM(p_code_id), ''), NULLIF(BTRIM(p_id), ''));
-BEGIN
-    IF v_target IS NOT NULL THEN
-        DELETE FROM public.activated_devices WHERE code_id::TEXT = v_target;
-        DELETE FROM public.access_codes WHERE id::TEXT = v_target OR code = v_target;
-    END IF;
-END;
-$$;
-GRANT EXECUTE ON FUNCTION public.admin_delete_access_code(TEXT, TEXT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.admin_revoke_device_to_pending(TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_revoke_device_to_pending(TEXT) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.admin_delete_app_notice(
     p_id TEXT DEFAULT '',
@@ -809,7 +966,8 @@ BEGIN
     END IF;
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.admin_delete_app_notice(TEXT, TEXT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.admin_delete_app_notice(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_delete_app_notice(TEXT, TEXT) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.admin_delete_app_update(
     p_id TEXT DEFAULT '',
@@ -828,7 +986,8 @@ BEGIN
     END IF;
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.admin_delete_app_update(TEXT, TEXT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.admin_delete_app_update(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_delete_app_update(TEXT, TEXT) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.admin_delete_support_link(
     p_id TEXT DEFAULT '',
@@ -847,7 +1006,8 @@ BEGIN
     END IF;
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.admin_delete_support_link(TEXT, TEXT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.admin_delete_support_link(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_delete_support_link(TEXT, TEXT) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.admin_delete_course_enrollment(
     p_enrollment_id BIGINT DEFAULT 0,
@@ -869,7 +1029,8 @@ BEGIN
     END IF;
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.admin_delete_course_enrollment(BIGINT, TEXT, TEXT) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.admin_delete_course_enrollment(BIGINT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_delete_course_enrollment(BIGINT, TEXT, TEXT) TO service_role;
 """.trimIndent()
     }
 }

@@ -6,8 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.api.CloudinaryClient
 import com.example.data.api.MaxbirdFirestoreClient
 import com.example.data.api.SupabaseClient
-import com.example.data.model.AccessCode
-import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
@@ -16,13 +14,11 @@ import com.example.data.model.CloudinaryHistoryItem
 import com.example.data.model.CourseAccessEnrollment
 import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
-import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceShikhoAccount
-import com.example.data.model.DeviceWithStudent
 import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.MaxbirdAdminAuthSession
@@ -43,7 +39,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.random.Random
 
 class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -80,55 +75,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isLoadingStats = MutableStateFlow(false)
     val isLoadingStats: StateFlow<Boolean> = _isLoadingStats.asStateFlow()
-
-    // Generator Form State
-    private val _genStudentName = MutableStateFlow("")
-    val genStudentName: StateFlow<String> = _genStudentName.asStateFlow()
-
-    private val _genCode = MutableStateFlow("MAX-${Random.nextInt(1000, 9999)}")
-    val genCode: StateFlow<String> = _genCode.asStateFlow()
-
-    private val _genMaxDevices = MutableStateFlow(1)
-    val genMaxDevices: StateFlow<Int> = _genMaxDevices.asStateFlow()
-
-    private val _genNote = MutableStateFlow("")
-    val genNote: StateFlow<String> = _genNote.asStateFlow()
-
-    private val _isGenerating = MutableStateFlow(false)
-    val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
-
-    private val _generatedSuccessCode = MutableStateFlow<AccessCode?>(null)
-    val generatedSuccessCode: StateFlow<AccessCode?> = _generatedSuccessCode.asStateFlow()
-
-    private val _generatorError = MutableStateFlow<String?>(null)
-    val generatorError: StateFlow<String?> = _generatorError.asStateFlow()
-
-    // Code Management State
-    private val _codes = MutableStateFlow<List<AccessCode>>(emptyList())
-    val codes: StateFlow<List<AccessCode>> = _codes.asStateFlow()
-
-    private val _codeSearchQuery = MutableStateFlow("")
-    val codeSearchQuery: StateFlow<String> = _codeSearchQuery.asStateFlow()
-
-    private val _codeFilter = MutableStateFlow("ALL") // ALL, ACTIVE, INACTIVE
-    val codeFilter: StateFlow<String> = _codeFilter.asStateFlow()
-
-    private val _isLoadingCodes = MutableStateFlow(false)
-    val isLoadingCodes: StateFlow<Boolean> = _isLoadingCodes.asStateFlow()
-
-    // Linked Devices for a code dialog
-    private val _selectedCodeForDevices = MutableStateFlow<AccessCode?>(null)
-    val selectedCodeForDevices: StateFlow<AccessCode?> = _selectedCodeForDevices.asStateFlow()
-
-    private val _linkedDevices = MutableStateFlow<List<ActivatedDevice>>(emptyList())
-    val linkedDevices: StateFlow<List<ActivatedDevice>> = _linkedDevices.asStateFlow()
-
-    private val _isLoadingLinkedDevices = MutableStateFlow(false)
-    val isLoadingLinkedDevices: StateFlow<Boolean> = _isLoadingLinkedDevices.asStateFlow()
-
-    // Device Management & Kill-Switch State
-    private val _joinedDevices = MutableStateFlow<List<DeviceWithStudent>>(emptyList())
-    val joinedDevices: StateFlow<List<DeviceWithStudent>> = _joinedDevices.asStateFlow()
 
     // Real Supabase Devices (public.devices) & Shikho Accounts (public.device_shikho_accounts)
     private val _userDevices = MutableStateFlow<List<UserDevice>>(emptyList())
@@ -607,8 +553,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadAllData() {
         refreshStats()
-        loadCodes()
-        loadJoinedDevices()
         loadUserDevices()
         loadAppUpdates()
         loadAppNotices()
@@ -632,190 +576,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Generator Functions
-    fun setGenStudentName(name: String) {
-        _genStudentName.value = name
-    }
-
-    fun setGenCode(code: String) {
-        _genCode.value = code.uppercase()
-    }
-
-    fun setGenMaxDevices(devices: Int) {
-        _genMaxDevices.value = devices.coerceIn(1, 5)
-    }
-
-    fun setGenNote(note: String) {
-        _genNote.value = note
-    }
-
-    fun generateRandomCode(prefix: String = "MAX") {
-        val randNum = Random.nextInt(1000, 9999)
-        _genCode.value = "$prefix-$randNum"
-    }
-
-    fun submitCreateCode() {
-        val name = _genStudentName.value.trim()
-        val code = _genCode.value.trim().uppercase()
-
-        if (name.isBlank()) {
-            _generatorError.value = "শিক্ষার্থীর নাম লিখুন (Student name is required)"
-            return
-        }
-        if (code.isBlank() || code.length < 3) {
-            _generatorError.value = "সঠিক কোড দিন (Valid code required)"
-            return
-        }
-
-        viewModelScope.launch {
-            try {
-                _isGenerating.value = true
-                _generatorError.value = null
-
-                val payload = CreateAccessCodePayload(
-                    code = code,
-                    studentName = name,
-                    maxDevices = _genMaxDevices.value,
-                    isActive = true,
-                    note = _genNote.value.ifBlank { null }
-                )
-
-                val result = repository.createAccessCode(payload)
-                if (result.isSuccess) {
-                    val created = result.getOrNull()
-                    _generatedSuccessCode.value = created
-                    _genStudentName.value = ""
-                    _genNote.value = ""
-                    generateRandomCode("MAX")
-                    loadCodes()
-                    refreshStats()
-                    showToast("এক্সেস কোড তৈরি সম্পন্ন হয়েছে! (Code created successfully)")
-                } else {
-                    _generatorError.value = result.exceptionOrNull()?.message ?: "কোড তৈরি করতে ব্যর্থ হয়েছে।"
-                }
-            } catch (e: Throwable) {
-                _generatorError.value = e.message ?: "ত্রুটি ঘটেছে।"
-            } finally {
-                _isGenerating.value = false
-            }
-        }
-    }
-
-    fun dismissSuccessDialog() {
-        _generatedSuccessCode.value = null
-    }
-
-    // Code Management Functions
-    fun setCodeSearchQuery(query: String) {
-        _codeSearchQuery.value = query
-    }
-
-    fun setCodeFilter(filter: String) {
-        _codeFilter.value = filter
-    }
-
-    fun loadCodes() {
-        viewModelScope.launch {
-            try {
-                _isLoadingCodes.value = true
-                val result = repository.getAccessCodes(forceRefresh = true)
-                if (result.isSuccess) {
-                    _codes.value = result.getOrNull() ?: emptyList()
-                }
-            } catch (e: Throwable) {
-                // Silently fallback
-            } finally {
-                _isLoadingCodes.value = false
-            }
-        }
-    }
-
-    fun toggleCodeStatus(code: AccessCode) {
-        val newStatus = !code.isActive
-        viewModelScope.launch {
-            try {
-                val result = repository.toggleCodeStatus(code.id, newStatus)
-                if (result.isSuccess) {
-                    loadCodes()
-                    refreshStats()
-                    val statusText = if (newStatus) "সক্রিয় (Active)" else "নিষ্ক্রিয় (Disabled)"
-                    showToast("${code.code} এখন $statusText")
-                }
-            } catch (e: Throwable) {
-                showToast("স্ট্যাটাস আপডেট ব্যর্থ হয়েছে।")
-            }
-        }
-    }
-
-    fun extendCodeValidity(code: AccessCode, extraDays: Int = 30) {
-        viewModelScope.launch {
-            try {
-                val result = repository.extendAccessCodeValidity(code.id, extraDays)
-                if (result.isSuccess) {
-                    loadCodes()
-                    refreshStats()
-                    showToast("✅ ${code.code}-এর মেয়াদ +$extraDays দিন বাড়ানো হয়েছে!")
-                }
-            } catch (e: Throwable) {
-                showToast("মেয়াদ বাড়াতে ব্যর্থ হয়েছে।")
-            }
-        }
-    }
-
-    fun resetDevicesForCode(code: AccessCode) {
-        viewModelScope.launch {
-            try {
-                val result = repository.resetDevicesForCode(code.id, code.code)
-                if (result.isSuccess) {
-                    loadJoinedDevices()
-                    refreshStats()
-                    if (_selectedCodeForDevices.value?.id == code.id) {
-                        openLinkedDevices(code)
-                    }
-                    showToast("🔄 ${code.code}-এর সকল ডিভাইস রিসেট (Unbind) করা হয়েছে!")
-                }
-            } catch (e: Throwable) {
-                showToast("ডিভাইস রিসেট ব্যর্থ হয়েছে।")
-            }
-        }
-    }
-
-    fun deleteCode(code: AccessCode) {
-        viewModelScope.launch {
-            try {
-                val result = repository.deleteAccessCode(code.id)
-                if (result.isSuccess) {
-                    loadCodes()
-                    loadJoinedDevices()
-                    refreshStats()
-                    showToast("${code.code} কোডটি মুছে ফেলা হয়েছে। (Code deleted)")
-                }
-            } catch (e: Throwable) {
-                showToast("মুছে ফেলতে ব্যর্থ হয়েছে।")
-            }
-        }
-    }
-
-    fun openLinkedDevices(code: AccessCode) {
-        _selectedCodeForDevices.value = code
-        viewModelScope.launch {
-            try {
-                _isLoadingLinkedDevices.value = true
-                val result = repository.getDevicesForCode(code.id)
-                _linkedDevices.value = result.getOrNull() ?: emptyList()
-            } catch (e: Throwable) {
-                _linkedDevices.value = emptyList()
-            } finally {
-                _isLoadingLinkedDevices.value = false
-            }
-        }
-    }
-
-    fun closeLinkedDevices() {
-        _selectedCodeForDevices.value = null
-        _linkedDevices.value = emptyList()
-    }
-
     // Device Management & Remote Kill-Switch Functions
     fun setDeviceSearchQuery(query: String) {
         _deviceSearchQuery.value = query
@@ -823,55 +583,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setDeviceFilter(filter: String) {
         _deviceFilter.value = filter
-    }
-
-    fun loadJoinedDevices() {
-        viewModelScope.launch {
-            try {
-                _isLoadingDevices.value = true
-                val result = repository.getJoinedDevices()
-                if (result.isSuccess) {
-                    _joinedDevices.value = result.getOrNull() ?: emptyList()
-                }
-            } catch (e: Throwable) {
-                // Silently fallback
-            } finally {
-                _isLoadingDevices.value = false
-            }
-        }
-    }
-
-    fun toggleDeviceBlocked(item: DeviceWithStudent) {
-        val newBlockedState = !item.device.isBlocked
-        viewModelScope.launch {
-            try {
-                val result = repository.toggleDeviceBlocked(item.device.id, newBlockedState)
-                if (result.isSuccess) {
-                    loadJoinedDevices()
-                    refreshStats()
-                    val action = if (newBlockedState) "ব্লক করা হয়েছে! কিল-সুইচ সক্রিয় (Device Blocked!)" else "আনব্লক করা হয়েছে (Device Unblocked)"
-                    showToast("${item.device.deviceModel}: $action")
-                }
-            } catch (e: Throwable) {
-                showToast("ডিভাইস স্ট্যাটাস আপডেট ব্যর্থ হয়েছে।")
-            }
-        }
-    }
-
-    fun unbindDevice(item: DeviceWithStudent) {
-        viewModelScope.launch {
-            try {
-                val result = repository.unbindDevice(item.device.id)
-                if (result.isSuccess) {
-                    loadJoinedDevices()
-                    refreshStats()
-                    _selectedCodeForDevices.value?.let { openLinkedDevices(it) }
-                    showToast("${item.device.deviceModel} আনবাইন্ড সম্পন্ন হয়েছে। নতুন ডিভাইস যুক্ত করা যাবে।")
-                }
-            } catch (e: Throwable) {
-                showToast("আনবাইন্ড ব্যর্থ হয়েছে।")
-            }
-        }
     }
 
     // Real Supabase Devices (public.devices) & Shikho Accounts (public.device_shikho_accounts) Operations

@@ -85,7 +85,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.AccessCode
 import com.example.data.model.DashboardStats
 import com.example.notifications.OneSignalPushManager
 import com.example.ui.navigation.Screen
@@ -117,12 +116,11 @@ import com.example.ui.theme.Violet500
 /**
  * Modern, Ultra-Polished Executive Dashboard Screen for MaxBird Admin.
  * Features glowing gradient hero metrics, balanced modular admin grid,
- * quick code copy actions, and clean zero-clutter information architecture.
+ * and clean zero-clutter information architecture.
  */
 @Composable
 fun DashboardScreen(
     stats: DashboardStats,
-    recentCodes: List<AccessCode>,
     isLoading: Boolean,
     onRefresh: () -> Unit,
     onNavigate: (Screen) -> Unit,
@@ -285,9 +283,9 @@ fun DashboardScreen(
                             }
                         }
 
-                        // Capacity Bar & Slots Info
-                        val capacityRatio = if (stats.totalCodes > 0) {
-                            (stats.totalDevices.toFloat() / (stats.totalCodes * 1.5f)).coerceIn(0f, 1f)
+                        // Device Verification Progress Bar & Live Status
+                        val verificationRatio = if (stats.totalDevices > 0) {
+                            (stats.activeVerifiedDevices.toFloat() / stats.totalDevices.toFloat()).coerceIn(0f, 1f)
                         } else 0f
 
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -297,14 +295,14 @@ fun DashboardScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "লাইসেন্স ব্যবহার হার",
+                                    text = "ডিভাইস ভেরিফিকেশন অনুপাত",
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         color = Slate200,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 )
                                 Text(
-                                    text = "${stats.totalDevices} ডিভাইস সংযুক্ত",
+                                    text = "${stats.activeVerifiedDevices} সক্রিয় / ${stats.totalDevices} মোট ডিভাইস",
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         color = NeonCyan,
                                         fontWeight = FontWeight.Bold
@@ -313,7 +311,7 @@ fun DashboardScreen(
                             }
 
                             LinearProgressIndicator(
-                                progress = { capacityRatio },
+                                progress = { verificationRatio },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(8.dp)
@@ -327,7 +325,7 @@ fun DashboardScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "অবশিষ্ট স্লট: ${stats.availableSlots}",
+                                    text = "অপেক্ষমান রিকোয়েস্ট: ${stats.pendingVerificationDevices} টি",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         color = Slate400,
                                         fontSize = 11.sp
@@ -928,21 +926,21 @@ fun DashboardScreen(
                     )
                 }
 
-                // Row 3: Legacy Code List & System Settings
+                // Row 3: Direct Device Control & System Settings
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     FeaturedModuleCard(
                         modifier = Modifier.weight(1f),
-                        title = "পুরনো কোড লিস্ট",
-                        subtitle = "অ্যাক্সেস কোড আর্কাইভ (ঐচ্ছিক)",
-                        icon = Icons.Default.Group,
-                        badge = null,
+                        title = "ডিভাইস ও অ্যাকাউন্ট পারমিশন",
+                        subtitle = "কোর্স অ্যাক্সেস ও হার্ডওয়্যার কিল-সুইচ",
+                        icon = Icons.Default.Devices,
+                        badge = "${stats.activeVerifiedDevices} সক্রিয়",
                         accentColor = Sky500,
                         gradientStart = Sky500.copy(alpha = 0.18f),
-                        onClick = { onNavigate(Screen.Codes) },
-                        testTag = "mod_card_codes"
+                        onClick = { onNavigate(Screen.Devices) },
+                        testTag = "mod_card_devices_permissions"
                     )
                     FeaturedModuleCard(
                         modifier = Modifier.weight(1f),
@@ -956,116 +954,6 @@ fun DashboardScreen(
                         testTag = "mod_card_settings"
                     )
                 }
-            }
-        }
-
-        // 5. Recent Codes Preview Header & List
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(NeonCyan)
-                    )
-                    Text(
-                        text = "সাম্প্রতিক অ্যাক্সেস কোড",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
-                        )
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = ElectricBlue.copy(alpha = 0.15f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.35f)),
-                    modifier = Modifier.clickable { onNavigate(Screen.Codes) }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = "সব কোড দেখুন",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = ElectricBlueLight,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
-                            )
-                        )
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = null,
-                            tint = ElectricBlueLight,
-                            modifier = Modifier.size(12.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        if (recentCodes.isEmpty()) {
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Slate800),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, Slate700, RoundedCornerShape(14.dp))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(28.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.VpnKey,
-                                contentDescription = null,
-                                tint = Slate600,
-                                modifier = Modifier.size(36.dp)
-                            )
-                            Text(
-                                text = "কোনো অ্যাক্সেস কোড এখনো তৈরি করা হয়নি।",
-                                style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
-                            )
-                            Button(
-                                onClick = { onNavigate(Screen.Generator) },
-                                colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text("নতুন কোড তৈরি করুন", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            items(recentCodes.take(4)) { code ->
-                RecentCodeCard(
-                    code = code,
-                    onCopy = {
-                        clipboardManager.setText(AnnotatedString(code.code))
-                        onShowToast("কোড ${code.code} কপি করা হয়েছে!")
-                    }
-                )
             }
         }
 
@@ -1157,103 +1045,7 @@ private fun MetricStatCard(
     }
 }
 
-/**
- * Modern Recent Code Card with Clear Visual Separation and Instant Copy
- */
-@Composable
-private fun RecentCodeCard(
-    code: AccessCode,
-    onCopy: () -> Unit
-) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Slate800),
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, Slate700, RoundedCornerShape(14.dp))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(if (code.isActive) EmeraldSuccess else CoralDanger)
-                    )
-                    Text(
-                        text = code.studentName,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    )
-                }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Surface(
-                        color = Slate950,
-                        shape = RoundedCornerShape(8.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f))
-                    ) {
-                        Text(
-                            text = code.code,
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                color = NeonCyan,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace,
-                                letterSpacing = 1.sp
-                            ),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-
-                    Surface(
-                        color = Slate700,
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            text = "সর্বোচ্চ ${code.maxDevices} ডিভাইস",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = Slate200,
-                                fontSize = 10.sp
-                            ),
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-
-            IconButton(
-                onClick = onCopy,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(Slate700)
-                    .size(38.dp)
-                    .testTag("btn_copy_${code.code}")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ContentCopy,
-                    contentDescription = "Copy Code",
-                    tint = ElectricBlueLight,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-    }
-}
 
 /**
  * Modern Feature Module Card with Subtle Glow and Elevated Feel

@@ -68,8 +68,6 @@ import com.example.notifications.OneSignalPushManager
 import com.example.ui.navigation.Screen
 import com.example.ui.screens.ActivationSupportLinksScreen
 import com.example.ui.screens.CloudinaryMediaScreen
-import com.example.ui.screens.CodeGeneratorScreen
-import com.example.ui.screens.CodeManagementScreen
 import com.example.ui.screens.CourseSalesManagementScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.DeviceManagementScreen
@@ -196,7 +194,6 @@ class MainActivity : ComponentActivity() {
                         when (currentScreen) {
                             Screen.Dashboard -> {
                                 val stats by viewModel.stats.collectAsStateWithLifecycle()
-                                val codes by viewModel.codes.collectAsStateWithLifecycle()
                                 val isLoadingStats by viewModel.isLoadingStats.collectAsStateWithLifecycle()
                                 val enrollments by viewModel.courseAccessEnrollments.collectAsStateWithLifecycle()
                                 val transactions by viewModel.coursePaymentTransactions.collectAsStateWithLifecycle()
@@ -211,7 +208,6 @@ class MainActivity : ComponentActivity() {
 
                                 DashboardScreen(
                                     stats = stats,
-                                    recentCodes = codes,
                                     isLoading = isLoadingStats,
                                     onRefresh = { viewModel.loadAllData() },
                                     onNavigate = { screen -> viewModel.navigateTo(screen) },
@@ -350,64 +346,6 @@ class MainActivity : ComponentActivity() {
                                     onShowToast = { msg -> viewModel.showToast(msg) },
                                     initialSubTab = selectedCourseSalesTab,
                                     onSubTabChanged = { tabIdx -> viewModel.setCourseSalesSubTab(tabIdx) }
-                                )
-                            }
-
-                            Screen.Generator -> {
-                                val studentName by viewModel.genStudentName.collectAsStateWithLifecycle()
-                                val code by viewModel.genCode.collectAsStateWithLifecycle()
-                                val maxDevices by viewModel.genMaxDevices.collectAsStateWithLifecycle()
-                                val note by viewModel.genNote.collectAsStateWithLifecycle()
-                                val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
-                                val generatorError by viewModel.generatorError.collectAsStateWithLifecycle()
-                                val successCode by viewModel.generatedSuccessCode.collectAsStateWithLifecycle()
-
-                                CodeGeneratorScreen(
-                                    studentName = studentName,
-                                    code = code,
-                                    maxDevices = maxDevices,
-                                    note = note,
-                                    isGenerating = isGenerating,
-                                    errorMessage = generatorError,
-                                    successCode = successCode,
-                                    onNameChange = { viewModel.setGenStudentName(it) },
-                                    onCodeChange = { viewModel.setGenCode(it) },
-                                    onMaxDevicesChange = { viewModel.setGenMaxDevices(it) },
-                                    onNoteChange = { viewModel.setGenNote(it) },
-                                    onGenerateRandom = { prefix -> viewModel.generateRandomCode(prefix) },
-                                    onSubmit = { viewModel.submitCreateCode() },
-                                    onDismissSuccess = { viewModel.dismissSuccessDialog() },
-                                    onShowToast = { msg -> viewModel.showToast(msg) }
-                                )
-                            }
-
-                            Screen.Codes -> {
-                                val codes by viewModel.codes.collectAsStateWithLifecycle()
-                                val searchQuery by viewModel.codeSearchQuery.collectAsStateWithLifecycle()
-                                val filter by viewModel.codeFilter.collectAsStateWithLifecycle()
-                                val isLoadingCodes by viewModel.isLoadingCodes.collectAsStateWithLifecycle()
-                                val selectedCodeForDevices by viewModel.selectedCodeForDevices.collectAsStateWithLifecycle()
-                                val linkedDevices by viewModel.linkedDevices.collectAsStateWithLifecycle()
-                                val isLoadingLinkedDevices by viewModel.isLoadingLinkedDevices.collectAsStateWithLifecycle()
-
-                                CodeManagementScreen(
-                                    codes = codes,
-                                    searchQuery = searchQuery,
-                                    filter = filter,
-                                    isLoading = isLoadingCodes,
-                                    selectedCodeForDevices = selectedCodeForDevices,
-                                    linkedDevices = linkedDevices,
-                                    isLoadingLinkedDevices = isLoadingLinkedDevices,
-                                    onSearchChange = { viewModel.setCodeSearchQuery(it) },
-                                    onFilterChange = { viewModel.setCodeFilter(it) },
-                                    onRefresh = { viewModel.loadCodes() },
-                                    onToggleActive = { target -> viewModel.toggleCodeStatus(target) },
-                                    onExtendValidity = { target, days -> viewModel.extendCodeValidity(target, days) },
-                                    onResetDevicesForCode = { target -> viewModel.resetDevicesForCode(target) },
-                                    onDeleteCode = { target -> viewModel.deleteCode(target) },
-                                    onOpenLinkedDevices = { target -> viewModel.openLinkedDevices(target) },
-                                    onCloseLinkedDevices = { viewModel.closeLinkedDevices() },
-                                    onShowToast = { msg -> viewModel.showToast(msg) }
                                 )
                             }
 
@@ -893,7 +831,7 @@ private fun AdminBottomNavigationBar(
     ) {
         val items = Screen.bottomNavItems
         items.forEach { screen ->
-            val isSelected = currentScreen == screen || (screen == Screen.Codes && currentScreen == Screen.Generator)
+            val isSelected = currentScreen == screen
             NavigationBarItem(
                 selected = isSelected,
                 onClick = { onNavigate(screen) },

@@ -22,9 +22,13 @@ class AdminPreferences(context: Context) {
         private const val KEY_SAVED_PAYMENT_METHODS_JSON = "saved_payment_methods_json"
         const val DEFAULT_PIN = "8899"
 
-        // Default project fallback
-        const val DEFAULT_FALLBACK_URL = "https://krmhyxovnpxlqfaptyuv.supabase.co/"
+        // Default project fallback (public base URL)
+        const val DEFAULT_FALLBACK_URL = "https://aaxonnktltywbwgjxpot.supabase.co/"
         const val DEFAULT_FALLBACK_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.fake_key"
+
+        fun isServiceRoleJwt(key: String): Boolean {
+            return key.trim().contains("InJvbGUiOiJzZXJ2aWNlX3JvbGUi")
+        }
     }
 
     fun getSavedPaymentMethodsJson(): String? {
@@ -61,7 +65,7 @@ class AdminPreferences(context: Context) {
 
     fun getSupabaseUrl(): String {
         val saved = prefs.getString(KEY_SUPABASE_URL, "")
-        if (!saved.isNullOrBlank()) {
+        if (!saved.isNullOrBlank() && !saved.contains("krmhyxovnpxlqfaptyuv")) {
             return normalizeUrl(saved)
         }
 
@@ -85,7 +89,7 @@ class AdminPreferences(context: Context) {
 
     private fun normalizeUrl(raw: String): String {
         val trimmed = raw.trim()
-        if (trimmed.isBlank() || trimmed.contains("your-project-ref")) {
+        if (trimmed.isBlank() || trimmed.contains("your-project-ref") || trimmed.contains("krmhyxovnpxlqfaptyuv")) {
             return DEFAULT_FALLBACK_URL
         }
 
@@ -108,16 +112,33 @@ class AdminPreferences(context: Context) {
     }
 
     fun getSupabaseKey(): String {
-        val saved = prefs.getString(KEY_SUPABASE_KEY, "")
-        if (!saved.isNullOrBlank()) return saved
+        val saved = prefs.getString(KEY_SUPABASE_KEY, "")?.trim().orEmpty()
+        if (saved.isNotEmpty() && isServiceRoleJwt(saved)) {
+            return saved
+        }
 
-        val candidateKeys = listOf("SERVICE_ROLE", "SUPABASE_ANON_KEY", "SUPABASE_KEY")
+        // Check BuildConfig SERVICE_ROLE first (injected via Secrets panel)
+        try {
+            val serviceRoleField = BuildConfig::class.java.getField("SERVICE_ROLE")
+            val serviceRoleVal = (serviceRoleField.get(null) as? String)?.trim().orEmpty()
+            if (serviceRoleVal.isNotEmpty() && !serviceRoleVal.contains("your-") && !serviceRoleVal.contains("fake_key")) {
+                return serviceRoleVal
+            }
+        } catch (_: Exception) {
+            // Ignore
+        }
+
+        if (saved.isNotEmpty() && !saved.contains("fake_key")) {
+            return saved
+        }
+
+        val candidateKeys = listOf("SUPABASE_KEY", "SUPABASE_ANON_KEY")
         for (fieldKey in candidateKeys) {
             try {
                 val field = BuildConfig::class.java.getField(fieldKey)
                 val value = field.get(null) as? String
                 if (!value.isNullOrBlank() && !value.contains("your-") && !value.contains("fake_key")) {
-                    return value
+                    return value.trim()
                 }
             } catch (_: Exception) {
                 // Ignore and try next
@@ -132,7 +153,8 @@ class AdminPreferences(context: Context) {
 
     fun isCustomConfigured(): Boolean {
         val url = getSupabaseUrl()
-        return !url.contains("your-project-ref") && !url.contains("krmhyxovnpxlqfaptyuv")
+        val key = getSupabaseKey()
+        return !url.contains("your-project-ref") && !key.contains("fake_key")
     }
 
     fun getOneSignalAppId(): String {

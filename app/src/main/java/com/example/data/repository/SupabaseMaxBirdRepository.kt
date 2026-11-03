@@ -1,7 +1,5 @@
 package com.example.data.repository
 
-import com.example.data.model.AccessCode
-import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
@@ -9,25 +7,20 @@ import com.example.data.model.ApproveCourseAccessRequestRpcPayload
 import com.example.data.model.CourseAccessEnrollment
 import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
-import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceShikhoAccount
-import com.example.data.model.DeviceWithStudent
 import com.example.data.model.DynamicPaymentMethodItem
 import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
-import com.example.data.model.UpdateCodeStatusPayload
-import com.example.data.model.UpdateDeviceBlockedPayload
 import com.example.data.model.UpdateAppUpdateStatusPayload
 import com.example.data.model.UpdateAppNoticeStatusPayload
 import com.example.data.model.UpdateSupportLinkStatusPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
-import com.example.data.model.UpdateDeviceBanPayload
 import com.example.data.api.SupabaseClient
 import com.example.data.preferences.AdminPreferences
 import com.squareup.moshi.Types
@@ -46,8 +39,6 @@ class SupabaseMaxBirdRepository(
 ) : MaxBirdRepository {
 
     // In-memory fallback / cache to guarantee seamless experience
-    private val cachedCodes = mutableListOf<AccessCode>()
-    private val cachedDevices = mutableListOf<ActivatedDevice>()
     private val cachedUpdates = mutableListOf<AppUpdate>()
     private val cachedNotices = mutableListOf<AppNotice>()
     private val cachedSupportLinks = mutableListOf<ActivationSupportLink>()
@@ -59,95 +50,8 @@ class SupabaseMaxBirdRepository(
     }
 
     private fun initSampleDataIfNeeded() {
-        if (!isInitializedWithSampleData && cachedCodes.isEmpty()) {
-            val code1Id = UUID.randomUUID().toString()
-            val code2Id = UUID.randomUUID().toString()
-            val code3Id = UUID.randomUUID().toString()
-            val code4Id = UUID.randomUUID().toString()
-
+        if (!isInitializedWithSampleData && cachedUserDevices.isEmpty()) {
             val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-
-            cachedCodes.addAll(
-                listOf(
-                    AccessCode(
-                        id = code1Id,
-                        code = "MAX-8921",
-                        studentName = "তানভীর আহমেদ (Tanvir Ahmed)",
-                        maxDevices = 1,
-                        isActive = true,
-                        createdAt = now,
-                        note = "Batch 2026 - Mobile App Development"
-                    ),
-                    AccessCode(
-                        id = code2Id,
-                        code = "VIP-5541",
-                        studentName = "সাকিবুল হাসান (Sakibul Hasan)",
-                        maxDevices = 2,
-                        isActive = true,
-                        createdAt = now,
-                        note = "VIP Student - Tab & Phone Access"
-                    ),
-                    AccessCode(
-                        id = code3Id,
-                        code = "MAX-3419",
-                        studentName = "ফারহানা করিম (Farhana Karim)",
-                        maxDevices = 1,
-                        isActive = false,
-                        createdAt = now,
-                        note = "Course Completed"
-                    ),
-                    AccessCode(
-                        id = code4Id,
-                        code = "MAX-9012",
-                        studentName = "মেহেদী হাসান (Mehedi Hasan)",
-                        maxDevices = 2,
-                        isActive = true,
-                        createdAt = now,
-                        note = "Registered 2026-10"
-                    )
-                )
-            )
-
-            cachedDevices.addAll(
-                listOf(
-                    ActivatedDevice(
-                        id = UUID.randomUUID().toString(),
-                        codeId = code1Id,
-                        deviceId = "MX-A1B2-C3D4",
-                        deviceModel = "Samsung Galaxy S24 Ultra",
-                        isBlocked = false,
-                        activatedAt = now,
-                        lastActiveAt = now
-                    ),
-                    ActivatedDevice(
-                        id = UUID.randomUUID().toString(),
-                        codeId = code2Id,
-                        deviceId = "MX-E5F6-G7H8",
-                        deviceModel = "Xiaomi 14 Pro",
-                        isBlocked = false,
-                        activatedAt = now,
-                        lastActiveAt = now
-                    ),
-                    ActivatedDevice(
-                        id = UUID.randomUUID().toString(),
-                        codeId = code2Id,
-                        deviceId = "MX-TB99-XX21",
-                        deviceModel = "Samsung Galaxy Tab S9",
-                        isBlocked = true,
-                        activatedAt = now,
-                        lastActiveAt = now
-                    ),
-                    ActivatedDevice(
-                        id = UUID.randomUUID().toString(),
-                        codeId = code3Id,
-                        deviceId = "MX-PX88-Z001",
-                        deviceModel = "Google Pixel 8 Pro",
-                        isBlocked = false,
-                        activatedAt = now,
-                        lastActiveAt = now
-                    )
-                )
-            )
 
             cachedUpdates.addAll(
                 listOf(
@@ -355,333 +259,21 @@ class SupabaseMaxBirdRepository(
         }
     }
 
-    override suspend fun getAccessCodes(forceRefresh: Boolean): Result<List<AccessCode>> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val remoteCodes = api.getAccessCodes().map { code ->
-                code.copy(
-                    studentName = code.effectiveStudentName,
-                    maxDevices = code.effectiveMaxDevices,
-                    expiresAt = code.effectiveExpiresAt
-                )
-            }
-            cachedCodes.clear()
-            cachedCodes.addAll(remoteCodes)
-            Result.success(remoteCodes)
-        } catch (e: Exception) {
-            initSampleDataIfNeeded()
-            Result.success(cachedCodes.toList())
-        }
-    }
-
-    override suspend fun createAccessCode(payload: CreateAccessCodePayload): Result<AccessCode> = withContext(Dispatchers.IO) {
-        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-        val syncedPayload = payload.copy(
-            code = payload.code.uppercase().trim(),
-            studentName = payload.studentName.trim(),
-            name = payload.studentName.trim(),
-            maxDevices = payload.maxDevices,
-            deviceLimit = payload.maxDevices,
-            isActive = payload.isActive,
-            status = if (payload.isActive) "active" else "inactive",
-            note = payload.note ?: ""
-        )
-        val localNewCode = AccessCode(
-            id = UUID.randomUUID().toString(),
-            code = syncedPayload.code,
-            studentName = syncedPayload.studentName,
-            name = syncedPayload.name,
-            maxDevices = syncedPayload.maxDevices,
-            deviceLimit = syncedPayload.deviceLimit,
-            isActive = syncedPayload.isActive,
-            status = syncedPayload.status,
-            createdAt = now,
-            updatedAt = now,
-            note = syncedPayload.note
-        )
-
-        try {
-            val api = supabaseClient.getApi()
-            val createdList = api.createAccessCode(syncedPayload)
-            val created = createdList.firstOrNull()?.let {
-                it.copy(
-                    studentName = it.effectiveStudentName,
-                    maxDevices = it.effectiveMaxDevices,
-                    expiresAt = it.effectiveExpiresAt
-                )
-            } ?: localNewCode
-            cachedCodes.add(0, created)
-            Result.success(created)
-        } catch (e: Exception) {
-            cachedCodes.add(0, localNewCode)
-            Result.success(localNewCode)
-        }
-    }
-
-    override suspend fun toggleCodeStatus(codeId: String, isActive: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
-        val statusStr = if (isActive) "active" else "inactive"
-        val index = cachedCodes.indexOfFirst { it.id == codeId }
-        if (index != -1) {
-            val existing = cachedCodes[index]
-            cachedCodes[index] = existing.copy(isActive = isActive, status = statusStr)
-        }
-
-        try {
-            val api = supabaseClient.getApi()
-            api.updateAccessCodeStatus(
-                idQuery = "eq.$codeId",
-                payload = UpdateCodeStatusPayload(isActive = isActive, status = statusStr)
-            )
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.success(Unit)
-        }
-    }
-
-    override suspend fun extendAccessCodeValidity(codeId: String, extraDays: Int): Result<Unit> = withContext(Dispatchers.IO) {
-        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-        val cal = Calendar.getInstance()
-        cal.add(Calendar.DAY_OF_YEAR, extraDays)
-        val newExpiryIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
-        val newExpiryDisplay = SimpleDateFormat("dd MMM yyyy", Locale.US).format(cal.time)
-
-        val index = cachedCodes.indexOfFirst { it.id == codeId }
-        val updatedNote = if (index != -1) {
-            val existing = cachedCodes[index]
-            val cleanNote = existing.note.orEmpty().replace(Regex("\\s*\\|\\s*মেয়াদ:.*$"), "").trim()
-            val noteWithExpiry = if (cleanNote.isBlank()) "মেয়াদ: $newExpiryDisplay" else "$cleanNote | মেয়াদ: $newExpiryDisplay"
-            cachedCodes[index] = existing.copy(
-                isActive = true,
-                status = "active",
-                expiresAt = newExpiryIso,
-                expiryDate = newExpiryIso,
-                note = noteWithExpiry,
-                updatedAt = nowIso
-            )
-            noteWithExpiry
-        } else {
-            "মেয়াদ: $newExpiryDisplay"
-        }
-
-        try {
-            val api = supabaseClient.getApi()
-            val res = api.patchAccessCode(
-                idQuery = "eq.$codeId",
-                payload = mapOf(
-                    "is_active" to true,
-                    "status" to "active",
-                    "expires_at" to newExpiryIso,
-                    "expiry_date" to newExpiryIso,
-                    "note" to updatedNote,
-                    "updated_at" to nowIso
-                )
-            )
-            if (!res.isSuccessful) {
-                api.patchAccessCode(
-                    idQuery = "eq.$codeId",
-                    payload = mapOf(
-                        "is_active" to true,
-                        "expires_at" to newExpiryIso,
-                        "note" to updatedNote
-                    )
-                )
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.success(Unit)
-        }
-    }
-
-    override suspend fun resetDevicesForCode(codeId: String, codeString: String): Result<Unit> = withContext(Dispatchers.IO) {
-        val linkedDevices = cachedDevices.filter { it.codeId == codeId }
-        cachedDevices.removeAll { it.codeId == codeId }
-
-        try {
-            val api = supabaseClient.getApi()
-            val remoteLinked = try {
-                api.getDevicesForCode(codeIdQuery = "eq.$codeId")
-            } catch (_: Exception) {
-                linkedDevices
-            }
-            var deletedAny = false
-            remoteLinked.forEach { dev ->
-                if (dev.id.isNotBlank()) {
-                    try {
-                        val delRes = api.deleteDevice("eq.${dev.id}")
-                        if (delRes.isSuccessful) {
-                            deletedAny = true
-                        } else {
-                            api.adminDeleteActivatedDeviceRpc(mapOf("p_device_id" to dev.id))
-                        }
-                    } catch (_: Exception) {
-                        try {
-                            api.adminDeleteActivatedDeviceRpc(mapOf("p_device_id" to dev.id))
-                        } catch (_: Exception) {
-                        }
-                    }
-                }
-            }
-            if (!deletedAny && remoteLinked.isNotEmpty()) {
-                try {
-                    api.adminResetDevicesForCodeRpc(
-                        mapOf(
-                            "p_code_id" to codeId,
-                            "p_code" to codeString
-                        )
-                    )
-                } catch (_: Exception) {
-                }
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.success(Unit)
-        }
-    }
-
-    override suspend fun deleteAccessCode(codeId: String): Result<Unit> = withContext(Dispatchers.IO) {
-        cachedCodes.removeAll { it.id == codeId }
-        cachedDevices.removeAll { it.codeId == codeId }
-
-        try {
-            val api = supabaseClient.getApi()
-            val delRes = try {
-                api.deleteAccessCode("eq.$codeId")
-            } catch (_: Exception) {
-                null
-            }
-            if (delRes?.isSuccessful != true) {
-                try {
-                    api.adminDeleteAccessCodeRpc(mapOf("p_code_id" to codeId, "p_id" to codeId))
-                } catch (_: Exception) {
-                }
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.success(Unit)
-        }
-    }
-
-    private fun enrichActivatedDevice(dev: ActivatedDevice): ActivatedDevice {
-        val matchInDevices = cachedUserDevices.firstOrNull {
-            dev.deviceHash.isNotBlank() && it.deviceHash.equals(dev.deviceHash, ignoreCase = true)
-        }
-        val resolvedId = matchInDevices?.displayDeviceId?.takeIf { it.isNotBlank() }
-            ?: dev.effectiveDeviceId
-        val resolvedModel = matchInDevices?.fullPhoneModel?.takeIf { it.isNotBlank() && it != "Unknown Device" }
-            ?: dev.effectiveDeviceModel
-        val resolvedLastSeen = dev.effectiveLastSeen ?: matchInDevices?.lastSeen
-        return dev.copy(
-            deviceId = resolvedId,
-            deviceModel = resolvedModel,
-            lastActiveAt = resolvedLastSeen
-        )
-    }
-
-    override suspend fun getActivatedDevices(forceRefresh: Boolean): Result<List<ActivatedDevice>> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val remoteDevices = api.getActivatedDevices().map { enrichActivatedDevice(it) }
-            cachedDevices.clear()
-            cachedDevices.addAll(remoteDevices)
-            Result.success(remoteDevices)
-        } catch (e: Exception) {
-            initSampleDataIfNeeded()
-            Result.success(cachedDevices.toList())
-        }
-    }
-
-    override suspend fun getDevicesForCode(codeId: String): Result<List<ActivatedDevice>> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val devices = api.getDevicesForCode(codeIdQuery = "eq.$codeId").map { enrichActivatedDevice(it) }
-            Result.success(devices)
-        } catch (e: Exception) {
-            val localFiltered = cachedDevices.filter { it.codeId == codeId }
-            Result.success(localFiltered)
-        }
-    }
-
-    override suspend fun getJoinedDevices(): Result<List<DeviceWithStudent>> = withContext(Dispatchers.IO) {
-        val codes = getAccessCodes().getOrDefault(cachedCodes)
-        val devices = getActivatedDevices().getOrDefault(cachedDevices)
-
-        val codeMap = codes.associateBy { it.id }
-
-        val joined = devices.map { device ->
-            val linkedCode = codeMap[device.codeId]
-            DeviceWithStudent(
-                device = enrichActivatedDevice(device),
-                studentName = linkedCode?.effectiveStudentName ?: "Unknown Student",
-                accessCode = linkedCode?.code ?: "N/A"
-            )
-        }
-        Result.success(joined)
-    }
-
-    override suspend fun toggleDeviceBlocked(deviceId: String, isBlocked: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
-        val index = cachedDevices.indexOfFirst { it.id == deviceId }
-        if (index != -1) {
-            val existing = cachedDevices[index]
-            cachedDevices[index] = existing.copy(isBlocked = isBlocked)
-        }
-
-        try {
-            val api = supabaseClient.getApi()
-            api.updateDeviceBlockedStatus(
-                idQuery = "eq.$deviceId",
-                payload = UpdateDeviceBlockedPayload(isBlocked = isBlocked)
-            )
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.success(Unit)
-        }
-    }
-
-    override suspend fun unbindDevice(deviceId: String): Result<Unit> = withContext(Dispatchers.IO) {
-        cachedDevices.removeAll { it.id == deviceId }
-
-        try {
-            val api = supabaseClient.getApi()
-            val delRes = try {
-                api.deleteDevice("eq.$deviceId")
-            } catch (_: Exception) {
-                null
-            }
-            if (delRes?.isSuccessful != true) {
-                try {
-                    api.adminDeleteActivatedDeviceRpc(mapOf("p_device_id" to deviceId, "p_id" to deviceId))
-                } catch (_: Exception) {
-                }
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.success(Unit)
-        }
-    }
-
     override suspend fun getDashboardStats(): Result<DashboardStats> = withContext(Dispatchers.IO) {
-        val codes = getAccessCodes().getOrDefault(cachedCodes)
-        val activatedDevices = getActivatedDevices().getOrDefault(cachedDevices)
         val realDevices = getUserDevices().getOrDefault(cachedUserDevices)
 
         val pendingCount = realDevices.count { it.isPendingDevice }
         val activeVerifiedCount = realDevices.count { it.isActiveDevice }
         val blockedRealCount = realDevices.count { it.isBlockedDevice }
-
-        val totalCodes = codes.size
-        val activeStudents = if (activeVerifiedCount > 0) activeVerifiedCount else codes.count { it.isActive }
-        val totalDevices = if (realDevices.isNotEmpty()) realDevices.size else activatedDevices.size
-        val blockedDevices = if (realDevices.isNotEmpty()) blockedRealCount else activatedDevices.count { it.isBlocked }
-        val totalCapacity = codes.sumOf { it.maxDevices }
-        val availableSlots = (totalCapacity - activatedDevices.size).coerceAtLeast(0)
+        val totalDevices = realDevices.size
 
         Result.success(
             DashboardStats(
-                totalCodes = totalCodes,
-                activeStudents = activeStudents,
+                totalCodes = activeVerifiedCount,
+                activeStudents = activeVerifiedCount,
                 totalDevices = totalDevices,
-                blockedDevices = blockedDevices,
-                availableSlots = availableSlots,
+                blockedDevices = blockedRealCount,
+                availableSlots = pendingCount,
                 pendingVerificationDevices = pendingCount,
                 activeVerifiedDevices = activeVerifiedCount
             )
@@ -1233,13 +825,24 @@ class SupabaseMaxBirdRepository(
             val effectiveHash = device.effectiveDeviceHash
             var rpcOk = false
 
-            // 1. Call official RPC `admin_approve_device_verification(p_device_hash)`
+            // 1. Call official RPC `admin_approve_device_verification(p_device_hash, p_student_note)`
+            // Passing both parameters avoids PostgreSQL PGRST203 overload ambiguity between the 1-arg and 2-arg versions
             if (effectiveHash.isNotBlank()) {
                 try {
                     val rpcRes = api.approveDeviceVerificationRpc(
-                        mapOf("p_device_hash" to effectiveHash)
+                        mapOf(
+                            "p_device_hash" to effectiveHash,
+                            "p_student_note" to (resolvedNote ?: "")
+                        )
                     )
-                    if (rpcRes.isSuccessful) rpcOk = true
+                    if (isJsonRpcSuccess(rpcRes)) {
+                        rpcOk = true
+                    } else {
+                        val fallbackRpcRes = api.approveDeviceVerificationRpc(
+                            mapOf("p_device_hash" to effectiveHash)
+                        )
+                        if (fallbackRpcRes.isSuccessful) rpcOk = true
+                    }
                 } catch (_: Exception) {
                 }
             }
@@ -1354,9 +957,12 @@ class SupabaseMaxBirdRepository(
                 if (!isBlocked) {
                     try {
                         val appRes = api.approveDeviceVerificationRpc(
-                            mapOf("p_device_hash" to effectiveHash)
+                            mapOf(
+                                "p_device_hash" to effectiveHash,
+                                "p_student_note" to (device.studentNote ?: "")
+                            )
                         )
-                        if (appRes.isSuccessful) rpcOk = true
+                        if (isJsonRpcSuccess(appRes)) rpcOk = true
                     } catch (_: Exception) {
                     }
                 }
@@ -1412,17 +1018,6 @@ class SupabaseMaxBirdRepository(
                     minimalBlockedMap
                 )
             )
-
-            // 3. Also sync `is_blocked` in `public.activated_devices` if present
-            if (effectiveHash.isNotBlank()) {
-                try {
-                    api.patchActivatedDeviceByHash(
-                        deviceHashQuery = "eq.$effectiveHash",
-                        payload = mapOf("is_blocked" to isBlocked)
-                    )
-                } catch (_: Exception) {
-                }
-            }
 
             if (patchResult.isSuccess || rpcOk) {
                 Result.success(Unit)
@@ -1574,15 +1169,6 @@ class SupabaseMaxBirdRepository(
                 device = targetDevice,
                 candidatePayloads = listOf(mapOf("can_view_profiles" to canViewProfiles))
             )
-            if (effectiveHash.isNotBlank()) {
-                try {
-                    api.patchActivatedDeviceByHash(
-                        deviceHashQuery = "eq.$effectiveHash",
-                        payload = mapOf("can_view_profiles" to canViewProfiles)
-                    )
-                } catch (_: Exception) {
-                }
-            }
 
             var rpcSucceeded = false
             if (patchResult.isFailure && effectiveHash.isNotBlank()) {
@@ -1625,15 +1211,11 @@ class SupabaseMaxBirdRepository(
             val displayIdToUse = target?.displayDeviceId?.takeIf { it.isNotBlank() }
             var deleted = false
 
-            // 1. Primary: Direct REST DELETE on `public.devices` & `public.activated_devices`
+            // 1. Primary: Direct REST DELETE on `public.devices`
             if (hashToUse != null) {
                 try {
                     val res = api.deleteDeviceRecordByHash("eq.$hashToUse")
                     if (res.isSuccessful) deleted = true
-                } catch (_: Exception) {
-                }
-                try {
-                    api.deleteActivatedDeviceByHash("eq.$hashToUse")
                 } catch (_: Exception) {
                 }
                 if (!deleted) {
@@ -1741,7 +1323,7 @@ class SupabaseMaxBirdRepository(
                 "p_allowed_programs" to allowedPrograms
             )
             val rpcRes = api.setDeviceCoursePermissionsRpc(rpcPayload)
-            if (rpcRes.isSuccessful) {
+            if (isJsonRpcSuccess(rpcRes)) {
                 return@withContext Result.success(Unit)
             }
 
@@ -1817,7 +1399,7 @@ class SupabaseMaxBirdRepository(
                 "p_revoke_other_accounts" to true
             )
             val rpcRes = api.setAccountCoursePermissionsRpc(rpcPayload)
-            if (rpcRes.isSuccessful) {
+            if (isJsonRpcSuccess(rpcRes)) {
                 return@withContext Result.success(Unit)
             }
 
@@ -3199,6 +2781,25 @@ class SupabaseMaxBirdRepository(
                 patchMap["access_status"] = newStatus
                 if (newStatus.equals("ACTIVE", ignoreCase = true)) {
                     patchMap["unlocked_at"] = nowIso
+                    patchMap["approved_at"] = nowIso
+                } else if (newStatus.equals("REQUESTED", ignoreCase = true)) {
+                    patchMap["approved_at"] = null
+                    patchMap["unlocked_at"] = null
+                    patchMap["total_price"] = 0
+                    patchMap["total_fee"] = 0
+                    patchMap["due_amount"] = 0
+                    patchMap["next_installment_amount"] = 0
+                    patchMap["allow_installments"] = false
+                    patchMap["installment_enabled"] = false
+                    patchMap["installment_plans_json"] = emptyList<Any>()
+                    patchMap["installment_plans"] = emptyList<Any>()
+                    patchMap["trial_enabled"] = false
+                    patchMap["trial_started_at"] = null
+                    patchMap["trial_ends_at"] = null
+                } else if (newStatus.equals("REJECTED", ignoreCase = true) || newStatus.equals("LOCKED", ignoreCase = true)) {
+                    patchMap["unlocked_at"] = null
+                    patchMap["trial_enabled"] = false
+                    patchMap["trial_Ends_at".lowercase()] = null
                 }
             }
             if (!newNextDueDateIso.isNullOrBlank()) {
@@ -3371,56 +2972,82 @@ class SupabaseMaxBirdRepository(
             val cleanRestKey = restApiKey.trim()
             val nowIso = formatUtcIso(System.currentTimeMillis())
 
-            // 1. Primary: Direct upsert/patch on `public.onesignal_config` using its exact 4 columns in the live DB:
-            // (`id`, `onesignal_app_id`, `onesignal_rest_api_key`, `updated_at`)
-            val tablePayload = mutableMapOf<String, Any?>(
-                "id" to 1,
-                "onesignal_app_id" to cleanAppId,
-                "updated_at" to nowIso
-            )
-            if (cleanRestKey.isNotBlank()) {
-                tablePayload["onesignal_rest_api_key"] = cleanRestKey
-            }
-
             var syncedToTable = false
+            var lastError = ""
+
+            // 1. Primary: Call `public.update_onesignal_config_secure(p_app_id, p_rest_api_key)` (SECURITY DEFINER)
+            // Required because `public.onesignal_config` has RLS blocking direct anon access (`USING (false)`).
             try {
-                val patchRes = api.patchOneSignalConfigRaw(idQuery = "eq.1", payload = tablePayload)
-                if (patchRes.isSuccessful) {
+                val primaryRpcPayload = mapOf<String, Any?>(
+                    "p_app_id" to cleanAppId,
+                    "p_rest_api_key" to cleanRestKey
+                )
+                val rpcRes = api.updateOneSignalConfigSecureRpc(primaryRpcPayload)
+                if (rpcRes.isSuccessful) {
                     syncedToTable = true
+                } else {
+                    lastError = try { rpcRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                lastError = e.message.orEmpty()
             }
 
+            // 2. Secondary fallback: alternate RPC parameter names if a custom RPC signature was used
             if (!syncedToTable) {
                 try {
-                    val upsertPayload = mapOf<String, Any?>(
-                        "id" to 1,
-                        "onesignal_app_id" to cleanAppId,
-                        "onesignal_rest_api_key" to cleanRestKey,
-                        "updated_at" to nowIso
+                    val altRpcPayload = mapOf<String, Any?>(
+                        "p_onesignal_app_id" to cleanAppId,
+                        "p_onesignal_rest_api_key" to cleanRestKey,
+                        "p_is_enabled" to isEnabled
                     )
-                    val upsertRes = api.upsertOneSignalConfigRaw(payload = upsertPayload)
-                    if (upsertRes.isSuccessful) {
+                    val altRes = api.updateOneSignalConfigSecureRpc(altRpcPayload)
+                    if (altRes.isSuccessful) {
                         syncedToTable = true
                     }
                 } catch (_: Exception) {
                 }
             }
 
-            // 2. Secondary fallback: Call `update_onesignal_config_secure` RPC if installed
+            // 3. Tertiary fallback: Direct upsert/patch on `public.onesignal_config` (`id`, `onesignal_app_id`, `onesignal_rest_api_key`, `updated_at`)
             if (!syncedToTable) {
-                val rpcPayload = mapOf<String, Any?>(
-                    "p_onesignal_app_id" to cleanAppId,
-                    "p_onesignal_rest_api_key" to cleanRestKey,
-                    "p_is_enabled" to isEnabled
+                val tablePayload = mutableMapOf<String, Any?>(
+                    "id" to 1,
+                    "onesignal_app_id" to cleanAppId,
+                    "updated_at" to nowIso
                 )
-                val response = api.updateOneSignalConfigSecureRpc(rpcPayload)
-                if (response.isSuccessful) {
-                    syncedToTable = true
-                } else {
-                    val err = try { response.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
-                    return@withContext Result.failure(Exception("OneSignal config sync failed (HTTP ${response.code()}): $err"))
+                if (cleanRestKey.isNotBlank()) {
+                    tablePayload["onesignal_rest_api_key"] = cleanRestKey
                 }
+
+                try {
+                    val patchRes = api.patchOneSignalConfigRaw(idQuery = "eq.1", payload = tablePayload)
+                    if (patchRes.isSuccessful) {
+                        syncedToTable = true
+                    }
+                } catch (_: Exception) {
+                }
+
+                if (!syncedToTable) {
+                    try {
+                        val upsertPayload = mapOf<String, Any?>(
+                            "id" to 1,
+                            "onesignal_app_id" to cleanAppId,
+                            "onesignal_rest_api_key" to cleanRestKey,
+                            "updated_at" to nowIso
+                        )
+                        val upsertRes = api.upsertOneSignalConfigRaw(payload = upsertPayload)
+                        if (upsertRes.isSuccessful) {
+                            syncedToTable = true
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+
+            if (!syncedToTable) {
+                return@withContext Result.failure(
+                    Exception("OneSignal config sync failed: ${lastError.ifBlank { "RPC update_onesignal_config_secure failed" }}")
+                )
             }
 
             Result.success(Unit)

@@ -702,6 +702,24 @@ fun CourseSalesManagementScreen(
                     isProcessing = isProcessingAction,
                     onFilterChange = { requestTabFilter = it },
                     onOpenApproveDialog = { enrollmentForPricingDialog = it },
+                    onQuickFreeUnlock = { enrollment ->
+                        onApproveAccessRequest(
+                            ApproveCourseAccessRequestRpcPayload(
+                                enrollmentId = enrollment.id,
+                                totalPrice = 0,
+                                installmentEnabled = false,
+                                installmentPlansJson = emptyList(),
+                                adminNote = "অ্যাডমিন কর্তৃক ফ্রি আনলক করা হয়েছে",
+                                instantFreeUnlock = true,
+                                studentPhone = enrollment.effectivePhone,
+                                shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { enrollment.effectivePhone },
+                                programId = enrollment.programId
+                            )
+                        ) {}
+                    },
+                    onUpdateStatus = { enrollment, targetStatus ->
+                        onUpdateEnrollmentStatus(enrollment, targetStatus)
+                    },
                     onOpenTrialActionDialog = { enrollment, action ->
                         trialActionDialogTarget = enrollment to action
                     },
@@ -818,6 +836,8 @@ private fun AccessRequestsSubTab(
     isProcessing: Boolean,
     onFilterChange: (String) -> Unit,
     onOpenApproveDialog: (CourseAccessEnrollment) -> Unit,
+    onQuickFreeUnlock: (CourseAccessEnrollment) -> Unit,
+    onUpdateStatus: (CourseAccessEnrollment, String) -> Unit,
     onOpenTrialActionDialog: (CourseAccessEnrollment, String) -> Unit,
     onQuickTrialAction: (ManageCourseTrialPayload) -> Unit,
     onNavigateToDevice: (String, UserDevice?) -> Unit,
@@ -953,7 +973,34 @@ private fun AccessRequestsSubTab(
             }
         }
 
-        if (filteredList.isEmpty()) {
+        val displayList = if (filteredList.isEmpty() && selectedFilter == "REQUESTED" && searchQuery.isBlank() && enrollments.isNotEmpty()) {
+            enrollments
+        } else {
+            filteredList
+        }
+
+        if (filteredList.isEmpty() && displayList.isNotEmpty()) {
+            item {
+                Surface(
+                    color = AmberWarning.copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, AmberWarning.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "⚠️ ডাটাবেজে ডিফল্ট স্ট্যাটাস বা আগের এপ্রুভালের কারণে রিকোয়েস্টটি অন্য স্ট্যাটাসে রয়েছে। নিচে সব কোর্স রিকোয়েস্ট দেখানো হচ্ছে — এখান থেকেই এপ্রুভ, দাম পরিবর্তন বা লক করতে পারবেন:",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = AmberWarning,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        ),
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+            }
+        }
+
+        if (displayList.isEmpty()) {
             item {
                 EmptyStateBox(
                     icon = Icons.Default.NotificationsActive,
@@ -962,7 +1009,7 @@ private fun AccessRequestsSubTab(
                 )
             }
         } else {
-            items(filteredList, key = { it.id }) { enrollment ->
+            items(displayList, key = { it.id }) { enrollment ->
                 val resolvedDeviceInfo = remember(enrollment, devices, transactions, nowMillis) {
                     StudentDeviceMatcher.resolveDeviceForEnrollment(
                         enrollment = enrollment,
@@ -977,6 +1024,8 @@ private fun AccessRequestsSubTab(
                     nowMillis = nowMillis,
                     isProcessing = isProcessing,
                     onConfigureClick = { onOpenApproveDialog(enrollment) },
+                    onQuickFreeUnlock = { onQuickFreeUnlock(enrollment) },
+                    onUpdateStatus = { status -> onUpdateStatus(enrollment, status) },
                     onOpenTrialActionDialog = { action -> onOpenTrialActionDialog(enrollment, action) },
                     onQuickTrialAction = onQuickTrialAction,
                     onNavigateToDevice = onNavigateToDevice,
@@ -1004,6 +1053,8 @@ private fun EnrollmentRequestCard(
     nowMillis: Long,
     isProcessing: Boolean,
     onConfigureClick: () -> Unit,
+    onQuickFreeUnlock: () -> Unit,
+    onUpdateStatus: (String) -> Unit,
     onOpenTrialActionDialog: (String) -> Unit,
     onQuickTrialAction: (ManageCourseTrialPayload) -> Unit,
     onNavigateToDevice: (String, UserDevice?) -> Unit,
@@ -1011,8 +1062,8 @@ private fun EnrollmentRequestCard(
     onQuickBlockDevice: (UserDevice) -> Unit,
     onCopyText: (String, String) -> Unit
 ) {
-    val statusColor = statusBadgeColor(enrollment.status)
-    val statusLabel = statusBadgeLabelBn(enrollment.status)
+    val statusColor = if (enrollment.isAccessRequestedStatus) AmberWarning else statusBadgeColor(enrollment.status)
+    val statusLabel = if (enrollment.isAccessRequestedStatus) "অ্যাডমিন অনুমোদনের অপেক্ষায়" else statusBadgeLabelBn(enrollment.status)
     val plans = remember(enrollment.installmentPlansJson) { enrollment.parsedInstallmentPlans() }
     val primaryPhone = enrollment.effectivePhone.takeIf { it.isNotBlank() }
         ?: enrollment.effectiveAccountKey.takeIf { it.isNotBlank() }
@@ -1160,8 +1211,35 @@ private fun EnrollmentRequestCard(
                 )
             }
 
-            // Show already configured price & plans if approved to buy
-            if (enrollment.totalPrice > 0 || plans.isNotEmpty() || enrollment.trialEnabled) {
+            // Show status of pricing & approval clearly
+            if (enrollment.isAccessRequestedStatus && !enrollment.isAdminApproved) {
+                Surface(
+                    color = AmberWarning.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, AmberWarning.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "⏳ নতুন কোর্স রিকোয়েস্ট (এখনো অ্যাডমিন অনুমোদন করেননি)",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                color = AmberWarning,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        )
+                        Text(
+                            text = "নিচের '✅ এপ্রুভ ও দাম সেট করুন' বাটনে ক্লিক করে কোর্সের দাম, কিস্তি বা ফ্রি ট্রায়াল সেট করে অনুমোদন দিন।",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Slate200,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+                }
+            } else if (enrollment.totalPrice > 0 || plans.isNotEmpty() || enrollment.trialEnabled) {
                 Surface(
                     color = Slate900,
                     shape = RoundedCornerShape(10.dp),
@@ -1210,47 +1288,135 @@ private fun EnrollmentRequestCard(
                 onQuickTrialAction = onQuickTrialAction
             )
 
-            // Timestamp + Primary Action Button
-            Row(
+            // Prominent 1-Click Approve / Free Unlock / Reject / Lock Action Bar
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "সময়: ${formatIsoTimestampBn(enrollment.effectiveTimestamp)}",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = Slate400,
-                        fontSize = 11.sp
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Button(
-                    onClick = onConfigureClick,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (enrollment.isAccessRequestedStatus) ElectricBlue else Slate700
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    modifier = Modifier.testTag("btn_configure_request_${enrollment.id}")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Payments,
-                        contentDescription = null,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
+                    Button(
+                        onClick = onConfigureClick,
+                        enabled = !isProcessing,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EmeraldSuccess
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .testTag("btn_configure_request_${enrollment.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Slate950,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = if (enrollment.isAccessRequestedStatus) {
+                                "✅ এপ্রুভ ও দাম সেট করুন"
+                            } else {
+                                "✅ দাম ও ট্রায়াল আপডেট"
+                            },
+                            color = Slate950,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1
+                        )
+                    }
+
+                    Button(
+                        onClick = onQuickFreeUnlock,
+                        enabled = !isProcessing,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ElectricBlue
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("btn_free_unlock_request_${enrollment.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LockOpen,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "ফ্রি আনলক",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = if (enrollment.isAccessRequestedStatus) {
-                            "দাম ও ট্রায়াল দিয়ে অনুমোদন"
-                        } else {
-                            "দাম ও ট্রায়াল পরিবর্তন"
-                        },
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        text = "সময়: ${formatIsoTimestampBn(enrollment.effectiveTimestamp)}",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = Slate400,
+                            fontSize = 11.sp
+                        ),
+                        modifier = Modifier.weight(1f)
                     )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (!enrollment.effectiveStatus.equals("REQUESTED", ignoreCase = true)) {
+                            OutlinedButton(
+                                onClick = { onUpdateStatus("REQUESTED") },
+                                enabled = !isProcessing,
+                                border = BorderStroke(1.dp, AmberWarning.copy(alpha = 0.6f)),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "⏳ পেন্ডিং করুন",
+                                    color = AmberWarning,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        if (!enrollment.effectiveStatus.equals("REJECTED", ignoreCase = true) &&
+                            !enrollment.effectiveStatus.equals("LOCKED", ignoreCase = true)
+                        ) {
+                            OutlinedButton(
+                                onClick = { onUpdateStatus("REJECTED") },
+                                enabled = !isProcessing,
+                                border = BorderStroke(1.dp, CoralDanger.copy(alpha = 0.6f)),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier.testTag("btn_reject_request_${enrollment.id}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = CoralDanger,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "বাতিল / লক",
+                                    color = CoralDanger,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

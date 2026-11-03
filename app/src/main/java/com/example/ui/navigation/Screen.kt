@@ -1,23 +1,19 @@
 package com.example.ui.navigation
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddModerator
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.HeadsetMic
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material.icons.outlined.AddModerator
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Devices
-import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.HeadsetMic
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Payments
@@ -56,14 +52,6 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Language
     )
 
-    data object Generator : Screen(
-        route = "generator",
-        titleEn = "New Code",
-        titleBn = "নতুন কোড",
-        selectedIcon = Icons.Filled.AddModerator,
-        unselectedIcon = Icons.Outlined.AddModerator
-    )
-
     data object Notices : Screen(
         route = "notices",
         titleEn = "Notices",
@@ -86,14 +74,6 @@ sealed class Screen(
         titleBn = "সাপোর্ট",
         selectedIcon = Icons.Filled.HeadsetMic,
         unselectedIcon = Icons.Outlined.HeadsetMic
-    )
-
-    data object Codes : Screen(
-        route = "codes",
-        titleEn = "Students",
-        titleBn = "কোডসমূহ",
-        selectedIcon = Icons.Filled.Group,
-        unselectedIcon = Icons.Outlined.Group
     )
 
     data object Devices : Screen(
@@ -125,11 +105,9 @@ sealed class Screen(
             Dashboard -> "হোম"
             CourseSales -> "কোর্স"
             MaxbirdWebsiteAdmin -> "ওয়েবসাইট"
-            Codes -> "কোডসমূহ"
             CloudinaryMedia -> "মিডিয়া"
             Devices -> "ডিভাইস"
             Settings -> "সেটিংস"
-            Generator -> "নতুন কোড"
             Notices -> "নোটিশ"
             Updates -> "আপডেট"
             SupportLinks -> "সাপোর্ট"

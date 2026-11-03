@@ -1,7 +1,5 @@
 package com.example.data.repository
 
-import com.example.data.model.AccessCode
-import com.example.data.model.ActivatedDevice
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
@@ -9,12 +7,10 @@ import com.example.data.model.ApproveCourseAccessRequestRpcPayload
 import com.example.data.model.CourseAccessEnrollment
 import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
-import com.example.data.model.CreateAccessCodePayload
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
-import com.example.data.model.DeviceWithStudent
 import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
@@ -26,28 +22,6 @@ import com.example.data.model.UserDevice
  * Universal repository contract for MaxBird Access Control & Device Management.
  */
 interface MaxBirdRepository {
-
-    suspend fun getAccessCodes(forceRefresh: Boolean = false): Result<List<AccessCode>>
-
-    suspend fun createAccessCode(payload: CreateAccessCodePayload): Result<AccessCode>
-
-    suspend fun toggleCodeStatus(codeId: String, isActive: Boolean): Result<Unit>
-
-    suspend fun extendAccessCodeValidity(codeId: String, extraDays: Int): Result<Unit>
-
-    suspend fun resetDevicesForCode(codeId: String, codeString: String): Result<Unit>
-
-    suspend fun deleteAccessCode(codeId: String): Result<Unit>
-
-    suspend fun getActivatedDevices(forceRefresh: Boolean = false): Result<List<ActivatedDevice>>
-
-    suspend fun getDevicesForCode(codeId: String): Result<List<ActivatedDevice>>
-
-    suspend fun getJoinedDevices(): Result<List<DeviceWithStudent>>
-
-    suspend fun toggleDeviceBlocked(deviceId: String, isBlocked: Boolean): Result<Unit>
-
-    suspend fun unbindDevice(deviceId: String): Result<Unit>
 
     suspend fun getDashboardStats(): Result<DashboardStats>
 
