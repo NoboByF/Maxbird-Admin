@@ -17,12 +17,22 @@ data class DashboardStats(
 )
 
 /**
- * App Update release record.
- * Matches Supabase table: `public.app_updates`
+ * App Update & Global Kill Switch / Maintenance Mode record.
+ * Matches Supabase table: `public.app_updates` (supports both new & legacy columns).
  */
 @JsonClass(generateAdapter = true)
 data class AppUpdate(
     @Json(name = "id") val id: String = "",
+    @Json(name = "version_code") val versionCode: Int = 0,
+    @Json(name = "version_name") val versionName: String = "",
+    @Json(name = "apk_url") val apkUrl: String = "",
+    @Json(name = "file_size_mb") val fileSizeMb: Double = 0.0,
+    @Json(name = "release_notes") val releaseNotes: String = "",
+    @Json(name = "is_kill_switch") val isKillSwitch: Boolean = false,
+    @Json(name = "is_maintenance") val isMaintenance: Boolean = false,
+    @Json(name = "kill_switch_title") val killSwitchTitle: String = "অ্যাপ আপডেটের কাজ চলছে",
+    @Json(name = "kill_switch_message") val killSwitchMessage: String = "অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।",
+    @Json(name = "estimated_back_time") val estimatedBackTime: String? = "",
     @Json(name = "latest_version_name") val latestVersionName: String = "",
     @Json(name = "latest_version_code") val latestVersionCode: Int = 0,
     @Json(name = "min_supported_version_code") val minSupportedVersionCode: Int = 0,
@@ -35,23 +45,48 @@ data class AppUpdate(
     @Json(name = "is_active") val isActive: Boolean = true,
     @Json(name = "created_at") val createdAt: String = "",
     @Json(name = "updated_at") val updatedAt: String = ""
-)
+) {
+    val effectiveVersionCode: Int
+        get() = if (versionCode > 0) versionCode else latestVersionCode
+
+    val effectiveVersionName: String
+        get() = versionName.ifBlank { latestVersionName }
+
+    val effectiveApkUrl: String
+        get() = apkUrl.ifBlank { downloadUrl }
+
+    val effectiveReleaseNotes: String
+        get() = releaseNotes.ifBlank { changelog }
+
+    val isKillSwitchActive: Boolean
+        get() = isKillSwitch || isMaintenance
+}
 
 /**
  * Request payload to create or update an app update release in `public.app_updates`.
  */
 @JsonClass(generateAdapter = true)
 data class CreateAppUpdatePayload(
-    @Json(name = "latest_version_name") val latestVersionName: String,
-    @Json(name = "latest_version_code") val latestVersionCode: Int,
-    @Json(name = "min_supported_version_code") val minSupportedVersionCode: Int,
-    @Json(name = "is_force_update") val isForceUpdate: Boolean,
-    @Json(name = "title") val title: String,
-    @Json(name = "changelog") val changelog: String,
-    @Json(name = "download_url") val downloadUrl: String,
-    @Json(name = "button_text") val buttonText: String,
+    @Json(name = "version_code") val versionCode: Int = 0,
+    @Json(name = "version_name") val versionName: String = "",
+    @Json(name = "apk_url") val apkUrl: String = "",
+    @Json(name = "file_size_mb") val fileSizeMb: Double = 0.0,
+    @Json(name = "release_notes") val releaseNotes: String = "",
+    @Json(name = "is_kill_switch") val isKillSwitch: Boolean = false,
+    @Json(name = "is_maintenance") val isMaintenance: Boolean = false,
+    @Json(name = "kill_switch_title") val killSwitchTitle: String = "অ্যাপ আপডেটের কাজ চলছে",
+    @Json(name = "kill_switch_message") val killSwitchMessage: String = "অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।",
+    @Json(name = "estimated_back_time") val estimatedBackTime: String = "",
+    @Json(name = "latest_version_name") val latestVersionName: String = "",
+    @Json(name = "latest_version_code") val latestVersionCode: Int = 0,
+    @Json(name = "min_supported_version_code") val minSupportedVersionCode: Int = 0,
+    @Json(name = "is_force_update") val isForceUpdate: Boolean = false,
+    @Json(name = "title") val title: String = "নতুন আপডেট উপলব্ধ!",
+    @Json(name = "changelog") val changelog: String = "",
+    @Json(name = "download_url") val downloadUrl: String = "",
+    @Json(name = "button_text") val buttonText: String = "এখনই আপডেট করুন",
     @Json(name = "apk_checksum_sha256") val apkChecksumSha256: String = "",
-    @Json(name = "is_active") val isActive: Boolean
+    @Json(name = "is_active") val isActive: Boolean = true
 )
 
 /**
@@ -60,6 +95,37 @@ data class CreateAppUpdatePayload(
 @JsonClass(generateAdapter = true)
 data class UpdateAppUpdateStatusPayload(
     @Json(name = "is_active") val isActive: Boolean
+)
+
+/**
+ * Real Server Push Notification model mapping to Supabase `public.student_notifications` table.
+ */
+@JsonClass(generateAdapter = true)
+data class StudentNotification(
+    @Json(name = "id") val id: String = "",
+    @Json(name = "title") val title: String = "",
+    @Json(name = "message") val message: String = "",
+    @Json(name = "target_type") val targetType: String = "ALL", // ALL, PHONE, PROGRAM
+    @Json(name = "target_value") val targetValue: String? = null,
+    @Json(name = "notification_type") val notificationType: String = "ADMIN_PUSH", // ADMIN_PUSH, LIVE_CLASS, EXAM
+    @Json(name = "image_url") val imageUrl: String? = null,
+    @Json(name = "deeplink") val deeplink: String? = null,
+    @Json(name = "is_active") val isActive: Boolean = true,
+    @Json(name = "created_at") val createdAt: String? = null
+)
+
+/**
+ * Payload for creating a row in `public.student_notifications`.
+ */
+data class CreateStudentNotificationPayload(
+    val title: String,
+    val message: String,
+    val targetType: String = "ALL", // ALL, PHONE, PROGRAM
+    val targetValue: String? = null,
+    val notificationType: String = "ADMIN_PUSH", // ADMIN_PUSH, LIVE_CLASS, EXAM
+    val imageUrl: String? = null,
+    val deeplink: String? = null,
+    val isActive: Boolean = true
 )
 
 /**

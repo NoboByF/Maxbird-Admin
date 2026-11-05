@@ -412,8 +412,15 @@ class MainActivity : ComponentActivity() {
                                 val title by viewModel.updateTitle.collectAsStateWithLifecycle()
                                 val changelog by viewModel.updateChangelog.collectAsStateWithLifecycle()
                                 val downloadUrl by viewModel.updateDownloadUrl.collectAsStateWithLifecycle()
+                                val fileSizeMb by viewModel.updateFileSizeMb.collectAsStateWithLifecycle()
                                 val buttonText by viewModel.updateButtonText.collectAsStateWithLifecycle()
                                 val isActive by viewModel.updateIsActive.collectAsStateWithLifecycle()
+
+                                val isKillSwitchEnabled by viewModel.isKillSwitchEnabled.collectAsStateWithLifecycle()
+                                val killSwitchTitle by viewModel.killSwitchTitle.collectAsStateWithLifecycle()
+                                val killSwitchMessage by viewModel.killSwitchMessage.collectAsStateWithLifecycle()
+                                val estimatedBackTime by viewModel.estimatedBackTime.collectAsStateWithLifecycle()
+                                val isSavingKillSwitch by viewModel.isSavingKillSwitch.collectAsStateWithLifecycle()
 
                                 UpdatesManagementScreen(
                                     updates = updates,
@@ -427,8 +434,14 @@ class MainActivity : ComponentActivity() {
                                     title = title,
                                     changelog = changelog,
                                     downloadUrl = downloadUrl,
+                                    fileSizeMb = fileSizeMb,
                                     buttonText = buttonText,
                                     isActive = isActive,
+                                    isKillSwitchEnabled = isKillSwitchEnabled,
+                                    killSwitchTitle = killSwitchTitle,
+                                    killSwitchMessage = killSwitchMessage,
+                                    estimatedBackTime = estimatedBackTime,
+                                    isSavingKillSwitch = isSavingKillSwitch,
                                     onOpenCreateDialog = { viewModel.openCreateUpdateDialog() },
                                     onOpenEditDialog = { update -> viewModel.openEditUpdateDialog(update) },
                                     onCloseDialog = { viewModel.closeUpdateDialog() },
@@ -439,8 +452,14 @@ class MainActivity : ComponentActivity() {
                                     onTitleChange = { viewModel.setUpdateTitle(it) },
                                     onChangelogChange = { viewModel.setUpdateChangelog(it) },
                                     onDownloadUrlChange = { viewModel.setUpdateDownloadUrl(it) },
+                                    onFileSizeMbChange = { viewModel.setUpdateFileSizeMb(it) },
                                     onButtonTextChange = { viewModel.setUpdateButtonText(it) },
                                     onIsActiveChange = { viewModel.setUpdateIsActive(it) },
+                                    onToggleKillSwitchInstant = { viewModel.toggleKillSwitchInstant(it) },
+                                    onKillSwitchTitleChange = { viewModel.setKillSwitchTitle(it) },
+                                    onKillSwitchMessageChange = { viewModel.setKillSwitchMessage(it) },
+                                    onEstimatedBackTimeChange = { viewModel.setEstimatedBackTime(it) },
+                                    onSaveKillSwitchSettings = { viewModel.saveKillSwitchSettings() },
                                     onSaveUpdate = { viewModel.saveAppUpdate() },
                                     onToggleStatus = { update -> viewModel.toggleAppUpdateStatus(update) },
                                     onDeleteUpdate = { update -> viewModel.deleteAppUpdate(update) },
@@ -466,6 +485,18 @@ class MainActivity : ComponentActivity() {
                                 val showAsPopup by viewModel.noticeShowAsPopup.collectAsStateWithLifecycle()
                                 val previewNotice by viewModel.previewNotice.collectAsStateWithLifecycle()
 
+                                val studentNotifications by viewModel.studentNotifications.collectAsStateWithLifecycle()
+                                val isLoadingStudentNotifications by viewModel.isLoadingStudentNotifications.collectAsStateWithLifecycle()
+                                val isSendingStudentNotification by viewModel.isSendingStudentNotification.collectAsStateWithLifecycle()
+                                val pushTitle by viewModel.pushTitle.collectAsStateWithLifecycle()
+                                val pushMessage by viewModel.pushMessage.collectAsStateWithLifecycle()
+                                val pushTargetType by viewModel.pushTargetType.collectAsStateWithLifecycle()
+                                val pushTargetValue by viewModel.pushTargetValue.collectAsStateWithLifecycle()
+                                val pushNotificationType by viewModel.pushNotificationType.collectAsStateWithLifecycle()
+                                val pushImageUrl by viewModel.pushImageUrl.collectAsStateWithLifecycle()
+                                val pushDeeplink by viewModel.pushDeeplink.collectAsStateWithLifecycle()
+                                val pushIsActive by viewModel.pushIsActive.collectAsStateWithLifecycle()
+
                                 NoticeManagementScreen(
                                     notices = notices,
                                     isLoading = isLoadingNotices,
@@ -482,6 +513,17 @@ class MainActivity : ComponentActivity() {
                                     isActive = isActive,
                                     showAsPopup = showAsPopup,
                                     previewNotice = previewNotice,
+                                    studentNotifications = studentNotifications,
+                                    isLoadingStudentNotifications = isLoadingStudentNotifications,
+                                    isSendingStudentNotification = isSendingStudentNotification,
+                                    pushTitle = pushTitle,
+                                    pushMessage = pushMessage,
+                                    pushTargetType = pushTargetType,
+                                    pushTargetValue = pushTargetValue,
+                                    pushNotificationType = pushNotificationType,
+                                    pushImageUrl = pushImageUrl,
+                                    pushDeeplink = pushDeeplink,
+                                    pushIsActive = pushIsActive,
                                     onSearchChange = { viewModel.setNoticeSearchQuery(it) },
                                     onFilterChange = { viewModel.setNoticeFilter(it) },
                                     onOpenCreateDialog = { viewModel.openCreateNoticeDialog() },
@@ -501,6 +543,18 @@ class MainActivity : ComponentActivity() {
                                     onToggleStatus = { notice -> viewModel.toggleAppNoticeStatus(notice) },
                                     onDeleteNotice = { notice -> viewModel.deleteAppNotice(notice) },
                                     onRefresh = { viewModel.loadAppNotices() },
+                                    onPushTitleChange = { viewModel.setPushTitle(it) },
+                                    onPushMessageChange = { viewModel.setPushMessage(it) },
+                                    onPushTargetTypeChange = { viewModel.setPushTargetType(it) },
+                                    onPushTargetValueChange = { viewModel.setPushTargetValue(it) },
+                                    onPushNotificationTypeChange = { viewModel.setPushNotificationType(it) },
+                                    onPushImageUrlChange = { viewModel.setPushImageUrl(it) },
+                                    onPushDeeplinkChange = { viewModel.setPushDeeplink(it) },
+                                    onPushIsActiveChange = { viewModel.setPushIsActive(it) },
+                                    onSendStudentNotification = { viewModel.sendStudentNotification() },
+                                    onToggleStudentNotificationStatus = { item -> viewModel.toggleStudentNotificationStatus(item) },
+                                    onDeleteStudentNotification = { item -> viewModel.deleteStudentNotification(item) },
+                                    onRefreshStudentNotifications = { viewModel.loadStudentNotifications() },
                                     onShowToast = { msg -> viewModel.showToast(msg) }
                                 )
                             }

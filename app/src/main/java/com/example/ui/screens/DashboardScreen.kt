@@ -875,10 +875,10 @@ fun DashboardScreen(
                 ) {
                     FeaturedModuleCard(
                         modifier = Modifier.weight(1f),
-                        title = "নোটিশ কন্ট্রোল",
-                        subtitle = "পপ-আপ ও ব্যানার নোটিশ ম্যানেজ",
+                        title = "পুশ ও নোটিশ",
+                        subtitle = "সার্ভার পুশ ও ব্যানার নোটিশ",
                         icon = Icons.Default.Campaign,
-                        badge = null,
+                        badge = "LIVE PUSH",
                         accentColor = AmberWarning,
                         gradientStart = AmberWarning.copy(alpha = 0.18f),
                         onClick = { onNavigate(Screen.Notices) },
@@ -886,10 +886,10 @@ fun DashboardScreen(
                     )
                     FeaturedModuleCard(
                         modifier = Modifier.weight(1f),
-                        title = "অ্যাপ আপডেট",
-                        subtitle = "নতুন রিলিজ ও ফোর্স আপডেট",
+                        title = "কিল সুইচ ও আপডেট",
+                        subtitle = "মেইনটেন্যান্স ও ডিরেক্ট APK",
                         icon = Icons.Default.SystemUpdate,
-                        badge = null,
+                        badge = "KILL SWITCH",
                         accentColor = EmeraldSuccess,
                         gradientStart = EmeraldSuccess.copy(alpha = 0.18f),
                         onClick = { onNavigate(Screen.Updates) },

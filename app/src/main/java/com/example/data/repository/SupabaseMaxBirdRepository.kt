@@ -9,6 +9,7 @@ import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
+import com.example.data.model.CreateStudentNotificationPayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceShikhoAccount
@@ -16,6 +17,7 @@ import com.example.data.model.DynamicPaymentMethodItem
 import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
+import com.example.data.model.StudentNotification
 import com.example.data.model.UpdateAppUpdateStatusPayload
 import com.example.data.model.UpdateAppNoticeStatusPayload
 import com.example.data.model.UpdateSupportLinkStatusPayload
@@ -38,225 +40,15 @@ class SupabaseMaxBirdRepository(
     private val adminPreferences: AdminPreferences
 ) : MaxBirdRepository {
 
-    // In-memory fallback / cache to guarantee seamless experience
+    // Live runtime caches (100% real Supabase rows — ZERO dummy/sample data)
     private val cachedUpdates = mutableListOf<AppUpdate>()
     private val cachedNotices = mutableListOf<AppNotice>()
     private val cachedSupportLinks = mutableListOf<ActivationSupportLink>()
     private val cachedUserDevices = mutableListOf<UserDevice>()
-    private var isInitializedWithSampleData = false
-
-    init {
-        initSampleDataIfNeeded()
-    }
+    private val cachedStudentNotifications = mutableListOf<StudentNotification>()
 
     private fun initSampleDataIfNeeded() {
-        if (!isInitializedWithSampleData && cachedUserDevices.isEmpty()) {
-            val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-
-            cachedUpdates.addAll(
-                listOf(
-                    AppUpdate(
-                        id = UUID.randomUUID().toString(),
-                        latestVersionName = "v6.1.0",
-                        latestVersionCode = 60100,
-                        minSupportedVersionCode = 60000,
-                        isForceUpdate = false,
-                        title = "MaxBird v6.1.0 আপডেট প্রকাশিত হয়েছে!",
-                        changelog = "• নতুন ভিডিও প্লেয়ার ইঞ্জিন যুক্ত হয়েছে\n• লাইভ চ্যাট ফিচারের বাগ ফিক্স\n• ইউজার ইন্টারফেস আরও আকর্ষণীয় করা হয়েছে",
-                        downloadUrl = "https://t.me/maxbird_updates",
-                        buttonText = "এখনই আপডেট করুন",
-                        isActive = true,
-                        createdAt = now,
-                        updatedAt = now
-                    ),
-                    AppUpdate(
-                        id = UUID.randomUUID().toString(),
-                        latestVersionName = "v6.0.0",
-                        latestVersionCode = 60000,
-                        minSupportedVersionCode = 50900,
-                        isForceUpdate = true,
-                        title = "জরুরি সিকিউরিটি আপডেট",
-                        changelog = "• বাধ্যতামূলক সিকিউরিটি প্যাচ\n• সার্ভার সংযোগ উন্নত করা হয়েছে",
-                        downloadUrl = "https://play.google.com/store/apps/details?id=com.maxbird.app",
-                        buttonText = "আবশ্যক আপডেট",
-                        isActive = true,
-                        createdAt = now,
-                        updatedAt = now
-                    )
-                )
-            )
-
-            cachedNotices.addAll(
-                listOf(
-                    AppNotice(
-                        id = UUID.randomUUID().toString(),
-                        title = "🎉 নতুন স্পেশাল ব্যাচ শুরু হয়েছে!",
-                        description = "সকল ক্লাসের লাইভ সেশন, নোট ও কুইজ অ্যাক্সেস করতে আমাদের অফিশিয়াল টেলিগ্রাম চ্যানেলে যুক্ত থাকুন।",
-                        imageUrl = "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800",
-                        actionUrl = "https://t.me/maxbird_updates",
-                        actionButtonText = "টেলিগ্রামে যুক্ত হোন",
-                        priority = 10,
-                        isActive = true,
-                        showAsPopup = true,
-                        createdAt = now,
-                        updatedAt = now
-                    ),
-                    AppNotice(
-                        id = UUID.randomUUID().toString(),
-                        title = "⚠️ সার্ভার মেইনটেন্যান্স অ্যালার্ট",
-                        description = "আজ রাত ১২টা থেকে রাত ১টা পর্যন্ত সার্ভার আপগ্রেড কার্যক্রম চলবে। সাময়িক অসুবিধার জন্য আন্তরিকভাবে দুঃখিত।",
-                        imageUrl = "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=800",
-                        actionUrl = "https://maxbird.app/status",
-                        actionButtonText = "সার্ভার স্ট্যাটাস দেখুন",
-                        priority = 5,
-                        isActive = true,
-                        showAsPopup = false,
-                        createdAt = now,
-                        updatedAt = now
-                    )
-                )
-            )
-
-            cachedSupportLinks.addAll(
-                listOf(
-                    ActivationSupportLink(
-                        id = UUID.randomUUID().toString(),
-                        title = "Telegram সাপোর্ট",
-                        subtitle = "@fahim017740 এ মেসেজ দিন",
-                        iconType = "telegram",
-                        url = "https://t.me/fahim017740",
-                        colorHex = "#229ED9",
-                        isActive = true,
-                        priority = 10,
-                        createdAt = now
-                    ),
-                    ActivationSupportLink(
-                        id = UUID.randomUUID().toString(),
-                        title = "WhatsApp হেল্পলাইন",
-                        subtitle = "+8801774092040 এ সরাসরি চ্যাট করুন",
-                        iconType = "whatsapp",
-                        url = "https://wa.me/8801774092040",
-                        colorHex = "#25D366",
-                        isActive = true,
-                        priority = 8,
-                        createdAt = now
-                    ),
-                    ActivationSupportLink(
-                        id = UUID.randomUUID().toString(),
-                        title = "অফিশিয়াল ফেসবুক গ্রুপ",
-                        subtitle = "নোট ও ক্লাস আলোচনা পেতে যুক্ত হোন",
-                        iconType = "facebook",
-                        url = "https://facebook.com/groups/maxbird",
-                        colorHex = "#1877F2",
-                        isActive = true,
-                        priority = 5,
-                        createdAt = now
-                    ),
-                    ActivationSupportLink(
-                        id = UUID.randomUUID().toString(),
-                        title = "জরুরি কল সেন্টার",
-                        subtitle = "সকাল ১০টা থেকে রাত ১০টা পর্যন্ত",
-                        iconType = "phone",
-                        url = "tel:+8801774092040",
-                        colorHex = "#10B981",
-                        isActive = true,
-                        priority = 3,
-                        createdAt = now
-                    ),
-                    ActivationSupportLink(
-                        id = UUID.randomUUID().toString(),
-                        title = "অফিশিয়াল ওয়েবসাইট পোর্টাল",
-                        subtitle = "নিয়মাবলি ও লাইসেন্স তথ্যের জন্য",
-                        iconType = "website",
-                        url = "https://maxbird.app",
-                        colorHex = "#0EA5E9",
-                        isActive = true,
-                        priority = 1,
-                        createdAt = now
-                    )
-                )
-            )
-
-            cachedUserDevices.addAll(
-                listOf(
-                    UserDevice(
-                        id = UUID.randomUUID().toString(),
-                        deviceHash = "sha256_hw_oneplus_pending_01",
-                        displayDeviceId = "MX-9A41-2B7C-E810",
-                        studentNote = "রাফি ইসলাম (HSC 26)",
-                        deviceModel = "OnePlus 11R 5G",
-                        deviceBrand = "OnePlus",
-                        androidVersion = "Android 14 (API 34)",
-                        appVersion = "1.0.0",
-                        status = "pending",
-                        isBanned = false,
-                        banReason = "",
-                        requestedAt = now,
-                        updatedAt = now,
-                        lastSeen = now,
-                        canViewProfiles = false
-                    ),
-                    UserDevice(
-                        id = UUID.randomUUID().toString(),
-                        deviceHash = "sha256_hw_xiaomi_9a12c40",
-                        displayDeviceId = "MX-7F3A-9B21-C04E",
-                        studentNote = "তানভীর আহমেদ",
-                        deviceModel = "Xiaomi Redmi Note 12",
-                        deviceBrand = "Xiaomi",
-                        androidVersion = "Android 14 (API 34)",
-                        appVersion = "1.0.0",
-                        appliedCode = "VIP-STUDENT-01",
-                        status = "active",
-                        isBanned = false,
-                        banReason = "",
-                        requestedAt = now,
-                        approvedAt = now,
-                        updatedAt = now,
-                        lastSeen = now,
-                        canViewProfiles = false
-                    ),
-                    UserDevice(
-                        id = UUID.randomUUID().toString(),
-                        deviceHash = "sha256_hw_samsung_b38df9",
-                        displayDeviceId = "MX-4C82-1D5E-F93A",
-                        studentNote = "সাকিবুল হাসান (SSC 26)",
-                        deviceModel = "Samsung Galaxy S23",
-                        deviceBrand = "Samsung",
-                        androidVersion = "Android 14 (API 34)",
-                        appVersion = "1.0.0",
-                        appliedCode = "MAX-8921",
-                        status = "active",
-                        isBanned = false,
-                        banReason = "",
-                        requestedAt = now,
-                        approvedAt = now,
-                        updatedAt = now,
-                        lastSeen = now,
-                        canViewProfiles = true
-                    ),
-                    UserDevice(
-                        id = UUID.randomUUID().toString(),
-                        deviceHash = "sha256_hw_realme_e847c1",
-                        displayDeviceId = "MX-89AB-CDEF-0123",
-                        studentNote = "মেহেদী হাসান",
-                        deviceModel = "Realme 11 Pro+",
-                        deviceBrand = "Realme",
-                        androidVersion = "Android 13 (API 33)",
-                        appVersion = "1.0.0",
-                        appliedCode = "MAX-1144",
-                        status = "blocked",
-                        isBanned = true,
-                        banReason = "একাধিক ডিভাইসে শেয়ার করার অভিযোগে ব্লক করা হয়েছে",
-                        requestedAt = now,
-                        updatedAt = now,
-                        lastSeen = now,
-                        canViewProfiles = false
-                    )
-                )
-            )
-
-            isInitializedWithSampleData = true
-        }
+        // Strict Zero-Dummy-Data Policy: No fake or sample data is ever added.
     }
 
     override suspend fun getDashboardStats(): Result<DashboardStats> = withContext(Dispatchers.IO) {
@@ -297,97 +89,341 @@ class SupabaseMaxBirdRepository(
     override suspend fun getAppUpdates(forceRefresh: Boolean): Result<List<AppUpdate>> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
-            val remoteUpdates = api.getAppUpdates()
+            val remoteUpdates = try {
+                api.getAppUpdatesLegacyOrder()
+            } catch (_: Exception) {
+                try {
+                    api.getAppUpdates()
+                } catch (_: Exception) {
+                    api.getAppUpdatesUnordered()
+                }
+            }
+            val sorted = remoteUpdates.sortedWith(
+                compareByDescending<AppUpdate> { it.effectiveVersionCode }
+                    .thenByDescending { it.updatedAt.ifBlank { it.createdAt } }
+            )
             cachedUpdates.clear()
-            cachedUpdates.addAll(remoteUpdates)
-            Result.success(remoteUpdates)
+            cachedUpdates.addAll(sorted)
+            Result.success(sorted)
         } catch (e: Exception) {
-            initSampleDataIfNeeded()
-            Result.success(cachedUpdates.toList())
+            if (cachedUpdates.isNotEmpty()) {
+                Result.success(cachedUpdates.toList())
+            } else {
+                Result.failure(e)
+            }
         }
     }
 
     override suspend fun createAppUpdate(payload: CreateAppUpdatePayload): Result<AppUpdate> = withContext(Dispatchers.IO) {
         val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-        // Live DB trigger `trg_enforce_mandatory_app_update` forces `is_force_update = true`
-        val syncedPayload = payload.copy(isForceUpdate = true)
-        val localNewUpdate = AppUpdate(
-            id = UUID.randomUUID().toString(),
-            latestVersionName = syncedPayload.latestVersionName.trim(),
-            latestVersionCode = syncedPayload.latestVersionCode,
-            minSupportedVersionCode = syncedPayload.minSupportedVersionCode,
-            isForceUpdate = true,
-            title = syncedPayload.title.trim(),
-            changelog = syncedPayload.changelog.trim(),
-            downloadUrl = syncedPayload.downloadUrl.trim(),
-            buttonText = syncedPayload.buttonText.trim().ifBlank { "এখনই আপডেট করুন" },
-            isActive = syncedPayload.isActive,
-            createdAt = now,
-            updatedAt = now
+        val vCode = if (payload.versionCode > 0) payload.versionCode else payload.latestVersionCode
+        val vName = payload.versionName.ifBlank { payload.latestVersionName }.trim()
+        val apkLink = payload.apkUrl.ifBlank { payload.downloadUrl }.trim()
+        val notes = payload.releaseNotes.ifBlank { payload.changelog }.trim()
+        val minCode = if (payload.minSupportedVersionCode > 0) payload.minSupportedVersionCode else vCode
+        val cleanTitle = payload.title.trim().ifBlank { "নতুন আপডেট উপলব্ধ! ($vName)" }
+        val cleanBtn = payload.buttonText.trim().ifBlank { "এখনই আপডেট করুন" }
+
+        // Matches the exact columns in public.app_updates of the live database
+        val liveSupabaseSchemaMap = mapOf<String, Any?>(
+            "latest_version_name" to vName,
+            "latest_version_code" to vCode,
+            "min_supported_version_code" to minCode,
+            "is_force_update" to payload.isForceUpdate,
+            "title" to cleanTitle,
+            "changelog" to notes,
+            "download_url" to apkLink,
+            "button_text" to cleanBtn,
+            "is_active" to payload.isActive,
+            "file_size_mb" to payload.fileSizeMb,
+            "is_kill_switch" to payload.isKillSwitch,
+            "is_maintenance" to payload.isMaintenance,
+            "kill_switch_title" to payload.killSwitchTitle,
+            "kill_switch_message" to payload.killSwitchMessage,
+            "estimated_back_time" to payload.estimatedBackTime.ifBlank { null },
+            "updated_at" to now
+        )
+
+        val fullSchemaMap = mapOf<String, Any?>(
+            "version_code" to vCode,
+            "version_name" to vName,
+            "apk_url" to apkLink,
+            "file_size_mb" to payload.fileSizeMb,
+            "release_notes" to notes,
+            "is_force_update" to payload.isForceUpdate,
+            "is_kill_switch" to payload.isKillSwitch,
+            "is_maintenance" to payload.isMaintenance,
+            "kill_switch_title" to payload.killSwitchTitle,
+            "kill_switch_message" to payload.killSwitchMessage,
+            "estimated_back_time" to payload.estimatedBackTime.ifBlank { null },
+            "latest_version_code" to vCode,
+            "latest_version_name" to vName,
+            "min_supported_version_code" to minCode,
+            "title" to cleanTitle,
+            "changelog" to notes,
+            "download_url" to apkLink,
+            "button_text" to cleanBtn,
+            "is_active" to payload.isActive,
+            "updated_at" to now
+        )
+
+        val legacySchemaMap = mapOf<String, Any?>(
+            "latest_version_name" to vName,
+            "latest_version_code" to vCode,
+            "min_supported_version_code" to minCode,
+            "is_force_update" to payload.isForceUpdate,
+            "title" to cleanTitle,
+            "changelog" to notes,
+            "download_url" to apkLink,
+            "button_text" to cleanBtn,
+            "is_active" to payload.isActive
         )
 
         try {
             val api = supabaseClient.getApi()
-            val createdList = api.createAppUpdate(syncedPayload)
-            val created = createdList.firstOrNull() ?: localNewUpdate
-            cachedUpdates.add(0, created)
-            Result.success(created)
+            var lastError = ""
+            for (candidate in listOf(liveSupabaseSchemaMap, fullSchemaMap, legacySchemaMap)) {
+                try {
+                    val res = api.createAppUpdateRaw(candidate)
+                    if (res.isSuccessful) {
+                        val created = res.body()?.firstOrNull() ?: AppUpdate(
+                            id = UUID.randomUUID().toString(),
+                            versionCode = vCode,
+                            versionName = vName,
+                            apkUrl = apkLink,
+                            fileSizeMb = payload.fileSizeMb,
+                            releaseNotes = notes,
+                            isForceUpdate = payload.isForceUpdate,
+                            isKillSwitch = payload.isKillSwitch,
+                            isMaintenance = payload.isMaintenance,
+                            killSwitchTitle = payload.killSwitchTitle,
+                            killSwitchMessage = payload.killSwitchMessage,
+                            estimatedBackTime = payload.estimatedBackTime,
+                            latestVersionName = vName,
+                            latestVersionCode = vCode,
+                            minSupportedVersionCode = minCode,
+                            title = cleanTitle,
+                            changelog = notes,
+                            downloadUrl = apkLink,
+                            buttonText = cleanBtn,
+                            isActive = payload.isActive,
+                            createdAt = now,
+                            updatedAt = now
+                        )
+                        cachedUpdates.add(0, created)
+                        return@withContext Result.success(created)
+                    } else {
+                        val err = res.errorBody()?.string().orEmpty()
+                        if (err.isNotBlank()) lastError = err
+                    }
+                } catch (e: Exception) {
+                    if (lastError.isBlank()) lastError = e.message.orEmpty()
+                }
+            }
+            Result.failure(Exception("আপডেট তৈরি ব্যর্থ: $lastError"))
         } catch (e: Exception) {
-            cachedUpdates.add(0, localNewUpdate)
-            Result.success(localNewUpdate)
+            Result.failure(e)
         }
     }
 
     override suspend fun updateAppUpdate(id: String, payload: CreateAppUpdatePayload): Result<AppUpdate> = withContext(Dispatchers.IO) {
         val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-        val syncedPayload = payload.copy(isForceUpdate = true)
-        val index = cachedUpdates.indexOfFirst { it.id == id }
-        val updatedLocal = if (index != -1) {
-            val existing = cachedUpdates[index]
-            existing.copy(
-                latestVersionName = syncedPayload.latestVersionName.trim(),
-                latestVersionCode = syncedPayload.latestVersionCode,
-                minSupportedVersionCode = syncedPayload.minSupportedVersionCode,
-                isForceUpdate = true,
-                title = syncedPayload.title.trim(),
-                changelog = syncedPayload.changelog.trim(),
-                downloadUrl = syncedPayload.downloadUrl.trim(),
-                buttonText = syncedPayload.buttonText.trim().ifBlank { "এখনই আপডেট করুন" },
-                isActive = syncedPayload.isActive,
-                updatedAt = now
-            )
-        } else {
-            AppUpdate(
-                id = id,
-                latestVersionName = syncedPayload.latestVersionName,
-                latestVersionCode = syncedPayload.latestVersionCode,
-                minSupportedVersionCode = syncedPayload.minSupportedVersionCode,
-                isForceUpdate = true,
-                title = syncedPayload.title,
-                changelog = syncedPayload.changelog,
-                downloadUrl = syncedPayload.downloadUrl,
-                buttonText = syncedPayload.buttonText,
-                isActive = syncedPayload.isActive,
-                createdAt = now,
-                updatedAt = now
-            )
-        }
+        val vCode = if (payload.versionCode > 0) payload.versionCode else payload.latestVersionCode
+        val vName = payload.versionName.ifBlank { payload.latestVersionName }.trim()
+        val apkLink = payload.apkUrl.ifBlank { payload.downloadUrl }.trim()
+        val notes = payload.releaseNotes.ifBlank { payload.changelog }.trim()
+        val minCode = if (payload.minSupportedVersionCode > 0) payload.minSupportedVersionCode else vCode
+        val cleanTitle = payload.title.trim().ifBlank { "নতুন আপডেট উপলব্ধ! ($vName)" }
+        val cleanBtn = payload.buttonText.trim().ifBlank { "এখনই আপডেট করুন" }
 
-        if (index != -1) {
-            cachedUpdates[index] = updatedLocal
-        } else {
-            cachedUpdates.add(0, updatedLocal)
-        }
+        // Matches the exact columns in public.app_updates of the live database
+        val liveSupabaseSchemaMap = mapOf<String, Any?>(
+            "latest_version_name" to vName,
+            "latest_version_code" to vCode,
+            "min_supported_version_code" to minCode,
+            "is_force_update" to payload.isForceUpdate,
+            "title" to cleanTitle,
+            "changelog" to notes,
+            "download_url" to apkLink,
+            "button_text" to cleanBtn,
+            "is_active" to payload.isActive,
+            "file_size_mb" to payload.fileSizeMb,
+            "is_kill_switch" to payload.isKillSwitch,
+            "is_maintenance" to payload.isMaintenance,
+            "kill_switch_title" to payload.killSwitchTitle,
+            "kill_switch_message" to payload.killSwitchMessage,
+            "estimated_back_time" to payload.estimatedBackTime.ifBlank { null },
+            "updated_at" to now
+        )
+
+        val fullSchemaMap = mapOf<String, Any?>(
+            "version_code" to vCode,
+            "version_name" to vName,
+            "apk_url" to apkLink,
+            "file_size_mb" to payload.fileSizeMb,
+            "release_notes" to notes,
+            "is_force_update" to payload.isForceUpdate,
+            "is_kill_switch" to payload.isKillSwitch,
+            "is_maintenance" to payload.isMaintenance,
+            "kill_switch_title" to payload.killSwitchTitle,
+            "kill_switch_message" to payload.killSwitchMessage,
+            "estimated_back_time" to payload.estimatedBackTime.ifBlank { null },
+            "latest_version_code" to vCode,
+            "latest_version_name" to vName,
+            "min_supported_version_code" to minCode,
+            "title" to cleanTitle,
+            "changelog" to notes,
+            "download_url" to apkLink,
+            "button_text" to cleanBtn,
+            "is_active" to payload.isActive,
+            "updated_at" to now
+        )
+
+        val legacySchemaMap = mapOf<String, Any?>(
+            "latest_version_name" to vName,
+            "latest_version_code" to vCode,
+            "min_supported_version_code" to minCode,
+            "is_force_update" to payload.isForceUpdate,
+            "title" to cleanTitle,
+            "changelog" to notes,
+            "download_url" to apkLink,
+            "button_text" to cleanBtn,
+            "is_active" to payload.isActive,
+            "updated_at" to now
+        )
 
         try {
             val api = supabaseClient.getApi()
-            val updatedList = api.updateAppUpdate("eq.$id", syncedPayload)
-            val updated = updatedList.firstOrNull() ?: updatedLocal
-            val idx = cachedUpdates.indexOfFirst { it.id == id }
-            if (idx != -1) cachedUpdates[idx] = updated
-            Result.success(updated)
+            var lastError = ""
+            for (candidate in listOf(liveSupabaseSchemaMap, fullSchemaMap, legacySchemaMap)) {
+                try {
+                    val res = api.patchAppUpdateRaw("eq.$id", candidate)
+                    if (res.isSuccessful && !res.body().isNullOrEmpty()) {
+                        val updated = res.body()!!.first()
+                        val idx = cachedUpdates.indexOfFirst { it.id == id }
+                        if (idx != -1) cachedUpdates[idx] = updated
+                        return@withContext Result.success(updated)
+                    } else if (!res.isSuccessful) {
+                        val err = res.errorBody()?.string().orEmpty()
+                        if (err.isNotBlank()) lastError = err
+                    }
+                } catch (e: Exception) {
+                    if (lastError.isBlank()) lastError = e.message.orEmpty()
+                }
+            }
+            Result.failure(Exception("আপডেট সংরক্ষণ ব্যর্থ: $lastError"))
         } catch (e: Exception) {
-            Result.success(updatedLocal)
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun updateGlobalKillSwitch(
+        isEnabled: Boolean,
+        title: String,
+        message: String,
+        estimatedBackTime: String
+    ): Result<AppUpdate> = withContext(Dispatchers.IO) {
+        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val cleanTitle = title.trim().ifBlank { "অ্যাপ আপডেটের কাজ চলছে" }
+        val cleanMessage = message.trim().ifBlank {
+            "অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।"
+        }
+        val cleanBackTime = estimatedBackTime.trim()
+
+        try {
+            val api = supabaseClient.getApi()
+            var rpcSucceeded = false
+
+            // 1. Call RPC `admin_set_kill_switch(p_enabled, p_title, p_message, p_estimated_time)`
+            try {
+                val rpcPayload = mapOf<String, Any?>(
+                    "p_enabled" to isEnabled,
+                    "p_title" to cleanTitle,
+                    "p_message" to cleanMessage,
+                    "p_estimated_time" to cleanBackTime.ifBlank { null }
+                )
+                val rpcRes = api.setKillSwitchRpc(rpcPayload)
+                if (rpcRes.isSuccessful) {
+                    rpcSucceeded = true
+                }
+            } catch (_: Exception) {
+            }
+
+            // 2. Also ensure the latest row in `public.app_updates` is directly updated
+            val currentList = getAppUpdates(forceRefresh = true).getOrNull().orEmpty()
+            val latestRow = currentList.firstOrNull()
+
+            val killSwitchPatch = mapOf<String, Any?>(
+                "is_kill_switch" to isEnabled,
+                "is_maintenance" to isEnabled,
+                "kill_switch_title" to cleanTitle,
+                "kill_switch_message" to cleanMessage,
+                "estimated_back_time" to cleanBackTime.ifBlank { null }
+            )
+
+            val killSwitchPatchWithUpdated = killSwitchPatch + ("updated_at" to now)
+
+            if (latestRow != null && latestRow.id.isNotBlank()) {
+                var lastErr = ""
+                for (candidate in listOf(killSwitchPatchWithUpdated, killSwitchPatch)) {
+                    try {
+                        val patchRes = api.patchAppUpdateRaw("eq.${latestRow.id}", candidate)
+                        if (patchRes.isSuccessful && !patchRes.body().isNullOrEmpty()) {
+                            val updatedRow = patchRes.body()!!.first()
+                            val idx = cachedUpdates.indexOfFirst { it.id == latestRow.id }
+                            if (idx != -1) cachedUpdates[idx] = updatedRow
+                            return@withContext Result.success(updatedRow)
+                        } else if (!patchRes.isSuccessful) {
+                            val err = patchRes.errorBody()?.string().orEmpty()
+                            if (err.isNotBlank()) lastErr = err
+                        }
+                    } catch (e: Exception) {
+                        if (lastErr.isBlank()) lastErr = e.message.orEmpty()
+                    }
+                }
+                if (rpcSucceeded) {
+                    val refreshed = getAppUpdates(forceRefresh = true).getOrNull()?.firstOrNull()
+                        ?: latestRow.copy(
+                            isKillSwitch = isEnabled,
+                            isMaintenance = isEnabled,
+                            killSwitchTitle = cleanTitle,
+                            killSwitchMessage = cleanMessage,
+                            estimatedBackTime = cleanBackTime
+                        )
+                    return@withContext Result.success(refreshed)
+                }
+                return@withContext Result.failure(
+                    Exception("Kill Switch আপডেট ব্যর্থ: $lastErr")
+                )
+            } else {
+                // No rows exist in `public.app_updates` yet — insert an initial row
+                val createRes = createAppUpdate(
+                    CreateAppUpdatePayload(
+                        versionCode = 110,
+                        versionName = "1.1.0",
+                        apkUrl = "https://maxbird.pages.dev",
+                        fileSizeMb = 25.0,
+                        releaseNotes = "Initial configuration",
+                        isForceUpdate = false,
+                        isKillSwitch = isEnabled,
+                        isMaintenance = isEnabled,
+                        killSwitchTitle = cleanTitle,
+                        killSwitchMessage = cleanMessage,
+                        estimatedBackTime = cleanBackTime,
+                        latestVersionCode = 110,
+                        latestVersionName = "1.1.0",
+                        minSupportedVersionCode = 110,
+                        title = cleanTitle,
+                        changelog = cleanMessage,
+                        downloadUrl = "https://maxbird.pages.dev",
+                        buttonText = "এখনই আপডেট করুন",
+                        isActive = true
+                    )
+                )
+                return@withContext createRes
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
@@ -399,10 +435,14 @@ class SupabaseMaxBirdRepository(
 
         try {
             val api = supabaseClient.getApi()
-            api.updateAppUpdateStatus("eq.$id", UpdateAppUpdateStatusPayload(isActive = isActive))
-            Result.success(Unit)
+            val res = api.updateAppUpdateStatus("eq.$id", UpdateAppUpdateStatusPayload(isActive = isActive))
+            if (res.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("HTTP ${res.code()}"))
+            }
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
@@ -424,7 +464,124 @@ class SupabaseMaxBirdRepository(
             }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
+    // Real Server Push Notifications (`public.student_notifications`)
+    // =========================================================================
+
+    override suspend fun getStudentNotifications(): Result<List<StudentNotification>> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val list = try {
+                api.getStudentNotifications()
+            } catch (_: Exception) {
+                api.getStudentNotificationsUnordered()
+            }
+            cachedStudentNotifications.clear()
+            cachedStudentNotifications.addAll(list)
+            Result.success(list)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun createStudentNotification(
+        payload: CreateStudentNotificationPayload
+    ): Result<StudentNotification> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val cleanTargetType = payload.targetType.trim().uppercase()
+            val cleanTargetValue = when (cleanTargetType) {
+                "ALL" -> null
+                "PHONE" -> CourseAccessEnrollment.normalizeBdPhone(payload.targetValue.orEmpty())
+                    .ifBlank { payload.targetValue?.trim() }
+                else -> payload.targetValue?.trim()?.ifBlank { null }
+            }
+
+            val baseMap = mutableMapOf<String, Any?>(
+                "title" to payload.title.trim(),
+                "message" to payload.message.trim(),
+                "target_type" to cleanTargetType,
+                "target_value" to cleanTargetValue,
+                "notification_type" to payload.notificationType.trim().uppercase().ifBlank { "ADMIN_PUSH" },
+                "image_url" to payload.imageUrl?.trim()?.ifBlank { null },
+                "deeplink" to payload.deeplink?.trim()?.ifBlank { null },
+                "is_active" to payload.isActive
+            )
+
+            // Try without explicit `id` first (if identity/serial exists), then fallback to explicit bigint `id`
+            val generatedId = System.currentTimeMillis()
+            val mapWithId = LinkedHashMap<String, Any?>().apply {
+                put("id", generatedId)
+                putAll(baseMap)
+            }
+
+            var lastErr = ""
+            for (candidate in listOf(baseMap, mapWithId)) {
+                val res = api.createStudentNotificationRaw(candidate)
+                if (res.isSuccessful) {
+                    val created = res.body()?.firstOrNull() ?: StudentNotification(
+                        id = generatedId.toString(),
+                        title = payload.title.trim(),
+                        message = payload.message.trim(),
+                        targetType = cleanTargetType,
+                        targetValue = cleanTargetValue,
+                        notificationType = payload.notificationType.trim().uppercase(),
+                        imageUrl = payload.imageUrl?.trim()?.ifBlank { null },
+                        deeplink = payload.deeplink?.trim()?.ifBlank { null },
+                        isActive = payload.isActive
+                    )
+                    cachedStudentNotifications.add(0, created)
+                    return@withContext Result.success(created)
+                } else {
+                    lastErr = "${res.code()}: ${res.errorBody()?.string().orEmpty()}"
+                }
+            }
+            Result.failure(Exception("নোটিফিকেশন সেভ ব্যর্থ (HTTP $lastErr)"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun toggleStudentNotificationStatus(id: String, isActive: Boolean): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                val api = supabaseClient.getApi()
+                val res = api.patchStudentNotificationRaw(
+                    idQuery = "eq.$id",
+                    payload = mapOf("is_active" to isActive)
+                )
+                if (res.isSuccessful) {
+                    val idx = cachedStudentNotifications.indexOfFirst { it.id == id }
+                    if (idx != -1) {
+                        cachedStudentNotifications[idx] = cachedStudentNotifications[idx].copy(isActive = isActive)
+                    }
+                    Result.success(Unit)
+                } else {
+                    val err = res.errorBody()?.string().orEmpty()
+                    Result.failure(Exception("স্ট্যাটাস পরিবর্তন ব্যর্থ: $err"))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    override suspend fun deleteStudentNotification(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val res = api.deleteStudentNotification("eq.$id")
+            if (res.isSuccessful) {
+                cachedStudentNotifications.removeAll { it.id == id }
+                Result.success(Unit)
+            } else {
+                val err = res.errorBody()?.string().orEmpty()
+                Result.failure(Exception("মুছে ফেলতে ব্যর্থ: $err"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
@@ -436,86 +593,38 @@ class SupabaseMaxBirdRepository(
             cachedNotices.addAll(remoteNotices)
             Result.success(remoteNotices)
         } catch (e: Exception) {
-            initSampleDataIfNeeded()
-            Result.success(cachedNotices.sortedWith(compareByDescending<AppNotice> { it.priority }.thenByDescending { it.createdAt }))
+            if (cachedNotices.isNotEmpty()) {
+                Result.success(cachedNotices.toList())
+            } else {
+                Result.failure(e)
+            }
         }
     }
 
     override suspend fun createAppNotice(payload: CreateAppNoticePayload): Result<AppNotice> = withContext(Dispatchers.IO) {
-        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-        val localNewNotice = AppNotice(
-            id = UUID.randomUUID().toString(),
-            title = payload.title.trim(),
-            description = payload.description?.trim(),
-            imageUrl = payload.imageUrl.trim(),
-            actionUrl = payload.actionUrl?.trim()?.ifBlank { null },
-            actionButtonText = payload.actionButtonText.trim().ifBlank { "বিস্তারিত দেখুন" },
-            priority = payload.priority,
-            isActive = payload.isActive,
-            showAsPopup = payload.showAsPopup,
-            createdAt = now,
-            updatedAt = now
-        )
-
         try {
             val api = supabaseClient.getApi()
             val createdList = api.createAppNotice(payload)
-            val created = createdList.firstOrNull() ?: localNewNotice
+            val created = createdList.firstOrNull()
+                ?: return@withContext Result.failure(Exception("নোটিশ ডাটাবেসে সেভ হয়নি"))
             cachedNotices.add(0, created)
             Result.success(created)
         } catch (e: Exception) {
-            cachedNotices.add(0, localNewNotice)
-            Result.success(localNewNotice)
+            Result.failure(e)
         }
     }
 
     override suspend fun updateAppNotice(id: String, payload: CreateAppNoticePayload): Result<AppNotice> = withContext(Dispatchers.IO) {
-        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-        val index = cachedNotices.indexOfFirst { it.id == id }
-        val updatedLocal = if (index != -1) {
-            val existing = cachedNotices[index]
-            existing.copy(
-                title = payload.title.trim(),
-                description = payload.description?.trim(),
-                imageUrl = payload.imageUrl.trim(),
-                actionUrl = payload.actionUrl?.trim()?.ifBlank { null },
-                actionButtonText = payload.actionButtonText.trim().ifBlank { "বিস্তারিত দেখুন" },
-                priority = payload.priority,
-                isActive = payload.isActive,
-                showAsPopup = payload.showAsPopup,
-                updatedAt = now
-            )
-        } else {
-            AppNotice(
-                id = id,
-                title = payload.title.trim(),
-                description = payload.description?.trim(),
-                imageUrl = payload.imageUrl.trim(),
-                actionUrl = payload.actionUrl?.trim()?.ifBlank { null },
-                actionButtonText = payload.actionButtonText.trim().ifBlank { "বিস্তারিত দেখুন" },
-                priority = payload.priority,
-                isActive = payload.isActive,
-                showAsPopup = payload.showAsPopup,
-                createdAt = now,
-                updatedAt = now
-            )
-        }
-
-        if (index != -1) {
-            cachedNotices[index] = updatedLocal
-        } else {
-            cachedNotices.add(0, updatedLocal)
-        }
-
         try {
             val api = supabaseClient.getApi()
             val updatedList = api.updateAppNotice("eq.$id", payload)
-            val updated = updatedList.firstOrNull() ?: updatedLocal
+            val updated = updatedList.firstOrNull()
+                ?: return@withContext Result.failure(Exception("নোটিশ আপডেট হয়নি"))
             val idx = cachedNotices.indexOfFirst { it.id == id }
             if (idx != -1) cachedNotices[idx] = updated
             Result.success(updated)
         } catch (e: Exception) {
-            Result.success(updatedLocal)
+            Result.failure(e)
         }
     }
 
@@ -530,7 +639,7 @@ class SupabaseMaxBirdRepository(
             api.updateAppNoticeStatus("eq.$id", UpdateAppNoticeStatusPayload(isActive = isActive))
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
@@ -552,7 +661,7 @@ class SupabaseMaxBirdRepository(
             }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
@@ -564,80 +673,38 @@ class SupabaseMaxBirdRepository(
             cachedSupportLinks.addAll(remoteLinks)
             Result.success(remoteLinks)
         } catch (e: Exception) {
-            initSampleDataIfNeeded()
-            Result.success(cachedSupportLinks.sortedWith(compareByDescending<ActivationSupportLink> { it.priority }.thenByDescending { it.createdAt ?: "" }))
+            if (cachedSupportLinks.isNotEmpty()) {
+                Result.success(cachedSupportLinks.toList())
+            } else {
+                Result.failure(e)
+            }
         }
     }
 
     override suspend fun createActivationSupportLink(payload: CreateSupportLinkPayload): Result<ActivationSupportLink> = withContext(Dispatchers.IO) {
-        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-        val localNewLink = ActivationSupportLink(
-            id = UUID.randomUUID().toString(),
-            title = payload.title.trim(),
-            subtitle = payload.subtitle?.trim()?.ifBlank { null },
-            iconType = payload.iconType.trim().lowercase(),
-            url = payload.url.trim(),
-            colorHex = payload.colorHex?.trim()?.ifBlank { null },
-            isActive = payload.isActive,
-            priority = payload.priority,
-            createdAt = now
-        )
-
         try {
             val api = supabaseClient.getApi()
             val createdList = api.createActivationSupportLink(payload)
-            val created = createdList.firstOrNull() ?: localNewLink
+            val created = createdList.firstOrNull()
+                ?: return@withContext Result.failure(Exception("সাপোর্ট লিংক সেভ হয়নি"))
             cachedSupportLinks.add(0, created)
             Result.success(created)
         } catch (e: Exception) {
-            cachedSupportLinks.add(0, localNewLink)
-            Result.success(localNewLink)
+            Result.failure(e)
         }
     }
 
     override suspend fun updateActivationSupportLink(id: String, payload: CreateSupportLinkPayload): Result<ActivationSupportLink> = withContext(Dispatchers.IO) {
-        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-        val index = cachedSupportLinks.indexOfFirst { it.id == id }
-        val updatedLocal = if (index != -1) {
-            val existing = cachedSupportLinks[index]
-            existing.copy(
-                title = payload.title.trim(),
-                subtitle = payload.subtitle?.trim()?.ifBlank { null },
-                iconType = payload.iconType.trim().lowercase(),
-                url = payload.url.trim(),
-                colorHex = payload.colorHex?.trim()?.ifBlank { null },
-                isActive = payload.isActive,
-                priority = payload.priority
-            )
-        } else {
-            ActivationSupportLink(
-                id = id,
-                title = payload.title.trim(),
-                subtitle = payload.subtitle?.trim()?.ifBlank { null },
-                iconType = payload.iconType.trim().lowercase(),
-                url = payload.url.trim(),
-                colorHex = payload.colorHex?.trim()?.ifBlank { null },
-                isActive = payload.isActive,
-                priority = payload.priority,
-                createdAt = now
-            )
-        }
-
-        if (index != -1) {
-            cachedSupportLinks[index] = updatedLocal
-        } else {
-            cachedSupportLinks.add(0, updatedLocal)
-        }
-
         try {
             val api = supabaseClient.getApi()
             val updatedList = api.updateActivationSupportLink("eq.$id", payload)
-            val updated = updatedList.firstOrNull() ?: updatedLocal
+            val updated = updatedList.firstOrNull()
+                ?: return@withContext Result.failure(Exception("সাপোর্ট লিংক আপডেট হয়নি"))
             val idx = cachedSupportLinks.indexOfFirst { it.id == id }
             if (idx != -1) cachedSupportLinks[idx] = updated
             Result.success(updated)
         } catch (e: Exception) {
-            Result.success(updatedLocal)
+            Result.failure(e)
         }
     }
 
@@ -652,7 +719,7 @@ class SupabaseMaxBirdRepository(
             api.updateActivationSupportLinkStatus("eq.$id", UpdateSupportLinkStatusPayload(isActive = isActive))
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
@@ -674,7 +741,7 @@ class SupabaseMaxBirdRepository(
             }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
@@ -693,8 +760,11 @@ class SupabaseMaxBirdRepository(
             cachedUserDevices.addAll(sorted)
             Result.success(sorted)
         } catch (e: Exception) {
-            initSampleDataIfNeeded()
-            Result.success(cachedUserDevices.toList())
+            if (cachedUserDevices.isNotEmpty()) {
+                Result.success(cachedUserDevices.toList())
+            } else {
+                Result.failure(e)
+            }
         }
     }
 

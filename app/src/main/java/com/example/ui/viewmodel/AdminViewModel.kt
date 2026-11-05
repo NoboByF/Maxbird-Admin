@@ -16,6 +16,7 @@ import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
+import com.example.data.model.CreateStudentNotificationPayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceShikhoAccount
@@ -24,6 +25,7 @@ import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.MaxbirdAdminAuthSession
 import com.example.data.model.MaxbirdPortalSettings
 import com.example.data.model.ReviewCoursePaymentRpcPayload
+import com.example.data.model.StudentNotification
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import com.example.data.preferences.AdminPreferences
@@ -92,12 +94,29 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLoadingDevices = MutableStateFlow(false)
     val isLoadingDevices: StateFlow<Boolean> = _isLoadingDevices.asStateFlow()
 
-    // App Updates Management State
+    // App Updates & Global Kill Switch / Maintenance Mode State (`public.app_updates`)
     private val _appUpdates = MutableStateFlow<List<AppUpdate>>(emptyList())
     val appUpdates: StateFlow<List<AppUpdate>> = _appUpdates.asStateFlow()
 
     private val _isLoadingUpdates = MutableStateFlow(false)
     val isLoadingUpdates: StateFlow<Boolean> = _isLoadingUpdates.asStateFlow()
+
+    private val _isKillSwitchEnabled = MutableStateFlow(false)
+    val isKillSwitchEnabled: StateFlow<Boolean> = _isKillSwitchEnabled.asStateFlow()
+
+    private val _killSwitchTitle = MutableStateFlow("অ্যাপ আপডেটের কাজ চলছে")
+    val killSwitchTitle: StateFlow<String> = _killSwitchTitle.asStateFlow()
+
+    private val _killSwitchMessage = MutableStateFlow(
+        "অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।"
+    )
+    val killSwitchMessage: StateFlow<String> = _killSwitchMessage.asStateFlow()
+
+    private val _estimatedBackTime = MutableStateFlow("")
+    val estimatedBackTime: StateFlow<String> = _estimatedBackTime.asStateFlow()
+
+    private val _isSavingKillSwitch = MutableStateFlow(false)
+    val isSavingKillSwitch: StateFlow<Boolean> = _isSavingKillSwitch.asStateFlow()
 
     private val _isUpdateDialogOpen = MutableStateFlow(false)
     val isUpdateDialogOpen: StateFlow<Boolean> = _isUpdateDialogOpen.asStateFlow()
@@ -105,22 +124,25 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _editingUpdateId = MutableStateFlow<String?>(null)
     val editingUpdateId: StateFlow<String?> = _editingUpdateId.asStateFlow()
 
-    private val _updateVersionName = MutableStateFlow("v6.1.0")
+    private val _updateVersionName = MutableStateFlow("1.1.0")
     val updateVersionName: StateFlow<String> = _updateVersionName.asStateFlow()
 
-    private val _updateVersionCode = MutableStateFlow("60100")
+    private val _updateVersionCode = MutableStateFlow("110")
     val updateVersionCode: StateFlow<String> = _updateVersionCode.asStateFlow()
 
-    private val _updateMinVersionCode = MutableStateFlow("60000")
+    private val _updateMinVersionCode = MutableStateFlow("100")
     val updateMinVersionCode: StateFlow<String> = _updateMinVersionCode.asStateFlow()
 
-    private val _updateIsForce = MutableStateFlow(true)
+    private val _updateFileSizeMb = MutableStateFlow("28.5")
+    val updateFileSizeMb: StateFlow<String> = _updateFileSizeMb.asStateFlow()
+
+    private val _updateIsForce = MutableStateFlow(false)
     val updateIsForce: StateFlow<Boolean> = _updateIsForce.asStateFlow()
 
-    private val _updateTitle = MutableStateFlow("নতুন আপডেট উপলভ্য!")
+    private val _updateTitle = MutableStateFlow("নতুন আপডেট উপলব্ধ!")
     val updateTitle: StateFlow<String> = _updateTitle.asStateFlow()
 
-    private val _updateChangelog = MutableStateFlow("• বাগ ফিক্স এবং পারফরম্যান্স উন্নতি\n• নতুন সিকিউরিটি ফিচার")
+    private val _updateChangelog = MutableStateFlow("")
     val updateChangelog: StateFlow<String> = _updateChangelog.asStateFlow()
 
     private val _updateDownloadUrl = MutableStateFlow("")
@@ -131,6 +153,40 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _updateIsActive = MutableStateFlow(true)
     val updateIsActive: StateFlow<Boolean> = _updateIsActive.asStateFlow()
+
+    // Real Server Push Notifications (`public.student_notifications`) State
+    private val _studentNotifications = MutableStateFlow<List<StudentNotification>>(emptyList())
+    val studentNotifications: StateFlow<List<StudentNotification>> = _studentNotifications.asStateFlow()
+
+    private val _isLoadingStudentNotifications = MutableStateFlow(false)
+    val isLoadingStudentNotifications: StateFlow<Boolean> = _isLoadingStudentNotifications.asStateFlow()
+
+    private val _isSendingStudentNotification = MutableStateFlow(false)
+    val isSendingStudentNotification: StateFlow<Boolean> = _isSendingStudentNotification.asStateFlow()
+
+    private val _pushTitle = MutableStateFlow("")
+    val pushTitle: StateFlow<String> = _pushTitle.asStateFlow()
+
+    private val _pushMessage = MutableStateFlow("")
+    val pushMessage: StateFlow<String> = _pushMessage.asStateFlow()
+
+    private val _pushTargetType = MutableStateFlow("ALL") // ALL, PHONE, PROGRAM
+    val pushTargetType: StateFlow<String> = _pushTargetType.asStateFlow()
+
+    private val _pushTargetValue = MutableStateFlow("")
+    val pushTargetValue: StateFlow<String> = _pushTargetValue.asStateFlow()
+
+    private val _pushNotificationType = MutableStateFlow("ADMIN_PUSH") // ADMIN_PUSH, LIVE_CLASS, EXAM
+    val pushNotificationType: StateFlow<String> = _pushNotificationType.asStateFlow()
+
+    private val _pushImageUrl = MutableStateFlow("")
+    val pushImageUrl: StateFlow<String> = _pushImageUrl.asStateFlow()
+
+    private val _pushDeeplink = MutableStateFlow("")
+    val pushDeeplink: StateFlow<String> = _pushDeeplink.asStateFlow()
+
+    private val _pushIsActive = MutableStateFlow(true)
+    val pushIsActive: StateFlow<Boolean> = _pushIsActive.asStateFlow()
 
     // Notice Management State
     private val _appNotices = MutableStateFlow<List<AppNotice>>(emptyList())
@@ -546,6 +602,11 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         } else if (screen == Screen.Devices) {
             loadUserDevices(forceRefresh = true)
             loadCourseSalesData()
+        } else if (screen == Screen.Updates) {
+            loadAppUpdates()
+        } else if (screen == Screen.Notices) {
+            loadAppNotices(forceRefresh = true)
+            loadStudentNotifications()
         } else if (screen == Screen.MaxbirdWebsiteAdmin) {
             loadMaxbirdPortalSettings()
         }
@@ -556,6 +617,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         loadUserDevices()
         loadAppUpdates()
         loadAppNotices()
+        loadStudentNotifications()
         loadActivationSupportLinks()
         loadCourseSalesData()
     }
@@ -979,31 +1041,100 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // App Updates Management Functions
+    // App Updates & Global Kill Switch Management Functions (`public.app_updates`)
     fun loadAppUpdates() {
         viewModelScope.launch {
             try {
                 _isLoadingUpdates.value = true
                 val result = repository.getAppUpdates(forceRefresh = true)
                 if (result.isSuccess) {
-                    _appUpdates.value = result.getOrNull() ?: emptyList()
+                    val list = result.getOrNull().orEmpty()
+                    _appUpdates.value = list
+                    val latest = list.firstOrNull()
+                    if (latest != null) {
+                        _isKillSwitchEnabled.value = latest.isKillSwitchActive
+                        _killSwitchTitle.value = latest.killSwitchTitle.ifBlank { "অ্যাপ আপডেটের কাজ চলছে" }
+                        _killSwitchMessage.value = latest.killSwitchMessage.ifBlank {
+                            "অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।"
+                        }
+                        _estimatedBackTime.value = latest.estimatedBackTime.orEmpty()
+                    }
                 }
-            } catch (e: Throwable) {
-                // Silently fallback
+            } catch (_: Throwable) {
             } finally {
                 _isLoadingUpdates.value = false
             }
         }
     }
 
+    fun setKillSwitchEnabled(enabled: Boolean) {
+        _isKillSwitchEnabled.value = enabled
+    }
+
+    fun setKillSwitchTitle(title: String) {
+        _killSwitchTitle.value = title
+    }
+
+    fun setKillSwitchMessage(message: String) {
+        _killSwitchMessage.value = message
+    }
+
+    fun setEstimatedBackTime(time: String) {
+        _estimatedBackTime.value = time
+    }
+
+    fun toggleKillSwitchInstant(enabled: Boolean) {
+        _isKillSwitchEnabled.value = enabled
+        saveKillSwitchSettings(enabledOverride = enabled)
+    }
+
+    fun saveKillSwitchSettings(enabledOverride: Boolean? = null) {
+        val targetEnabled = enabledOverride ?: _isKillSwitchEnabled.value
+        val cleanTitle = _killSwitchTitle.value.trim().ifBlank { "অ্যাপ আপডেটের কাজ চলছে" }
+        val cleanMessage = _killSwitchMessage.value.trim().ifBlank {
+            "অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।"
+        }
+        val cleanBackTime = _estimatedBackTime.value.trim()
+
+        viewModelScope.launch {
+            try {
+                _isSavingKillSwitch.value = true
+                val result = repository.updateGlobalKillSwitch(
+                    isEnabled = targetEnabled,
+                    title = cleanTitle,
+                    message = cleanMessage,
+                    estimatedBackTime = cleanBackTime
+                )
+                if (result.isSuccess) {
+                    _isKillSwitchEnabled.value = targetEnabled
+                    loadAppUpdates()
+                    if (targetEnabled) {
+                        showToast("🛑 Global Kill Switch / Maintenance Mode চালু (ON) করা হয়েছে!")
+                    } else {
+                        showToast("✅ Global Kill Switch বন্ধ (OFF) করা হয়েছে — অ্যাপ এখন সবার জন্য সচল!")
+                    }
+                } else {
+                    showToast("⚠️ ${result.exceptionOrNull()?.message ?: "Kill Switch আপডেট ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isSavingKillSwitch.value = false
+            }
+        }
+    }
+
     fun openCreateUpdateDialog() {
+        val latest = _appUpdates.value.firstOrNull()
+        val nextCode = ((latest?.effectiveVersionCode ?: 109) + 1)
         _editingUpdateId.value = null
-        _updateVersionName.value = "v6.1.0"
-        _updateVersionCode.value = "60100"
-        _updateMinVersionCode.value = "60000"
-        _updateIsForce.value = true
-        _updateTitle.value = "নতুন আপডেট উপলভ্য!"
-        _updateChangelog.value = "• বাগ ফিক্স এবং পারফরম্যান্স উন্নতি\n• নতুন সিকিউরিটি ফিচার"
+        _updateVersionName.value = ""
+        _updateVersionCode.value = nextCode.toString()
+        _updateMinVersionCode.value = (latest?.minSupportedVersionCode?.takeIf { it > 0 } ?: nextCode).toString()
+        _updateFileSizeMb.value = if ((latest?.fileSizeMb ?: 0.0) > 0.0) latest!!.fileSizeMb.toString() else "28.5"
+        _updateIsForce.value = false
+        _updateTitle.value = "নতুন আপডেট উপলব্ধ!"
+        _updateChangelog.value = ""
         _updateDownloadUrl.value = ""
         _updateButtonText.value = "এখনই আপডেট করুন"
         _updateIsActive.value = true
@@ -1012,14 +1143,15 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openEditUpdateDialog(update: AppUpdate) {
         _editingUpdateId.value = update.id
-        _updateVersionName.value = update.latestVersionName
-        _updateVersionCode.value = update.latestVersionCode.toString()
-        _updateMinVersionCode.value = update.minSupportedVersionCode.toString()
+        _updateVersionName.value = update.effectiveVersionName
+        _updateVersionCode.value = update.effectiveVersionCode.toString()
+        _updateMinVersionCode.value = (if (update.minSupportedVersionCode > 0) update.minSupportedVersionCode else update.effectiveVersionCode).toString()
+        _updateFileSizeMb.value = if (update.fileSizeMb > 0.0) update.fileSizeMb.toString() else "28.5"
         _updateIsForce.value = update.isForceUpdate
         _updateTitle.value = update.title
-        _updateChangelog.value = update.changelog
-        _updateDownloadUrl.value = update.downloadUrl
-        _updateButtonText.value = update.buttonText
+        _updateChangelog.value = update.effectiveReleaseNotes
+        _updateDownloadUrl.value = update.effectiveApkUrl
+        _updateButtonText.value = update.buttonText.ifBlank { "এখনই আপডেট করুন" }
         _updateIsActive.value = update.isActive
         _isUpdateDialogOpen.value = true
     }
@@ -1032,6 +1164,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     fun setUpdateVersionName(v: String) { _updateVersionName.value = v }
     fun setUpdateVersionCode(v: String) { _updateVersionCode.value = v }
     fun setUpdateMinVersionCode(v: String) { _updateMinVersionCode.value = v }
+    fun setUpdateFileSizeMb(v: String) { _updateFileSizeMb.value = v }
     fun setUpdateIsForce(v: Boolean) { _updateIsForce.value = v }
     fun setUpdateTitle(v: String) { _updateTitle.value = v }
     fun setUpdateChangelog(v: String) { _updateChangelog.value = v }
@@ -1042,38 +1175,47 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     fun saveAppUpdate() {
         val versionName = _updateVersionName.value.trim()
         val versionCodeInt = _updateVersionCode.value.trim().toIntOrNull()
-        val minVersionCodeInt = _updateMinVersionCode.value.trim().toIntOrNull()
+        val minVersionCodeInt = _updateMinVersionCode.value.trim().toIntOrNull() ?: versionCodeInt
+        val fileSizeDouble = _updateFileSizeMb.value.trim().toDoubleOrNull() ?: 0.0
         val title = _updateTitle.value.trim()
-        val changelog = _updateChangelog.value.trim()
-        val downloadUrl = _updateDownloadUrl.value.trim()
+        val releaseNotes = _updateChangelog.value.trim()
+        val apkUrl = _updateDownloadUrl.value.trim()
         val buttonText = _updateButtonText.value.trim().ifBlank { "এখনই আপডেট করুন" }
 
         if (versionName.isBlank()) {
-            showToast("ভার্সন নাম লিখুন (e.g. v6.1.0)")
+            showToast("ভার্সন নাম লিখুন (যেমন: 1.1.0 বা 1.2.0)")
             return
         }
-        if (versionCodeInt == null) {
-            showToast("সঠিক ভার্সন কোড (ইনটিজার) দিন")
+        if (versionCodeInt == null || versionCodeInt <= 0) {
+            showToast("সঠিক ভার্সন কোড (Integer, যেমন: 110 বা 111) দিন")
             return
         }
-        if (minVersionCodeInt == null) {
-            showToast("সঠিক সর্বনিম্ন সমর্থিত ভার্সন কোড দিন")
-            return
-        }
-        if (downloadUrl.isBlank() || (!downloadUrl.startsWith("http://") && !downloadUrl.startsWith("https://"))) {
-            showToast("সঠিক ডাউনলোড URL দিন (http:// বা https://)")
+        if (apkUrl.isBlank() || (!apkUrl.startsWith("http://") && !apkUrl.startsWith("https://"))) {
+            showToast("সঠিক ডিরেক্ট APK লিংক দিন (http:// বা https://)")
             return
         }
 
         viewModelScope.launch {
             val payload = CreateAppUpdatePayload(
+                versionCode = versionCodeInt,
+                versionName = versionName,
+                apkUrl = apkUrl,
+                fileSizeMb = fileSizeDouble,
+                releaseNotes = releaseNotes,
+                isKillSwitch = _isKillSwitchEnabled.value,
+                isMaintenance = _isKillSwitchEnabled.value,
+                killSwitchTitle = _killSwitchTitle.value.trim().ifBlank { "অ্যাপ আপডেটের কাজ চলছে" },
+                killSwitchMessage = _killSwitchMessage.value.trim().ifBlank {
+                    "অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।"
+                },
+                estimatedBackTime = _estimatedBackTime.value.trim(),
                 latestVersionName = versionName,
                 latestVersionCode = versionCodeInt,
-                minSupportedVersionCode = minVersionCodeInt,
+                minSupportedVersionCode = minVersionCodeInt ?: versionCodeInt,
                 isForceUpdate = _updateIsForce.value,
-                title = title.ifBlank { "নতুন আপডেট উপলভ্য!" },
-                changelog = changelog,
-                downloadUrl = downloadUrl,
+                title = title.ifBlank { "নতুন আপডেট উপলব্ধ! ($versionName)" },
+                changelog = releaseNotes,
+                downloadUrl = apkUrl,
                 buttonText = buttonText,
                 isActive = _updateIsActive.value
             )
@@ -1088,9 +1230,9 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             if (result.isSuccess) {
                 closeUpdateDialog()
                 loadAppUpdates()
-                showToast("অ্যাপ আপডেট সফলভাবে সংরক্ষণ করা হয়েছে! (Saved)")
+                showToast("✅ ইন-অ্যাপ APK আপডেট ($versionName • কোড $versionCodeInt) সফলভাবে প্রকাশিত হয়েছে!")
             } else {
-                showToast("আপডেট সংরক্ষণ করতে ব্যর্থ হয়েছে।")
+                showToast("⚠️ ${result.exceptionOrNull()?.message ?: "আপডেট সংরক্ষণ করতে ব্যর্থ হয়েছে।"}")
             }
         }
     }
@@ -1102,7 +1244,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             if (result.isSuccess) {
                 loadAppUpdates()
                 val statusText = if (newStatus) "সক্রিয় (Active)" else "নিষ্ক্রিয় (Inactive)"
-                showToast("আপডেট ${update.latestVersionName} এখন $statusText")
+                showToast("আপডেট ${update.effectiveVersionName} এখন $statusText")
             } else {
                 showToast("স্ট্যাটাস পরিবর্তন ব্যর্থ হয়েছে।")
             }
@@ -1114,9 +1256,138 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             val result = repository.deleteAppUpdate(update.id)
             if (result.isSuccess) {
                 loadAppUpdates()
-                showToast("আপডেট ${update.latestVersionName} মুছে ফেলা হয়েছে। (Deleted)")
+                showToast("আপডেট ${update.effectiveVersionName} মুছে ফেলা হয়েছে। (Deleted)")
             } else {
                 showToast("মুছে ফেলতে ব্যর্থ হয়েছে।")
+            }
+        }
+    }
+
+    // =========================================================================
+    // Real Server Push Notification Sender (`public.student_notifications`)
+    // =========================================================================
+
+    fun loadStudentNotifications() {
+        viewModelScope.launch {
+            try {
+                _isLoadingStudentNotifications.value = true
+                val res = repository.getStudentNotifications()
+                if (res.isSuccess) {
+                    _studentNotifications.value = res.getOrNull().orEmpty()
+                }
+            } catch (_: Throwable) {
+            } finally {
+                _isLoadingStudentNotifications.value = false
+            }
+        }
+    }
+
+    fun setPushTitle(v: String) { _pushTitle.value = v }
+    fun setPushMessage(v: String) { _pushMessage.value = v }
+    fun setPushTargetType(v: String) { _pushTargetType.value = v }
+    fun setPushTargetValue(v: String) { _pushTargetValue.value = v }
+    fun setPushNotificationType(v: String) { _pushNotificationType.value = v }
+    fun setPushImageUrl(v: String) { _pushImageUrl.value = v }
+    fun setPushDeeplink(v: String) { _pushDeeplink.value = v }
+    fun setPushIsActive(v: Boolean) { _pushIsActive.value = v }
+
+    fun sendStudentNotification() {
+        val cleanTitle = _pushTitle.value.trim()
+        val cleanMessage = _pushMessage.value.trim()
+        val cleanTargetType = _pushTargetType.value.trim().uppercase()
+        val cleanTargetVal = _pushTargetValue.value.trim()
+        val cleanNotifType = _pushNotificationType.value.trim().uppercase().ifBlank { "ADMIN_PUSH" }
+        val cleanImg = _pushImageUrl.value.trim().ifBlank { null }
+        val cleanLink = _pushDeeplink.value.trim().ifBlank { null }
+
+        if (cleanTitle.isBlank()) {
+            showToast("নোটিফিকেশনের শিরোনাম (Title) লিখুন")
+            return
+        }
+        if (cleanMessage.isBlank()) {
+            showToast("বিস্তারিত মেসেজ (Message) লিখুন")
+            return
+        }
+        if (cleanTargetType == "PHONE" && cleanTargetVal.isBlank()) {
+            showToast("নির্দিষ্ট স্টুডেন্টের মোবাইল নম্বর (target_value) লিখুন")
+            return
+        }
+        if (cleanTargetType == "PROGRAM" && cleanTargetVal.isBlank()) {
+            showToast("নির্দিষ্ট কোর্সের Program ID (target_value) লিখুন")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                _isSendingStudentNotification.value = true
+                val payload = CreateStudentNotificationPayload(
+                    title = cleanTitle,
+                    message = cleanMessage,
+                    targetType = cleanTargetType,
+                    targetValue = if (cleanTargetType == "ALL") null else cleanTargetVal,
+                    notificationType = cleanNotifType,
+                    imageUrl = cleanImg,
+                    deeplink = cleanLink,
+                    isActive = _pushIsActive.value
+                )
+                val res = repository.createStudentNotification(payload)
+                if (res.isSuccess) {
+                    // If targeting a specific phone, also fire OneSignal push if configured
+                    if (cleanTargetType == "PHONE" && cleanTargetVal.isNotBlank()) {
+                        dispatchStudentPushForPhoneOrDevice(
+                            studentPhone = cleanTargetVal,
+                            title = cleanTitle,
+                            message = cleanMessage,
+                            eventType = cleanNotifType,
+                            extraData = mapOf(
+                                "target_type" to cleanTargetType,
+                                "target_value" to cleanTargetVal,
+                                "image_url" to (cleanImg ?: ""),
+                                "deeplink" to (cleanLink ?: "")
+                            )
+                        )
+                    }
+                    // Clear form fields after successful insert
+                    _pushTitle.value = ""
+                    _pushMessage.value = ""
+                    _pushTargetValue.value = ""
+                    _pushImageUrl.value = ""
+                    _pushDeeplink.value = ""
+                    loadStudentNotifications()
+                    showToast("🚀 সার্ভার পুশ নোটিফিকেশন সফলভাবে ডাটাবেসে পাঠানো হয়েছে!")
+                } else {
+                    showToast("⚠️ ${res.exceptionOrNull()?.message ?: "পুশ নোটিফিকেশন পাঠানো ব্যর্থ হয়েছে"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isSendingStudentNotification.value = false
+            }
+        }
+    }
+
+    fun toggleStudentNotificationStatus(item: StudentNotification) {
+        val nextActive = !item.isActive
+        viewModelScope.launch {
+            val res = repository.toggleStudentNotificationStatus(item.id, nextActive)
+            if (res.isSuccess) {
+                loadStudentNotifications()
+                val label = if (nextActive) "সক্রিয় (Active)" else "নিষ্ক্রিয় (Inactive)"
+                showToast("নোটিফিকেশন এখন $label")
+            } else {
+                showToast("⚠️ ${res.exceptionOrNull()?.message ?: "স্ট্যাটাস পরিবর্তন ব্যর্থ হয়েছে"}")
+            }
+        }
+    }
+
+    fun deleteStudentNotification(item: StudentNotification) {
+        viewModelScope.launch {
+            val res = repository.deleteStudentNotification(item.id)
+            if (res.isSuccess) {
+                loadStudentNotifications()
+                showToast("🗑️ নোটিফিকেশনটি মুছে ফেলা হয়েছে।")
+            } else {
+                showToast("⚠️ ${res.exceptionOrNull()?.message ?: "মুছে ফেলতে ব্যর্থ হয়েছে"}")
             }
         }
     }

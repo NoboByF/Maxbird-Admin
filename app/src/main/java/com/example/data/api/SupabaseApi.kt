@@ -17,6 +17,7 @@ import com.example.data.model.UpdateSupportLinkStatusPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import com.example.data.model.DeviceShikhoAccount
+import com.example.data.model.StudentNotification
 import com.example.data.model.UpdateDeviceBanPayload
 import retrofit2.Response
 import retrofit2.http.Body
@@ -41,7 +42,18 @@ interface SupabaseApi {
     @GET("rest/v1/app_updates")
     suspend fun getAppUpdates(
         @Query("select") select: String = "*",
-        @Query("order") order: String = "created_at.desc"
+        @Query("order") order: String = "version_code.desc.nullslast,id.desc"
+    ): List<AppUpdate>
+
+    @GET("rest/v1/app_updates")
+    suspend fun getAppUpdatesLegacyOrder(
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "latest_version_code.desc.nullslast,created_at.desc.nullslast"
+    ): List<AppUpdate>
+
+    @GET("rest/v1/app_updates")
+    suspend fun getAppUpdatesUnordered(
+        @Query("select") select: String = "*"
     ): List<AppUpdate>
 
     @POST("rest/v1/app_updates")
@@ -49,6 +61,12 @@ interface SupabaseApi {
         @Body payload: CreateAppUpdatePayload,
         @Header("Prefer") prefer: String = "return=representation"
     ): List<AppUpdate>
+
+    @POST("rest/v1/app_updates")
+    suspend fun createAppUpdateRaw(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<AppUpdate>>
 
     @PATCH("rest/v1/app_updates")
     suspend fun updateAppUpdate(
@@ -58,6 +76,18 @@ interface SupabaseApi {
     ): List<AppUpdate>
 
     @PATCH("rest/v1/app_updates")
+    suspend fun patchAppUpdateRaw(
+        @Query("id") idQuery: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<AppUpdate>>
+
+    @POST("rest/v1/rpc/admin_set_kill_switch")
+    suspend fun setKillSwitchRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
+    @PATCH("rest/v1/app_updates")
     suspend fun updateAppUpdateStatus(
         @Query("id") idQuery: String,
         @Body payload: UpdateAppUpdateStatusPayload
@@ -65,6 +95,39 @@ interface SupabaseApi {
 
     @DELETE("rest/v1/app_updates")
     suspend fun deleteAppUpdate(
+        @Query("id") idQuery: String
+    ): Response<Unit>
+
+    // =========================================================================
+    // Real Server Push Notification Endpoints (`public.student_notifications`)
+    // =========================================================================
+
+    @GET("rest/v1/student_notifications")
+    suspend fun getStudentNotifications(
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "created_at.desc.nullslast,id.desc"
+    ): List<StudentNotification>
+
+    @GET("rest/v1/student_notifications")
+    suspend fun getStudentNotificationsUnordered(
+        @Query("select") select: String = "*"
+    ): List<StudentNotification>
+
+    @POST("rest/v1/student_notifications")
+    suspend fun createStudentNotificationRaw(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<StudentNotification>>
+
+    @PATCH("rest/v1/student_notifications")
+    suspend fun patchStudentNotificationRaw(
+        @Query("id") idQuery: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<StudentNotification>>
+
+    @DELETE("rest/v1/student_notifications")
+    suspend fun deleteStudentNotification(
         @Query("id") idQuery: String
     ): Response<Unit>
 

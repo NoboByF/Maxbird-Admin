@@ -9,12 +9,14 @@ import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.CoursePaymentTransaction
 import com.example.data.model.CreateAppUpdatePayload
 import com.example.data.model.CreateAppNoticePayload
+import com.example.data.model.CreateStudentNotificationPayload
 import com.example.data.model.CreateSupportLinkPayload
 import com.example.data.model.DashboardStats
 import com.example.data.model.DeviceShikhoAccount
 import com.example.data.model.ManageCourseTrialPayload
 import com.example.data.model.ManualCourseAccessPayload
 import com.example.data.model.ReviewCoursePaymentRpcPayload
+import com.example.data.model.StudentNotification
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 
@@ -33,9 +35,25 @@ interface MaxBirdRepository {
 
     suspend fun updateAppUpdate(id: String, payload: CreateAppUpdatePayload): Result<AppUpdate>
 
+    suspend fun updateGlobalKillSwitch(
+        isEnabled: Boolean,
+        title: String,
+        message: String,
+        estimatedBackTime: String
+    ): Result<AppUpdate>
+
     suspend fun toggleAppUpdateStatus(id: String, isActive: Boolean): Result<Unit>
 
     suspend fun deleteAppUpdate(id: String): Result<Unit>
+
+    // Real Server Push Notifications (`public.student_notifications`)
+    suspend fun getStudentNotifications(): Result<List<StudentNotification>> = Result.success(emptyList())
+
+    suspend fun createStudentNotification(payload: CreateStudentNotificationPayload): Result<StudentNotification>
+
+    suspend fun toggleStudentNotificationStatus(id: String, isActive: Boolean): Result<Unit> = Result.success(Unit)
+
+    suspend fun deleteStudentNotification(id: String): Result<Unit> = Result.success(Unit)
 
     suspend fun getAppNotices(forceRefresh: Boolean = false): Result<List<AppNotice>>
 

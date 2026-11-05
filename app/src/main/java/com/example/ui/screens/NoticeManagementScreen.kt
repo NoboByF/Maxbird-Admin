@@ -89,13 +89,17 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.data.model.AppNotice
+import com.example.data.model.StudentNotification
+import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CoralDanger
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.NeonCyan
+import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
+import com.example.ui.theme.Slate850
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 
@@ -116,6 +120,31 @@ fun NoticeManagementScreen(
     isActive: Boolean,
     showAsPopup: Boolean,
     previewNotice: AppNotice?,
+    // Real Server Push Notification Sender (`public.student_notifications`) State & Callbacks
+    studentNotifications: List<StudentNotification> = emptyList(),
+    isLoadingStudentNotifications: Boolean = false,
+    isSendingStudentNotification: Boolean = false,
+    pushTitle: String = "",
+    pushMessage: String = "",
+    pushTargetType: String = "ALL", // ALL, PHONE, PROGRAM
+    pushTargetValue: String = "",
+    pushNotificationType: String = "ADMIN_PUSH", // ADMIN_PUSH, LIVE_CLASS, EXAM
+    pushImageUrl: String = "",
+    pushDeeplink: String = "",
+    pushIsActive: Boolean = true,
+    onPushTitleChange: (String) -> Unit = {},
+    onPushMessageChange: (String) -> Unit = {},
+    onPushTargetTypeChange: (String) -> Unit = {},
+    onPushTargetValueChange: (String) -> Unit = {},
+    onPushNotificationTypeChange: (String) -> Unit = {},
+    onPushImageUrlChange: (String) -> Unit = {},
+    onPushDeeplinkChange: (String) -> Unit = {},
+    onPushIsActiveChange: (Boolean) -> Unit = {},
+    onSendStudentNotification: () -> Unit = {},
+    onToggleStudentNotificationStatus: (StudentNotification) -> Unit = {},
+    onDeleteStudentNotification: (StudentNotification) -> Unit = {},
+    onRefreshStudentNotifications: () -> Unit = {},
+    // App Notices Callbacks
     onSearchChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
     onOpenCreateDialog: () -> Unit,
@@ -138,6 +167,7 @@ fun NoticeManagementScreen(
     onShowToast: (String) -> Unit
 ) {
     var noticeToDelete by remember { mutableStateOf<AppNotice?>(null) }
+    var selectedSectionTab by remember { mutableIntStateOf(0) } // 0 = Real Server Push (student_notifications), 1 = App Notices (app_notices)
 
     val filteredNotices = remember(notices, searchQuery, filter) {
         notices.filter { notice ->
@@ -160,20 +190,22 @@ fun NoticeManagementScreen(
     Scaffold(
         containerColor = Slate900,
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = onOpenCreateDialog,
-                containerColor = ElectricBlue,
-                contentColor = Color.White,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.testTag("fab_create_notice")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            if (selectedSectionTab == 1) {
+                FloatingActionButton(
+                    onClick = onOpenCreateDialog,
+                    containerColor = ElectricBlue,
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.testTag("fab_create_notice")
                 ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = "Add Notice")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("নতুন নোটিশ", fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(imageVector = Icons.Default.Add, contentDescription = "Add Notice")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("নতুন নোটিশ", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -193,7 +225,7 @@ fun NoticeManagementScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Filled.Campaign,
@@ -203,7 +235,7 @@ fun NoticeManagementScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "নোটিশ কন্ট্রোল সেন্টার",
+                                text = "সার্ভার পুশ ও নোটিশ সেন্টার",
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -211,20 +243,23 @@ fun NoticeManagementScreen(
                             )
                         }
                         Text(
-                            text = "Supabase app_notices • লাইভ ব্যানার ও পপ-আপ বার্তা",
+                            text = "student_notifications ও app_notices • ১০০% রিয়েল Supabase সিঙ্ক",
                             style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
                         )
                     }
 
                     IconButton(
-                        onClick = onRefresh,
+                        onClick = {
+                            onRefresh()
+                            onRefreshStudentNotifications()
+                        },
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(Slate800)
                             .border(1.dp, Slate700, CircleShape)
                             .testTag("btn_refresh_notices")
                     ) {
-                        if (isLoading) {
+                        if (isLoading || isLoadingStudentNotifications) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(18.dp),
                                 color = NeonCyan,
@@ -233,7 +268,7 @@ fun NoticeManagementScreen(
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
-                                contentDescription = "Refresh Notices",
+                                contentDescription = "Refresh",
                                 tint = Slate400
                             )
                         }
@@ -241,177 +276,629 @@ fun NoticeManagementScreen(
                 }
             }
 
-            // Quick Stats Row
+            // Top Section Switcher (0 = Real Server Push Notifications, 1 = In-App Notices)
             item {
-                val totalCount = notices.size
-                val activeCount = notices.count { it.isActive }
-                val popupCount = notices.count { it.showAsPopup && it.isActive }
-                val highestPriority = notices.maxOfOrNull { it.priority } ?: 0
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                Surface(
+                    color = Slate800,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, Slate700, RoundedCornerShape(14.dp))
                 ) {
-                    NoticeStatBox(
-                        title = "মোট নোটিশ",
-                        value = totalCount.toString(),
-                        accentColor = ElectricBlue,
-                        modifier = Modifier.weight(1f)
-                    )
-                    NoticeStatBox(
-                        title = "সক্রিয় নোটিশ",
-                        value = activeCount.toString(),
-                        accentColor = EmeraldSuccess,
-                        modifier = Modifier.weight(1f)
-                    )
-                    NoticeStatBox(
-                        title = "পপ-আপ অ্যালার্ট",
-                        value = popupCount.toString(),
-                        accentColor = NeonCyan,
-                        modifier = Modifier.weight(1f)
-                    )
-                    NoticeStatBox(
-                        title = "টপ প্রায়োরিটি",
-                        value = highestPriority.toString(),
-                        accentColor = CoralDanger,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
-            // Search Bar & Filter Chips
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = onSearchChange,
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("input_search_notices"),
-                        placeholder = { Text("নোটিশ খুঁজুন (শিরোনাম বা বিবরণ)...", color = Slate400) },
-                        leadingIcon = {
-                            Icon(Icons.Default.Search, contentDescription = null, tint = Slate400)
-                        },
-                        trailingIcon = {
-                            if (searchQuery.isNotBlank()) {
-                                IconButton(onClick = { onSearchChange("") }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Slate400)
-                                }
-                            }
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Slate800,
-                            unfocusedContainerColor = Slate800,
-                            focusedBorderColor = ElectricBlue,
-                            unfocusedBorderColor = Slate700,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        singleLine = true
-                    )
-
-                    // Filter chips row
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        item {
-                            FilterChip(
-                                selected = filter == "ALL",
-                                onClick = { onFilterChange("ALL") },
-                                label = { Text("সকল (${notices.size})") },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = ElectricBlue,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = Slate800,
-                                    labelColor = Slate400
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = filter == "ALL",
-                                    borderColor = Slate700,
-                                    selectedBorderColor = ElectricBlue
-                                )
+                        Button(
+                            onClick = { selectedSectionTab = 0 },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selectedSectionTab == 0) ElectricBlue else Color.Transparent,
+                                contentColor = if (selectedSectionTab == 0) Color.White else Slate400
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("tab_student_notifications")
+                        ) {
+                            Text(
+                                text = "🚀 সার্ভার পুশ (${studentNotifications.size})",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 12.sp
                             )
                         }
-                        item {
-                            FilterChip(
-                                selected = filter == "ACTIVE",
-                                onClick = { onFilterChange("ACTIVE") },
-                                label = { Text("সক্রিয় (${notices.count { it.isActive }})") },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = EmeraldSuccess,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = Slate800,
-                                    labelColor = Slate400
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = filter == "ACTIVE",
-                                    borderColor = Slate700,
-                                    selectedBorderColor = EmeraldSuccess
-                                )
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = filter == "POPUP",
-                                onClick = { onFilterChange("POPUP") },
-                                label = { Text("পপ-আপ (${notices.count { it.showAsPopup }})") },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = NeonCyan,
-                                    selectedLabelColor = Slate950,
-                                    containerColor = Slate800,
-                                    labelColor = Slate400
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = filter == "POPUP",
-                                    borderColor = Slate700,
-                                    selectedBorderColor = NeonCyan
-                                )
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = filter == "INACTIVE",
-                                onClick = { onFilterChange("INACTIVE") },
-                                label = { Text("নিষ্ক্রিয় (${notices.count { !it.isActive }})") },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Slate700,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = Slate800,
-                                    labelColor = Slate400
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = filter == "INACTIVE",
-                                    borderColor = Slate700,
-                                    selectedBorderColor = Slate400
-                                )
+
+                        Button(
+                            onClick = { selectedSectionTab = 1 },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selectedSectionTab == 1) ElectricBlue else Color.Transparent,
+                                contentColor = if (selectedSectionTab == 1) Color.White else Slate400
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("tab_app_notices")
+                        ) {
+                            Text(
+                                text = "📢 ব্যানার নোটিশ (${notices.size})",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 12.sp
                             )
                         }
                     }
                 }
             }
 
-            // Notice List Section
-            if (filteredNotices.isEmpty()) {
+            if (selectedSectionTab == 0) {
+                // =====================================================================
+                // TAB 0: REAL SERVER PUSH NOTIFICATION SENDER (`public.student_notifications`)
+                // =====================================================================
                 item {
-                    EmptyNoticeCard(
-                        searchQuery = searchQuery,
-                        onOpenCreateDialog = onOpenCreateDialog
-                    )
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Slate850),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                1.dp,
+                                Brush.horizontalGradient(listOf(NeonCyan.copy(alpha = 0.6f), ElectricBlue.copy(alpha = 0.6f))),
+                                RoundedCornerShape(20.dp)
+                            )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "🚀 রিয়েল সার্ভার পুশ নোটিফিকেশন পাঠান",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 16.sp
+                                    )
+                                    Text(
+                                        text = "সরাসরি public.student_notifications টেবিলে INSERT হবে",
+                                        color = NeonCyan,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+
+                            // 1. Title
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = "নোটিফিকেশনের শিরোনাম (title) *",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                                OutlinedTextField(
+                                    value = pushTitle,
+                                    onValueChange = onPushTitleChange,
+                                    placeholder = { Text("যেমন: আজ রাত ৯টায় ফিজিক্স লাইভ ক্লাস!", color = Slate400, fontSize = 13.sp) },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = Slate900,
+                                        unfocusedContainerColor = Slate900,
+                                        focusedBorderColor = NeonCyan,
+                                        unfocusedBorderColor = Slate700,
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("input_push_title")
+                                )
+                            }
+
+                            // 2. Message
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = "বিস্তারিত মেসেজ (message) *",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                                OutlinedTextField(
+                                    value = pushMessage,
+                                    onValueChange = onPushMessageChange,
+                                    placeholder = { Text("নোটিফিকেশনের বিস্তারিত বার্তা লিখুন...", color = Slate400, fontSize = 13.sp) },
+                                    minLines = 2,
+                                    maxLines = 4,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = Slate900,
+                                        unfocusedContainerColor = Slate900,
+                                        focusedBorderColor = NeonCyan,
+                                        unfocusedBorderColor = Slate700,
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("input_push_message")
+                                )
+                            }
+
+                            // 3. target_type selector (ALL, PHONE, PROGRAM)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "টার্গেট অডিয়েন্স (target_type) *",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val targets = listOf(
+                                        "ALL" to "সবার জন্য (ALL)",
+                                        "PHONE" to "নির্দিষ্ট নম্বর (PHONE)",
+                                        "PROGRAM" to "কোর্স আইডি (PROGRAM)"
+                                    )
+                                    targets.forEach { (code, label) ->
+                                        val isSelected = pushTargetType.equals(code, ignoreCase = true)
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { onPushTargetTypeChange(code) },
+                                            label = {
+                                                Text(
+                                                    text = label,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                                                )
+                                            },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = ElectricBlue,
+                                                selectedLabelColor = Color.White,
+                                                containerColor = Slate900,
+                                                labelColor = Slate400
+                                            ),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // target_value input (when PHONE or PROGRAM is selected)
+                            AnimatedVisibility(visible = !pushTargetType.equals("ALL", ignoreCase = true)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    val isPhone = pushTargetType.equals("PHONE", ignoreCase = true)
+                                    Text(
+                                        text = if (isPhone) {
+                                            "স্টুডেন্টের মোবাইল নম্বর (target_value) *"
+                                        } else {
+                                            "কোর্সের Program ID (target_value) *"
+                                        },
+                                        color = AmberWarning,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp
+                                    )
+                                    OutlinedTextField(
+                                        value = pushTargetValue,
+                                        onValueChange = onPushTargetValueChange,
+                                        placeholder = {
+                                            Text(
+                                                text = if (isPhone) "যেমন: 017XXXXXXXX" else "যেমন: prog_hsc26_physics",
+                                                color = Slate400,
+                                                fontSize = 13.sp
+                                            )
+                                        },
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = Slate900,
+                                            unfocusedContainerColor = Slate900,
+                                            focusedBorderColor = AmberWarning,
+                                            unfocusedBorderColor = Slate700,
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("input_push_target_value")
+                                    )
+                                }
+                            }
+
+                            // 4. notification_type selector (ADMIN_PUSH, LIVE_CLASS, EXAM)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "নোটিফিকেশন টাইপ (notification_type) *",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val notifTypes = listOf(
+                                        "ADMIN_PUSH" to "ADMIN_PUSH",
+                                        "LIVE_CLASS" to "LIVE_CLASS",
+                                        "EXAM" to "EXAM"
+                                    )
+                                    notifTypes.forEach { (code, label) ->
+                                        val isSelected = pushNotificationType.equals(code, ignoreCase = true)
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { onPushNotificationTypeChange(code) },
+                                            label = {
+                                                Text(
+                                                    text = label,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                                                )
+                                            },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = EmeraldSuccess,
+                                                selectedLabelColor = Slate950,
+                                                containerColor = Slate900,
+                                                labelColor = Slate400
+                                            ),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 5. image_url & 6. deeplink
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "ব্যানার ইমেজ (image_url - ঐচ্ছিক)",
+                                        color = Slate200,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 11.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OutlinedTextField(
+                                        value = pushImageUrl,
+                                        onValueChange = onPushImageUrlChange,
+                                        placeholder = { Text("https://...", color = Slate400, fontSize = 12.sp) },
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = Slate900,
+                                            unfocusedContainerColor = Slate900,
+                                            focusedBorderColor = NeonCyan,
+                                            unfocusedBorderColor = Slate700,
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "ডিপলিংক / URL (deeplink - ঐচ্ছিক)",
+                                        color = Slate200,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 11.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OutlinedTextField(
+                                        value = pushDeeplink,
+                                        onValueChange = onPushDeeplinkChange,
+                                        placeholder = { Text("https://...", color = Slate400, fontSize = 12.sp) },
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = Slate900,
+                                            unfocusedContainerColor = Slate900,
+                                            focusedBorderColor = NeonCyan,
+                                            unfocusedBorderColor = Slate700,
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+
+                            // 7. is_active switch + Submit Button
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Switch(
+                                        checked = pushIsActive,
+                                        onCheckedChange = onPushIsActiveChange,
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = EmeraldSuccess
+                                        )
+                                    )
+                                    Text(
+                                        text = "সক্রিয় (is_active = ${if (pushIsActive) "true" else "false"})",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Button(
+                                    onClick = onSendStudentNotification,
+                                    enabled = !isSendingStudentNotification,
+                                    colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.testTag("btn_send_student_notification")
+                                ) {
+                                    if (isSendingStudentNotification) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = Color.White,
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+                                    Text(
+                                        text = "🚀 পুশ পাঠান (INSERT)",
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color.White,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // History Header
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "পাঠানো সার্ভার পুশ তালিকা (${studentNotifications.size})",
+                            color = Color.White,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 15.sp
+                        )
+                        Text(
+                            text = "public.student_notifications",
+                            color = Slate400,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                if (studentNotifications.isEmpty()) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Slate800),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "কোনো সার্ভার পুশ নোটিফিকেশন পাওয়া যায়নি",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "উপরের ফর্মটি পূরণ করে 'পুশ পাঠান' বাটনে চাপ দিলে সাথে সাথে সব স্টুডেন্টের ফোনে নোটিফিকেশন চলে যাবে।",
+                                    color = Slate400,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    items(studentNotifications, key = { it.id }) { item ->
+                        StudentNotificationHistoryCard(
+                            item = item,
+                            onToggleActive = { onToggleStudentNotificationStatus(item) },
+                            onDelete = { onDeleteStudentNotification(item) }
+                        )
+                    }
                 }
             } else {
-                items(filteredNotices, key = { it.id }) { notice ->
-                    NoticeCard(
-                        notice = notice,
-                        onToggleStatus = { onToggleStatus(notice) },
-                        onEdit = { onOpenEditDialog(notice) },
-                        onDelete = { noticeToDelete = notice },
-                        onPreview = { onOpenPreview(notice) }
-                    )
+                // =====================================================================
+                // TAB 1: IN-APP BANNER & POPUP NOTICES (`public.app_notices`)
+                // =====================================================================
+                // Quick Stats Row
+                item {
+                    val totalCount = notices.size
+                    val activeCount = notices.count { it.isActive }
+                    val popupCount = notices.count { it.showAsPopup && it.isActive }
+                    val highestPriority = notices.maxOfOrNull { it.priority } ?: 0
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        NoticeStatBox(
+                            title = "মোট নোটিশ",
+                            value = totalCount.toString(),
+                            accentColor = ElectricBlue,
+                            modifier = Modifier.weight(1f)
+                        )
+                        NoticeStatBox(
+                            title = "সক্রিয় নোটিশ",
+                            value = activeCount.toString(),
+                            accentColor = EmeraldSuccess,
+                            modifier = Modifier.weight(1f)
+                        )
+                        NoticeStatBox(
+                            title = "পপ-আপ অ্যালার্ট",
+                            value = popupCount.toString(),
+                            accentColor = NeonCyan,
+                            modifier = Modifier.weight(1f)
+                        )
+                        NoticeStatBox(
+                            title = "টপ প্রায়োরিটি",
+                            value = highestPriority.toString(),
+                            accentColor = CoralDanger,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // Search Bar & Filter Chips
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = onSearchChange,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("input_search_notices"),
+                            placeholder = { Text("নোটিশ খুঁজুন (শিরোনাম বা বিবরণ)...", color = Slate400) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Search, contentDescription = null, tint = Slate400)
+                            },
+                            trailingIcon = {
+                                if (searchQuery.isNotBlank()) {
+                                    IconButton(onClick = { onSearchChange("") }) {
+                                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Slate400)
+                                    }
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Slate800,
+                                unfocusedContainerColor = Slate800,
+                                focusedBorderColor = ElectricBlue,
+                                unfocusedBorderColor = Slate700,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
+
+                        // Filter chips row
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            item {
+                                FilterChip(
+                                    selected = filter == "ALL",
+                                    onClick = { onFilterChange("ALL") },
+                                    label = { Text("সকল (${notices.size})") },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = ElectricBlue,
+                                        selectedLabelColor = Color.White,
+                                        containerColor = Slate800,
+                                        labelColor = Slate400
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = filter == "ALL",
+                                        borderColor = Slate700,
+                                        selectedBorderColor = ElectricBlue
+                                    )
+                                )
+                            }
+                            item {
+                                FilterChip(
+                                    selected = filter == "ACTIVE",
+                                    onClick = { onFilterChange("ACTIVE") },
+                                    label = { Text("সক্রিয় (${notices.count { it.isActive }})") },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = EmeraldSuccess,
+                                        selectedLabelColor = Color.White,
+                                        containerColor = Slate800,
+                                        labelColor = Slate400
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = filter == "ACTIVE",
+                                        borderColor = Slate700,
+                                        selectedBorderColor = EmeraldSuccess
+                                    )
+                                )
+                            }
+                            item {
+                                FilterChip(
+                                    selected = filter == "POPUP",
+                                    onClick = { onFilterChange("POPUP") },
+                                    label = { Text("পপ-আপ (${notices.count { it.showAsPopup }})") },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = NeonCyan,
+                                        selectedLabelColor = Slate950,
+                                        containerColor = Slate800,
+                                        labelColor = Slate400
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = filter == "POPUP",
+                                        borderColor = Slate700,
+                                        selectedBorderColor = NeonCyan
+                                    )
+                                )
+                            }
+                            item {
+                                FilterChip(
+                                    selected = filter == "INACTIVE",
+                                    onClick = { onFilterChange("INACTIVE") },
+                                    label = { Text("নিষ্ক্রিয় (${notices.count { !it.isActive }})") },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = Slate700,
+                                        selectedLabelColor = Color.White,
+                                        containerColor = Slate800,
+                                        labelColor = Slate400
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = filter == "INACTIVE",
+                                        borderColor = Slate700,
+                                        selectedBorderColor = Slate400
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Notice List Section
+                if (filteredNotices.isEmpty()) {
+                    item {
+                        EmptyNoticeCard(
+                            searchQuery = searchQuery,
+                            onOpenCreateDialog = onOpenCreateDialog
+                        )
+                    }
+                } else {
+                    items(filteredNotices, key = { it.id }) { notice ->
+                        NoticeCard(
+                            notice = notice,
+                            onToggleStatus = { onToggleStatus(notice) },
+                            onEdit = { onOpenEditDialog(notice) },
+                            onDelete = { noticeToDelete = notice },
+                            onPreview = { onOpenPreview(notice) }
+                        )
+                    }
                 }
             }
 
@@ -484,6 +971,143 @@ fun NoticeManagementScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun StudentNotificationHistoryCard(
+    item: StudentNotification,
+    onToggleActive: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Slate800),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                if (item.isActive) ElectricBlue.copy(alpha = 0.5f) else Slate700,
+                RoundedCornerShape(16.dp)
+            )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        color = ElectricBlue.copy(alpha = 0.18f),
+                        shape = RoundedCornerShape(6.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue)
+                    ) {
+                        Text(
+                            text = item.notificationType,
+                            color = NeonCyan,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+
+                    val targetBadge = when (item.targetType.uppercase()) {
+                        "ALL" -> "সকল স্টুডেন্ট (ALL)"
+                        "PHONE" -> "📱 ${item.targetValue.orEmpty()}"
+                        "PROGRAM" -> "🎓 ${item.targetValue.orEmpty()}"
+                        else -> item.targetType
+                    }
+                    Surface(
+                        color = EmeraldSuccess.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = targetBadge,
+                            color = EmeraldSuccess,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Switch(
+                        checked = item.isActive,
+                        onCheckedChange = { onToggleActive() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = EmeraldSuccess
+                        )
+                    )
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Slate900)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete Notification",
+                            tint = CoralDanger,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            Text(
+                text = item.title,
+                color = Color.White,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 15.sp
+            )
+
+            Text(
+                text = item.message,
+                color = Slate200,
+                fontSize = 12.sp,
+                lineHeight = 17.sp
+            )
+
+            if (!item.imageUrl.isNullOrBlank() || !item.deeplink.isNullOrBlank()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (!item.imageUrl.isNullOrBlank()) {
+                        Text(
+                            text = "🖼️ ইমেজ যুক্ত",
+                            color = NeonCyan,
+                            fontSize = 10.sp
+                        )
+                    }
+                    if (!item.deeplink.isNullOrBlank()) {
+                        Text(
+                            text = "🔗 ${item.deeplink}",
+                            color = AmberWarning,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
