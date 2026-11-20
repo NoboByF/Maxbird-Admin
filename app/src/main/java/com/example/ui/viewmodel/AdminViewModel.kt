@@ -29,6 +29,7 @@ import com.example.data.model.StudentNotification
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import com.example.data.preferences.AdminPreferences
+import com.example.data.preferences.SupabaseAdminSession
 import com.example.data.repository.MaxBirdRepository
 import com.example.data.repository.SupabaseMaxBirdRepository
 import com.example.notifications.AdminNotificationHelper
@@ -50,6 +51,19 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val cloudinaryClient = CloudinaryClient(application)
     private val maxbirdFirestoreClient = MaxbirdFirestoreClient(application)
     private val notificationHelper = AdminNotificationHelper(application)
+
+    // Zero-Trust Supabase Authenticated Admin Session State
+    val adminSession: StateFlow<SupabaseAdminSession?> = AdminPreferences.sharedAdminSession
+    val sessionExpiredMessage: StateFlow<String?> = AdminPreferences.sessionExpiredMessage
+
+    private val _isAuthLoading = MutableStateFlow(false)
+    val isAuthLoading: StateFlow<Boolean> = _isAuthLoading.asStateFlow()
+
+    private val _authError = MutableStateFlow<String?>(null)
+    val authError: StateFlow<String?> = _authError.asStateFlow()
+
+    private val _isCheckingSession = MutableStateFlow(true)
+    val isCheckingSession: StateFlow<Boolean> = _isCheckingSession.asStateFlow()
 
     // Navigation State
     private val _currentScreen = MutableStateFlow<Screen>(Screen.Dashboard)
@@ -148,11 +162,27 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateDownloadUrl = MutableStateFlow("")
     val updateDownloadUrl: StateFlow<String> = _updateDownloadUrl.asStateFlow()
 
+    private val _updateApkChecksumSha256 = MutableStateFlow("")
+    val updateApkChecksumSha256: StateFlow<String> = _updateApkChecksumSha256.asStateFlow()
+
     private val _updateButtonText = MutableStateFlow("এখনই আপডেট করুন")
     val updateButtonText: StateFlow<String> = _updateButtonText.asStateFlow()
 
     private val _updateIsActive = MutableStateFlow(true)
     val updateIsActive: StateFlow<Boolean> = _updateIsActive.asStateFlow()
+
+    // App Security Config (`public.app_security_config`, id = 1)
+    private val _allowedReleaseSignatures = MutableStateFlow<List<String>>(emptyList())
+    val allowedReleaseSignatures: StateFlow<List<String>> = _allowedReleaseSignatures.asStateFlow()
+
+    private val _maxAdminPushPerMinute = MutableStateFlow(20)
+    val maxAdminPushPerMinute: StateFlow<Int> = _maxAdminPushPerMinute.asStateFlow()
+
+    private val _isLoadingSecurityConfig = MutableStateFlow(false)
+    val isLoadingSecurityConfig: StateFlow<Boolean> = _isLoadingSecurityConfig.asStateFlow()
+
+    private val _isSavingSecurityConfig = MutableStateFlow(false)
+    val isSavingSecurityConfig: StateFlow<Boolean> = _isSavingSecurityConfig.asStateFlow()
 
     // Real Server Push Notifications (`public.student_notifications`) State
     private val _studentNotifications = MutableStateFlow<List<StudentNotification>>(emptyList())
@@ -348,21 +378,90 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     init {
         val app = getApplication<Application>()
         OneSignalPushManager.initializeIfConfigured(app)
+        _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
+        startInAppRealtimeMonitorLoop()
+
+        viewModelScope.launch {
+            try {
+                _isCheckingSession.value = true
+                val existing = adminPreferences.getAuthSession()
+                if (existing?.isPresent == true) {
+                    // Proactively refresh if expired or expiring in < 5 minutes before firing dashboard API calls
+                    val validToken = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        supabaseClient.authManager.ensureValidAccessTokenBlocking()
+                    }
+                    if (!validToken.isNullOrBlank()) {
+                        onAuthenticatedBootstrap()
+                    }
+                }
+            } finally {
+                _isCheckingSession.value = false
+            }
+        }
+    }
+
+    private fun onAuthenticatedBootstrap() {
+        val app = getApplication<Application>()
         OneSignalPushManager.syncAdminPushRegistration(app) {
             _oneSignalAppId.value = adminPreferences.getOneSignalAppId()
             _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
         }
-        _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
         loadAllData()
+        loadAppSecurityConfig()
         loadMaxbirdPortalSettings()
-        startInAppRealtimeMonitorLoop()
         AdminRealtimeMonitorService.startIfEnabled(app)
+    }
+
+    fun clearAuthError() {
+        _authError.value = null
+        AdminPreferences.clearSessionExpiredMessage()
+    }
+
+    fun loginAdmin(email: String, password: String) {
+        viewModelScope.launch {
+            try {
+                _isAuthLoading.value = true
+                _authError.value = null
+                AdminPreferences.clearSessionExpiredMessage()
+
+                val res = supabaseClient.authManager.signInWithEmailPassword(email, password)
+                if (res.isSuccess) {
+                    val session = res.getOrNull()
+                    _currentScreen.value = Screen.Dashboard
+                    onAuthenticatedBootstrap()
+                    showToast("✅ অ্যাডমিন লগইন সফল (${session?.email.orEmpty()})")
+                } else {
+                    _authError.value = res.exceptionOrNull()?.message ?: "লগইন ব্যর্থ হয়েছে।"
+                }
+            } catch (e: Throwable) {
+                _authError.value = "লগইন ত্রুটি: ${e.message}"
+            } finally {
+                _isAuthLoading.value = false
+            }
+        }
+    }
+
+    fun logoutAdmin() {
+        viewModelScope.launch {
+            try {
+                _isAuthLoading.value = true
+                val app = getApplication<Application>()
+                AdminRealtimeMonitorService.stop(app)
+                supabaseClient.authManager.logout()
+                _currentScreen.value = Screen.Dashboard
+                _authError.value = null
+                showToast("🔒 নিরাপদে লগআউট সম্পন্ন হয়েছে।")
+            } finally {
+                _isAuthLoading.value = false
+            }
+        }
     }
 
     private fun startInAppRealtimeMonitorLoop() {
         viewModelScope.launch {
             while (isActive) {
                 delay(15_000L)
+                if (!adminPreferences.hasValidAdminSession()) continue
                 val app = getApplication<Application>()
                 if (_oneSignalAppId.value.isBlank()) {
                     val savedAppId = adminPreferences.getOneSignalAppId()
@@ -599,6 +698,9 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         if (screen == Screen.CourseSales || screen == Screen.Settings) {
             loadCourseSalesData()
             loadUserDevices(forceRefresh = false)
+            if (screen == Screen.Settings) {
+                loadAppSecurityConfig()
+            }
         } else if (screen == Screen.Devices) {
             loadUserDevices(forceRefresh = true)
             loadCourseSalesData()
@@ -613,6 +715,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadAllData() {
+        if (!adminPreferences.hasValidAdminSession()) return
         refreshStats()
         loadUserDevices()
         loadAppUpdates()
@@ -620,6 +723,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         loadStudentNotifications()
         loadActivationSupportLinks()
         loadCourseSalesData()
+        loadAppSecurityConfig()
     }
 
     fun refreshStats() {
@@ -1136,6 +1240,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         _updateTitle.value = "নতুন আপডেট উপলব্ধ!"
         _updateChangelog.value = ""
         _updateDownloadUrl.value = ""
+        _updateApkChecksumSha256.value = ""
         _updateButtonText.value = "এখনই আপডেট করুন"
         _updateIsActive.value = true
         _isUpdateDialogOpen.value = true
@@ -1151,6 +1256,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         _updateTitle.value = update.title
         _updateChangelog.value = update.effectiveReleaseNotes
         _updateDownloadUrl.value = update.effectiveApkUrl
+        _updateApkChecksumSha256.value = update.apkChecksumSha256.trim()
         _updateButtonText.value = update.buttonText.ifBlank { "এখনই আপডেট করুন" }
         _updateIsActive.value = update.isActive
         _isUpdateDialogOpen.value = true
@@ -1169,6 +1275,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     fun setUpdateTitle(v: String) { _updateTitle.value = v }
     fun setUpdateChangelog(v: String) { _updateChangelog.value = v }
     fun setUpdateDownloadUrl(v: String) { _updateDownloadUrl.value = v }
+    fun setUpdateApkChecksumSha256(v: String) { _updateApkChecksumSha256.value = v }
     fun setUpdateButtonText(v: String) { _updateButtonText.value = v }
     fun setUpdateIsActive(v: Boolean) { _updateIsActive.value = v }
 
@@ -1180,6 +1287,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         val title = _updateTitle.value.trim()
         val releaseNotes = _updateChangelog.value.trim()
         val apkUrl = _updateDownloadUrl.value.trim()
+        val checksumSha256 = _updateApkChecksumSha256.value.trim().lowercase()
         val buttonText = _updateButtonText.value.trim().ifBlank { "এখনই আপডেট করুন" }
 
         if (versionName.isBlank()) {
@@ -1190,8 +1298,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             showToast("সঠিক ভার্সন কোড (Integer, যেমন: 110 বা 111) দিন")
             return
         }
-        if (apkUrl.isBlank() || (!apkUrl.startsWith("http://") && !apkUrl.startsWith("https://"))) {
-            showToast("সঠিক ডিরেক্ট APK লিংক দিন (http:// বা https://)")
+        if (apkUrl.isBlank() || !apkUrl.startsWith("https://", ignoreCase = true)) {
+            showToast("⚠️ নিরাপত্তা নিয়ম: download_url অবশ্যই https:// দিয়ে শুরু হতে হবে!")
+            return
+        }
+        if (checksumSha256.isNotEmpty() && !Regex("^[0-9a-f]{64}$").matches(checksumSha256)) {
+            showToast("⚠️ ভুল SHA-256 চেকসাম! খালি রাখুন অথবা ঠিক ৬৪ অক্ষরের বৈধ হেক্স (0-9, a-f) হ্যাশ দিন।")
             return
         }
 
@@ -1217,6 +1329,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 changelog = releaseNotes,
                 downloadUrl = apkUrl,
                 buttonText = buttonText,
+                apkChecksumSha256 = checksumSha256,
                 isActive = _updateIsActive.value
             )
 
@@ -1702,12 +1815,132 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveSupabaseSettings() {
+        val candidateKey = _supabaseKey.value.trim()
+        if (candidateKey.isNotEmpty() && AdminPreferences.isServiceRoleJwt(candidateKey)) {
+            showToast("🚫 নিরাপত্তার জন্য Admin App-এ service_role key নিষিদ্ধ! শুধুমাত্র SUPABASE_ANON_KEY দিন।")
+            return
+        }
         adminPreferences.setSupabaseUrl(_supabaseUrl.value)
-        adminPreferences.setSupabaseKey(_supabaseKey.value)
+        val savedOk = adminPreferences.setSupabaseKey(candidateKey)
+        if (!savedOk) {
+            showToast("🚫 service_role key সেভ করা যাবে না।")
+            return
+        }
         _supabaseUrl.value = adminPreferences.getSupabaseUrl()
-        _supabaseKey.value = adminPreferences.getSupabaseKey()
-        showToast("সুপাবেস কনফিগারেশন সেভ হয়েছে! (Supabase config saved)")
-        testSupabaseConnection()
+        _supabaseKey.value = adminPreferences.getSupabaseAnonKey()
+        showToast("✅ Supabase URL ও ANON KEY সেভ হয়েছে!")
+        if (adminPreferences.hasValidAdminSession()) {
+            testSupabaseConnection()
+        }
+    }
+
+    // =========================================================================
+    // App Security Config (`public.app_security_config`, id = 1)
+    // =========================================================================
+
+    fun loadAppSecurityConfig() {
+        if (!adminPreferences.hasValidAdminSession()) return
+        viewModelScope.launch {
+            try {
+                _isLoadingSecurityConfig.value = true
+                val res = repository.getAppSecurityConfig()
+                if (res.isSuccess) {
+                    val cfg = res.getOrNull()
+                    _allowedReleaseSignatures.value = cfg?.allowedReleaseSignatures.orEmpty()
+                    if (cfg != null && cfg.maxAdminPushPerMinute > 0) {
+                        _maxAdminPushPerMinute.value = cfg.maxAdminPushPerMinute
+                    }
+                }
+            } catch (_: Throwable) {
+            } finally {
+                _isLoadingSecurityConfig.value = false
+            }
+        }
+    }
+
+    fun updateMaxAdminPushPerMinute(limit: Int) {
+        if (limit !in 1..600) {
+            showToast("⚠️ Push rate limit ১ থেকে ৬০০ এর মধ্যে হতে হবে।")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                _isSavingSecurityConfig.value = true
+                val res = repository.saveAppSecurityConfig(
+                    signatures = _allowedReleaseSignatures.value,
+                    maxAdminPushPerMinute = limit
+                )
+                if (res.isSuccess) {
+                    val saved = res.getOrNull()
+                    _maxAdminPushPerMinute.value = saved?.maxAdminPushPerMinute ?: limit
+                    if (saved != null) {
+                        _allowedReleaseSignatures.value = saved.allowedReleaseSignatures
+                    }
+                    showToast("✅ max_admin_push_per_minute = $limit সেভ হয়েছে!")
+                } else {
+                    showToast("⚠️ ${res.exceptionOrNull()?.message ?: "রেট লিমিট আপডেট ব্যর্থ হয়েছে।"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isSavingSecurityConfig.value = false
+            }
+        }
+    }
+
+    fun addReleaseSignature(rawSignature: String) {
+        val trimmed = rawSignature.trim()
+        val strippedHex = trimmed.replace(":", "").replace(" ", "").uppercase()
+        if (!Regex("^[0-9A-F]{64}$").matches(strippedHex)) {
+            showToast("⚠️ সঠিক ৬৪-অক্ষরের SHA-256 সিগনেচার দিন (যেমন: 64-char Hex বা AA:BB:... ফরম্যাট)।")
+            return
+        }
+        // Preserve colon-separated uppercase if pasted with colons, else store normalized uppercase hex
+        val normalized = if (trimmed.contains(":")) {
+            strippedHex.chunked(2).joinToString(":")
+        } else {
+            strippedHex
+        }
+
+        val currentList = _allowedReleaseSignatures.value
+        if (currentList.any { it.replace(":", "").equals(strippedHex, ignoreCase = true) }) {
+            showToast("ℹ️ এই SHA-256 সিগনেচারটি আগে থেকেই তালিকাভুক্ত আছে।")
+            return
+        }
+
+        val updatedList = currentList + normalized
+        saveAllowedReleaseSignaturesList(updatedList, "✅ নতুন Release SHA-256 সিগনেচার যুক্ত করা হয়েছে!")
+    }
+
+    fun removeReleaseSignature(signature: String) {
+        val updatedList = _allowedReleaseSignatures.value.filterNot { it == signature }
+        saveAllowedReleaseSignaturesList(updatedList, "🗑️ SHA-256 সিগনেচার তালিকা থেকে সরানো হয়েছে।")
+    }
+
+    private fun saveAllowedReleaseSignaturesList(signatures: List<String>, successMsg: String) {
+        viewModelScope.launch {
+            try {
+                _isSavingSecurityConfig.value = true
+                val res = repository.saveAppSecurityConfig(
+                    signatures = signatures,
+                    maxAdminPushPerMinute = _maxAdminPushPerMinute.value
+                )
+                if (res.isSuccess) {
+                    val saved = res.getOrNull()
+                    _allowedReleaseSignatures.value = saved?.allowedReleaseSignatures ?: signatures
+                    if (saved != null && saved.maxAdminPushPerMinute > 0) {
+                        _maxAdminPushPerMinute.value = saved.maxAdminPushPerMinute
+                    }
+                    showToast(successMsg)
+                } else {
+                    showToast("⚠️ ${res.exceptionOrNull()?.message ?: "সিগনেচার আপডেট ব্যর্থ হয়েছে।"}")
+                }
+            } catch (e: Throwable) {
+                showToast("ত্রুটি: ${e.message}")
+            } finally {
+                _isSavingSecurityConfig.value = false
+            }
+        }
     }
 
     fun testSupabaseConnection() {
@@ -2466,6 +2699,22 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             _isRunningSyncDiagnostics.value = true
             val checks = mutableListOf<SyncDiagnosticCheckItem>()
             try {
+                // 0. Zero-Trust Admin Auth & RLS Verification (`public.admin_users` / `is_admin_user()`)
+                val adminVerifyRes = supabaseClient.authManager.verifyCurrentSessionIsAdmin()
+                val isAdminVerified = adminVerifyRes.getOrNull() == true
+                checks.add(
+                    SyncDiagnosticCheckItem(
+                        id = "zero_trust_admin_auth",
+                        titleBn = "০. Zero-Trust Admin Auth ভেরিফিকেশন (admin_users / is_admin_user)",
+                        isSuccess = isAdminVerified,
+                        detailBn = if (isAdminVerified) {
+                            "✅ Authenticated Admin JWT ভেরিফায়েড (${adminSession.value?.email.orEmpty()})"
+                        } else {
+                            "❌ অ্যাডমিন ভেরিফিকেশন ব্যর্থ: ${adminVerifyRes.exceptionOrNull()?.message ?: "সেশন অবৈধ"}"
+                        }
+                    )
+                )
+
                 // 1. Supabase REST API & Connection Check
                 val connRes = repository.testConnection()
                 checks.add(
@@ -2477,6 +2726,28 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                             "✅ সংযুক্ত (${_supabaseUrl.value.take(36)}...)"
                         } else {
                             "❌ কানেকশন ব্যর্থ: ${connRes.exceptionOrNull()?.message ?: "অজানা ত্রুটি"}"
+                        }
+                    )
+                )
+
+                // 1b. App Security Config (`public.app_security_config`, id = 1)
+                val secCfgRes = repository.getAppSecurityConfig()
+                val secCfg = secCfgRes.getOrNull()
+                if (secCfg != null) {
+                    _allowedReleaseSignatures.value = secCfg.allowedReleaseSignatures
+                    if (secCfg.maxAdminPushPerMinute > 0) {
+                        _maxAdminPushPerMinute.value = secCfg.maxAdminPushPerMinute
+                    }
+                }
+                checks.add(
+                    SyncDiagnosticCheckItem(
+                        id = "app_security_config",
+                        titleBn = "১(খ). অ্যাপ সিকিউরিটি কনফিগ (public.app_security_config)",
+                        isSuccess = secCfgRes.isSuccess,
+                        detailBn = if (secCfgRes.isSuccess && secCfg != null) {
+                            "✅ সিঙ্কড • Release Signatures: ${secCfg.allowedReleaseSignatures.size}টি • Push Limit: ${secCfg.maxAdminPushPerMinute}/min"
+                        } else {
+                            "❌ app_security_config রিড ত্রুটি: ${secCfgRes.exceptionOrNull()?.message}"
                         }
                     )
                 )

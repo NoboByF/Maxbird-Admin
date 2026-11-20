@@ -48,6 +48,8 @@ class AdminRealtimeMonitorService : Service() {
         private const val POLL_INTERVAL_MS = 15_000L // 15 seconds
 
         fun startIfEnabled(context: Context) {
+            val prefs = AdminPreferences(context)
+            if (!prefs.hasValidAdminSession()) return
             val helper = AdminNotificationHelper(context)
             if (!helper.isLiveMonitorEnabled() || !helper.hasNotificationPermission()) return
             try {
@@ -89,6 +91,11 @@ class AdminRealtimeMonitorService : Service() {
             monitorJob = serviceScope.launch {
                 while (isActive && notificationHelper.isLiveMonitorEnabled()) {
                     try {
+                        if (!adminPreferences.hasValidAdminSession()) {
+                            updateForegroundStatus("অ্যাডমিন লগইন প্রয়োজন • সেশন অ্যাক্টিভ হলে মনিটরিং চালু হবে")
+                            delay(POLL_INTERVAL_MS)
+                            continue
+                        }
                         val devices = repository.getUserDevices().getOrNull().orEmpty()
                         val enrollments = repository.getCourseAccessEnrollments().getOrNull().orEmpty()
                         val transactions = repository.getCoursePaymentTransactions().getOrNull().orEmpty()

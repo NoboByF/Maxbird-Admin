@@ -209,6 +209,9 @@ object OneSignalPushManager {
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val prefs = AdminPreferences(appContext)
+            if (!prefs.hasValidAdminSession()) {
+                return@withContext false
+            }
             val supabaseClient = SupabaseClient(prefs)
             val repository = SupabaseMaxBirdRepository(supabaseClient, prefs)
 
@@ -816,7 +819,7 @@ END;
 $$;
 GRANT EXECUTE ON FUNCTION public.get_onesignal_public_app_id() TO anon, authenticated, service_role;
 
--- Admin App থেকে নিরাপদে OneSignal কনফিগারেশন আপডেট করার RPC
+-- Admin App থেকে নিরাপদে OneSignal কনফিগারেশন আপডেট করার RPC (Authenticated Admin Only)
 CREATE OR REPLACE FUNCTION public.update_onesignal_config_secure(
     p_app_id TEXT,
     p_rest_api_key TEXT DEFAULT ''
@@ -827,6 +830,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     INSERT INTO public.onesignal_config (id, onesignal_app_id, onesignal_rest_api_key, updated_at)
     VALUES (
         1,
@@ -845,10 +852,10 @@ BEGIN
     RETURN jsonb_build_object('success', true);
 END;
 $$;
-REVOKE ALL ON FUNCTION public.update_onesignal_config_secure(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.update_onesignal_config_secure(TEXT, TEXT) TO service_role;
+REVOKE ALL ON FUNCTION public.update_onesignal_config_secure(TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.update_onesignal_config_secure(TEXT, TEXT) TO authenticated;
 
--- ৩. স্টুডেন্টকে সার্ভার-সাইড থেকে OneSignal পুশ পাঠানোর SECURITY DEFINER RPC (শুধুমাত্র service_role)
+-- ৩. স্টুডেন্টকে সার্ভার-সাইড থেকে OneSignal পুশ পাঠানোর SECURITY DEFINER RPC (Authenticated Admin Only)
 CREATE OR REPLACE FUNCTION public.send_student_push_via_onesignal(
     p_onesignal_player_id TEXT DEFAULT '',
     p_device_hash TEXT DEFAULT '',
@@ -864,6 +871,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     PERFORM public.notify_student_via_onesignal(
         p_onesignal_player_id := p_onesignal_player_id,
         p_device_hash := p_device_hash,
@@ -878,10 +889,10 @@ EXCEPTION WHEN OTHERS THEN
     RETURN jsonb_build_object('success', false, 'error', SQLERRM);
 END;
 $$;
-REVOKE ALL ON FUNCTION public.send_student_push_via_onesignal(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.send_student_push_via_onesignal(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB) TO service_role;
+REVOKE ALL ON FUNCTION public.send_student_push_via_onesignal(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.send_student_push_via_onesignal(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB) TO authenticated;
 
--- ৪. ডিভাইস ও কনটেন্ট ডিলিট এবং পারমিশন ম্যানেজমেন্টের SECURITY DEFINER RPCs (শুধুমাত্র service_role)
+-- ৪. ডিভাইস ও কনটেন্ট ডিলিট এবং পারমিশন ম্যানেজমেন্টের SECURITY DEFINER RPCs (Authenticated Admin Only)
 CREATE OR REPLACE FUNCTION public.admin_delete_device(
     p_device_hash TEXT DEFAULT '',
     p_device_id TEXT DEFAULT ''
@@ -892,6 +903,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     DELETE FROM public.devices
     WHERE (NULLIF(BTRIM(p_device_hash), '') IS NOT NULL AND (device_hash = BTRIM(p_device_hash) OR display_device_id = BTRIM(p_device_hash) OR device_id = BTRIM(p_device_hash)))
        OR (NULLIF(BTRIM(p_device_id), '') IS NOT NULL AND id::TEXT = BTRIM(p_device_id));
@@ -899,8 +914,8 @@ BEGIN
     RETURN jsonb_build_object('success', true);
 END;
 $$;
-REVOKE ALL ON FUNCTION public.admin_delete_device(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.admin_delete_device(TEXT, TEXT) TO service_role;
+REVOKE ALL ON FUNCTION public.admin_delete_device(TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_delete_device(TEXT, TEXT) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.admin_set_device_can_view_profiles(
     p_device_hash TEXT,
@@ -912,6 +927,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     UPDATE public.devices
     SET can_view_profiles = COALESCE(p_can_view_profiles, FALSE),
         updated_at = now()
@@ -921,8 +940,8 @@ BEGIN
        OR id::TEXT = BTRIM(p_device_hash);
 END;
 $$;
-REVOKE ALL ON FUNCTION public.admin_set_device_can_view_profiles(TEXT, BOOLEAN) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.admin_set_device_can_view_profiles(TEXT, BOOLEAN) TO service_role;
+REVOKE ALL ON FUNCTION public.admin_set_device_can_view_profiles(TEXT, BOOLEAN) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_set_device_can_view_profiles(TEXT, BOOLEAN) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.admin_revoke_device_to_pending(
     p_device_hash TEXT
@@ -933,6 +952,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     UPDATE public.devices
     SET status = 'pending',
         is_banned = FALSE,
@@ -946,8 +969,8 @@ BEGIN
        OR id::TEXT = BTRIM(p_device_hash);
 END;
 $$;
-REVOKE ALL ON FUNCTION public.admin_revoke_device_to_pending(TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.admin_revoke_device_to_pending(TEXT) TO service_role;
+REVOKE ALL ON FUNCTION public.admin_revoke_device_to_pending(TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_revoke_device_to_pending(TEXT) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.admin_delete_app_notice(
     p_id TEXT DEFAULT '',
@@ -961,13 +984,17 @@ AS $$
 DECLARE
     v_target TEXT := COALESCE(NULLIF(BTRIM(p_id), ''), NULLIF(BTRIM(p_notice_id), ''));
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     IF v_target IS NOT NULL THEN
         DELETE FROM public.app_notices WHERE id::TEXT = v_target;
     END IF;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.admin_delete_app_notice(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.admin_delete_app_notice(TEXT, TEXT) TO service_role;
+REVOKE ALL ON FUNCTION public.admin_delete_app_notice(TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_delete_app_notice(TEXT, TEXT) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.admin_delete_app_update(
     p_id TEXT DEFAULT '',
@@ -981,13 +1008,17 @@ AS $$
 DECLARE
     v_target TEXT := COALESCE(NULLIF(BTRIM(p_id), ''), NULLIF(BTRIM(p_update_id), ''));
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     IF v_target IS NOT NULL THEN
         DELETE FROM public.app_updates WHERE id::TEXT = v_target;
     END IF;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.admin_delete_app_update(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.admin_delete_app_update(TEXT, TEXT) TO service_role;
+REVOKE ALL ON FUNCTION public.admin_delete_app_update(TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_delete_app_update(TEXT, TEXT) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.admin_delete_support_link(
     p_id TEXT DEFAULT '',
@@ -1001,13 +1032,17 @@ AS $$
 DECLARE
     v_target TEXT := COALESCE(NULLIF(BTRIM(p_id), ''), NULLIF(BTRIM(p_link_id), ''));
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     IF v_target IS NOT NULL THEN
         DELETE FROM public.activation_support_links WHERE id::TEXT = v_target;
     END IF;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.admin_delete_support_link(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.admin_delete_support_link(TEXT, TEXT) TO service_role;
+REVOKE ALL ON FUNCTION public.admin_delete_support_link(TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_delete_support_link(TEXT, TEXT) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.admin_delete_course_enrollment(
     p_enrollment_id BIGINT DEFAULT 0,
@@ -1020,6 +1055,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     IF COALESCE(p_enrollment_id, 0) > 0 THEN
         DELETE FROM public.course_access_enrollments WHERE id = p_enrollment_id;
     ELSIF NULLIF(BTRIM(p_student_phone), '') IS NOT NULL AND NULLIF(BTRIM(p_program_id), '') IS NOT NULL THEN
@@ -1029,8 +1068,8 @@ BEGIN
     END IF;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.admin_delete_course_enrollment(BIGINT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.admin_delete_course_enrollment(BIGINT, TEXT, TEXT) TO service_role;
+REVOKE ALL ON FUNCTION public.admin_delete_course_enrollment(BIGINT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_delete_course_enrollment(BIGINT, TEXT, TEXT) TO authenticated;
 """.trimIndent()
     }
 }

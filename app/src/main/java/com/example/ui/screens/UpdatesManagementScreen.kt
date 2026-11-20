@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -99,6 +100,7 @@ fun UpdatesManagementScreen(
     title: String,
     changelog: String,
     downloadUrl: String,
+    apkChecksumSha256: String = "",
     buttonText: String,
     isActive: Boolean,
     // Global Kill Switch / Maintenance Mode State
@@ -124,6 +126,7 @@ fun UpdatesManagementScreen(
     onTitleChange: (String) -> Unit,
     onChangelogChange: (String) -> Unit,
     onDownloadUrlChange: (String) -> Unit,
+    onApkChecksumSha256Change: (String) -> Unit = {},
     onButtonTextChange: (String) -> Unit,
     onIsActiveChange: (Boolean) -> Unit,
     onSaveUpdate: () -> Unit,
@@ -754,14 +757,16 @@ fun UpdatesManagementScreen(
                         }
                     }
 
-                    // 3. apk_url (Direct APK / Google Drive / GitHub Release)
+                    // 3. apk_url (HTTPS-Only Direct APK / Google Drive / GitHub Release)
+                    val trimmedUrl = downloadUrl.trim()
+                    val isUrlNotHttps = trimmedUrl.isNotEmpty() && !trimmedUrl.startsWith("https://", ignoreCase = true)
                     Column {
                         Text(
-                            text = "ডিরেক্ট APK লিংক (apk_url) *",
+                            text = "ডিরেক্ট APK লিংক (apk_url • শুধুমাত্র HTTPS) *",
                             style = MaterialTheme.typography.labelMedium.copy(color = Color.White, fontWeight = FontWeight.Bold)
                         )
                         Text(
-                            text = "ডিরেক্ট ডাউনলোড, Google Drive শেয়ার লিংক, অথবা GitHub Release APK লিংক",
+                            text = "নিরাপত্তার জন্য অবশ্যই https:// দিয়ে শুরু হওয়া APK লিংক দিতে হবে",
                             color = Slate400,
                             fontSize = 11.sp
                         )
@@ -771,11 +776,83 @@ fun UpdatesManagementScreen(
                             onValueChange = onDownloadUrlChange,
                             placeholder = { Text("https://.../app-release.apk", color = Slate400, fontSize = 12.sp) },
                             singleLine = true,
+                            isError = isUrlNotHttps,
+                            supportingText = if (isUrlNotHttps) {
+                                {
+                                    Text(
+                                        text = "⛔ APK লিংক অবশ্যই https:// দিয়ে শুরু হতে হবে (http:// নিষিদ্ধ)।",
+                                        color = CoralDanger,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            } else null,
                             colors = textFieldColors(),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("input_update_apk_url")
+                        )
+                    }
+
+                    // 3B. apk_checksum_sha256 (Optional 64-char SHA-256 Hex Checksum)
+                    val cleanChecksum = apkChecksumSha256.trim().replace(":", "").replace(" ", "")
+                    val isChecksumValid = cleanChecksum.isEmpty() || Regex("^[0-9a-fA-F]{64}$").matches(cleanChecksum)
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "APK SHA-256 চেকসাম (ঐচ্ছিক)",
+                                style = MaterialTheme.typography.labelMedium.copy(color = Color.White, fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = "${cleanChecksum.length}/64 hex",
+                                color = when {
+                                    cleanChecksum.isEmpty() -> Slate400
+                                    isChecksumValid -> EmeraldSuccess
+                                    else -> CoralDanger
+                                },
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            text = "apk_checksum_sha256 • ঠিক ৬৪ অক্ষরের SHA-256 হেক্স স্ট্রিং (ডাউনলোড ভেরিফিকেশনের জন্য)",
+                            color = Slate400,
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = apkChecksumSha256,
+                            onValueChange = onApkChecksumSha256Change,
+                            placeholder = { Text("64-char hex (a1b2c3...)", color = Slate400, fontSize = 12.sp) },
+                            singleLine = true,
+                            isError = !isChecksumValid,
+                            supportingText = if (!isChecksumValid) {
+                                {
+                                    Text(
+                                        text = "⛔ SHA-256 চেকসাম অবশ্যই ঠিক ৬৪ অক্ষরের Hex (0-9, a-f) হতে হবে।",
+                                        color = CoralDanger,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            } else if (cleanChecksum.length == 64) {
+                                {
+                                    Text(
+                                        text = "✅ ভ্যালিড ৬৪-অক্ষরের SHA-256 চেকসাম",
+                                        color = EmeraldSuccess,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            } else null,
+                            colors = textFieldColors(),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("input_update_apk_checksum")
                         )
                     }
 
@@ -943,8 +1020,13 @@ fun UpdatesManagementScreen(
                 }
             },
             confirmButton = {
+                val trimmedConfirmUrl = downloadUrl.trim()
+                val confirmUrlError = trimmedConfirmUrl.isNotEmpty() && !trimmedConfirmUrl.startsWith("https://", ignoreCase = true)
+                val cleanConfirmChecksum = apkChecksumSha256.trim().replace(":", "").replace(" ", "")
+                val confirmChecksumError = cleanConfirmChecksum.isNotEmpty() && !Regex("^[0-9a-fA-F]{64}$").matches(cleanConfirmChecksum)
                 Button(
                     onClick = onSaveUpdate,
+                    enabled = !confirmUrlError && !confirmChecksumError,
                     colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.testTag("btn_confirm_save_update")
@@ -1166,6 +1248,37 @@ private fun AppUpdateCard(
                 }
             }
 
+            // APK SHA-256 Checksum Badge (if present)
+            if (update.apkChecksumSha256.isNotBlank()) {
+                Surface(
+                    color = EmeraldSuccess.copy(alpha = 0.10f),
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VerifiedUser,
+                            contentDescription = "SHA-256 Verified",
+                            tint = EmeraldSuccess,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "SHA-256: ${update.apkChecksumSha256.take(18)}…${update.apkChecksumSha256.takeLast(8)}",
+                            color = EmeraldSuccess,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1245,6 +1358,10 @@ DECLARE
     v_target_id UUID;
     v_maint BOOLEAN := COALESCE(p_is_maintenance, p_is_kill_switch);
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     SELECT id INTO v_target_id
     FROM public.app_updates
     ORDER BY version_code DESC NULLS LAST, latest_version_code DESC NULLS LAST, created_at DESC NULLS LAST
@@ -1264,12 +1381,12 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.admin_set_kill_switch(BOOLEAN, BOOLEAN, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.admin_set_kill_switch(BOOLEAN, BOOLEAN, TEXT, TEXT, TEXT) TO service_role;
+REVOKE ALL ON FUNCTION public.admin_set_kill_switch(BOOLEAN, BOOLEAN, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_set_kill_switch(BOOLEAN, BOOLEAN, TEXT, TEXT, TEXT) TO authenticated;
 
 -- 3. Create public.student_notifications table
 CREATE TABLE IF NOT EXISTS public.student_notifications (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     title TEXT NOT NULL,
     message TEXT NOT NULL,
     target_type TEXT NOT NULL DEFAULT 'ALL', -- ALL, PHONE, PROGRAM
@@ -1290,9 +1407,17 @@ FOR SELECT
 TO anon, authenticated
 USING (is_active = true);
 
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.student_notifications FROM anon, authenticated;
-GRANT SELECT ON public.student_notifications TO anon, authenticated;
-GRANT ALL ON public.student_notifications TO service_role;
+DROP POLICY IF EXISTS "Admin full student_notifications" ON public.student_notifications;
+CREATE POLICY "Admin full student_notifications"
+ON public.student_notifications
+FOR ALL
+TO authenticated
+USING (public.is_admin_user())
+WITH CHECK (public.is_admin_user());
+
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.student_notifications FROM anon;
+GRANT SELECT ON public.student_notifications TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.student_notifications TO authenticated;
 """.trimIndent()
 
 @Composable

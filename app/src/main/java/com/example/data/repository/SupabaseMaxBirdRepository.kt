@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import com.example.data.model.AppSecurityConfig
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
@@ -124,6 +125,8 @@ class SupabaseMaxBirdRepository(
         val cleanTitle = payload.title.trim().ifBlank { "নতুন আপডেট উপলব্ধ! ($vName)" }
         val cleanBtn = payload.buttonText.trim().ifBlank { "এখনই আপডেট করুন" }
 
+        val cleanChecksum = payload.apkChecksumSha256.trim().lowercase()
+
         // Matches the exact columns in public.app_updates of the live database
         val liveSupabaseSchemaMap = mapOf<String, Any?>(
             "latest_version_name" to vName,
@@ -134,6 +137,7 @@ class SupabaseMaxBirdRepository(
             "changelog" to notes,
             "download_url" to apkLink,
             "button_text" to cleanBtn,
+            "apk_checksum_sha256" to cleanChecksum,
             "is_active" to payload.isActive,
             "file_size_mb" to payload.fileSizeMb,
             "is_kill_switch" to payload.isKillSwitch,
@@ -163,6 +167,7 @@ class SupabaseMaxBirdRepository(
             "changelog" to notes,
             "download_url" to apkLink,
             "button_text" to cleanBtn,
+            "apk_checksum_sha256" to cleanChecksum,
             "is_active" to payload.isActive,
             "updated_at" to now
         )
@@ -176,6 +181,7 @@ class SupabaseMaxBirdRepository(
             "changelog" to notes,
             "download_url" to apkLink,
             "button_text" to cleanBtn,
+            "apk_checksum_sha256" to cleanChecksum,
             "is_active" to payload.isActive
         )
 
@@ -220,6 +226,53 @@ class SupabaseMaxBirdRepository(
                     if (lastError.isBlank()) lastError = e.message.orEmpty()
                 }
             }
+            // Fallback to authenticated SECURITY DEFINER RPC `admin_publish_app_update`
+            try {
+                val rpcPayload = mapOf<String, Any?>(
+                    "p_latest_version_name" to vName,
+                    "p_latest_version_code" to vCode,
+                    "p_min_supported_version_code" to minCode,
+                    "p_is_force_update" to payload.isForceUpdate,
+                    "p_title" to cleanTitle,
+                    "p_changelog" to notes,
+                    "p_download_url" to apkLink,
+                    "p_button_text" to cleanBtn,
+                    "p_apk_checksum_sha256" to cleanChecksum,
+                    "p_file_size_mb" to payload.fileSizeMb,
+                    "p_is_active" to payload.isActive
+                )
+                val rpcRes = api.adminPublishAppUpdateRpc(rpcPayload)
+                if (rpcRes.isSuccessful) {
+                    val created = AppUpdate(
+                        id = UUID.randomUUID().toString(),
+                        versionCode = vCode,
+                        versionName = vName,
+                        apkUrl = apkLink,
+                        fileSizeMb = payload.fileSizeMb,
+                        releaseNotes = notes,
+                        isForceUpdate = payload.isForceUpdate,
+                        isKillSwitch = payload.isKillSwitch,
+                        isMaintenance = payload.isMaintenance,
+                        killSwitchTitle = payload.killSwitchTitle,
+                        killSwitchMessage = payload.killSwitchMessage,
+                        estimatedBackTime = payload.estimatedBackTime,
+                        latestVersionName = vName,
+                        latestVersionCode = vCode,
+                        minSupportedVersionCode = minCode,
+                        title = cleanTitle,
+                        changelog = notes,
+                        downloadUrl = apkLink,
+                        buttonText = cleanBtn,
+                        apkChecksumSha256 = cleanChecksum,
+                        isActive = payload.isActive,
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                    cachedUpdates.add(0, created)
+                    return@withContext Result.success(created)
+                }
+            } catch (_: Exception) {
+            }
             Result.failure(Exception("আপডেট তৈরি ব্যর্থ: $lastError"))
         } catch (e: Exception) {
             Result.failure(e)
@@ -236,6 +289,8 @@ class SupabaseMaxBirdRepository(
         val cleanTitle = payload.title.trim().ifBlank { "নতুন আপডেট উপলব্ধ! ($vName)" }
         val cleanBtn = payload.buttonText.trim().ifBlank { "এখনই আপডেট করুন" }
 
+        val cleanChecksum = payload.apkChecksumSha256.trim().lowercase()
+
         // Matches the exact columns in public.app_updates of the live database
         val liveSupabaseSchemaMap = mapOf<String, Any?>(
             "latest_version_name" to vName,
@@ -246,6 +301,7 @@ class SupabaseMaxBirdRepository(
             "changelog" to notes,
             "download_url" to apkLink,
             "button_text" to cleanBtn,
+            "apk_checksum_sha256" to cleanChecksum,
             "is_active" to payload.isActive,
             "file_size_mb" to payload.fileSizeMb,
             "is_kill_switch" to payload.isKillSwitch,
@@ -275,6 +331,7 @@ class SupabaseMaxBirdRepository(
             "changelog" to notes,
             "download_url" to apkLink,
             "button_text" to cleanBtn,
+            "apk_checksum_sha256" to cleanChecksum,
             "is_active" to payload.isActive,
             "updated_at" to now
         )
@@ -288,6 +345,7 @@ class SupabaseMaxBirdRepository(
             "changelog" to notes,
             "download_url" to apkLink,
             "button_text" to cleanBtn,
+            "apk_checksum_sha256" to cleanChecksum,
             "is_active" to payload.isActive,
             "updated_at" to now
         )
@@ -2999,7 +3057,7 @@ class SupabaseMaxBirdRepository(
             } catch (_: Exception) {
             }
 
-            // 2. Fallback: Query `rest/v1/onesignal_config` directly (live DB has RLS `ALL = true`)
+            // 2. Fallback: Query `rest/v1/onesignal_config` directly (authenticated Admin RLS via is_admin_user())
             if (extracted.isBlank()) {
                 try {
                     val tableRes = api.getOneSignalConfigRaw()
@@ -3220,6 +3278,107 @@ class SupabaseMaxBirdRepository(
             } else {
                 val err = try { response.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
                 Result.failure(Exception("notify_admin_via_onesignal HTTP ${response.code()}: $err"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
+    // App Security Config (`public.app_security_config`, id = 1)
+    // =========================================================================
+
+    override suspend fun getAppSecurityConfig(): Result<AppSecurityConfig> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val response = api.getAppSecurityConfig()
+            if (response.isSuccessful) {
+                val config = response.body()?.firstOrNull() ?: AppSecurityConfig()
+                Result.success(config)
+            } else {
+                val err = try { response.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("app_security_config HTTP ${response.code()}: $err"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun saveAllowedReleaseSignatures(signatures: List<String>): Result<AppSecurityConfig> =
+        withContext(Dispatchers.IO) {
+            try {
+                val api = supabaseClient.getApi()
+                val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+                val cleanList = signatures.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+                val patchPayload = mapOf<String, Any?>(
+                    "allowed_release_signatures" to cleanList,
+                    "updated_at" to now
+                )
+                val patchRes = api.patchAppSecurityConfig(payload = patchPayload)
+                if (patchRes.isSuccessful && !patchRes.body().isNullOrEmpty()) {
+                    return@withContext Result.success(patchRes.body()!!.first())
+                }
+
+                // Fallback to UPSERT in case row id = 1 doesn't exist yet
+                val upsertPayload = mapOf<String, Any?>(
+                    "id" to 1,
+                    "allowed_release_signatures" to cleanList,
+                    "updated_at" to now
+                )
+                val upsertRes = api.upsertAppSecurityConfig(payload = upsertPayload)
+                if (upsertRes.isSuccessful) {
+                    val saved = upsertRes.body()?.firstOrNull()
+                        ?: AppSecurityConfig(id = 1, allowedReleaseSignatures = cleanList, updatedAt = now)
+                    Result.success(saved)
+                } else {
+                    val err = try { upsertRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                    Result.failure(Exception("সিগনেচার সেভ ব্যর্থ (HTTP ${upsertRes.code()}): $err"))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    override suspend fun saveAppSecurityConfig(
+        signatures: List<String>,
+        maxAdminPushPerMinute: Int
+    ): Result<AppSecurityConfig> = withContext(Dispatchers.IO) {
+        try {
+            val api = supabaseClient.getApi()
+            val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+            val cleanList = signatures.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+            val safeLimit = maxAdminPushPerMinute.coerceIn(1, 600)
+
+            val patchPayload = mapOf<String, Any?>(
+                "allowed_release_signatures" to cleanList,
+                "max_admin_push_per_minute" to safeLimit,
+                "updated_at" to now
+            )
+            val patchRes = api.patchAppSecurityConfig(payload = patchPayload)
+            if (patchRes.isSuccessful && !patchRes.body().isNullOrEmpty()) {
+                return@withContext Result.success(patchRes.body()!!.first())
+            }
+
+            val upsertPayload = mapOf<String, Any?>(
+                "id" to 1,
+                "allowed_release_signatures" to cleanList,
+                "max_admin_push_per_minute" to safeLimit,
+                "updated_at" to now
+            )
+            val upsertRes = api.upsertAppSecurityConfig(payload = upsertPayload)
+            if (upsertRes.isSuccessful) {
+                val saved = upsertRes.body()?.firstOrNull()
+                    ?: AppSecurityConfig(
+                        id = 1,
+                        allowedReleaseSignatures = cleanList,
+                        maxAdminPushPerMinute = safeLimit,
+                        updatedAt = now
+                    )
+                Result.success(saved)
+            } else {
+                val err = try { upsertRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("সিকিউরিটি কনফিগ সেভ ব্যর্থ (HTTP ${upsertRes.code()}): $err"))
             }
         } catch (e: Exception) {
             Result.failure(e)

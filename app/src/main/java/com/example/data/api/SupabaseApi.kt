@@ -17,6 +17,7 @@ import com.example.data.model.UpdateSupportLinkStatusPayload
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
 import com.example.data.model.UserDevice
 import com.example.data.model.DeviceShikhoAccount
+import com.example.data.model.AppSecurityConfig
 import com.example.data.model.StudentNotification
 import com.example.data.model.UpdateDeviceBanPayload
 import retrofit2.Response
@@ -81,6 +82,11 @@ interface SupabaseApi {
         @Body payload: Map<String, @JvmSuppressWildcards Any?>,
         @Header("Prefer") prefer: String = "return=representation"
     ): Response<List<AppUpdate>>
+
+    @POST("rest/v1/rpc/admin_publish_app_update")
+    suspend fun adminPublishAppUpdateRpc(
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/admin_set_kill_switch")
     suspend fun setKillSwitchRpc(
@@ -530,6 +536,30 @@ interface SupabaseApi {
     suspend fun adminRevokeDeviceToPendingRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<okhttp3.ResponseBody>
+
+    // =========================================================================
+    // App Security Config (`public.app_security_config`, id = 1)
+    // =========================================================================
+
+    @GET("rest/v1/app_security_config")
+    suspend fun getAppSecurityConfig(
+        @Query("id") idQuery: String = "eq.1",
+        @Query("select") select: String = "*"
+    ): Response<List<AppSecurityConfig>>
+
+    @PATCH("rest/v1/app_security_config")
+    suspend fun patchAppSecurityConfig(
+        @Query("id") idQuery: String = "eq.1",
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<AppSecurityConfig>>
+
+    @POST("rest/v1/app_security_config")
+    suspend fun upsertAppSecurityConfig(
+        @Query("on_conflict") onConflict: String = "id",
+        @Body payload: Map<String, @JvmSuppressWildcards Any?>,
+        @Header("Prefer") prefer: String = "resolution=merge-duplicates,return=representation"
+    ): Response<List<AppSecurityConfig>>
 }
 
 

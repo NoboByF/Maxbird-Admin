@@ -355,3 +355,16 @@ data class UpdateDeviceBanPayload(
     @Json(name = "status") val status: String,
     @Json(name = "ban_reason") val banReason: String?
 )
+
+/**
+ * Row model for `public.app_security_config` (id = 1) containing allowed APK release SHA-256 signatures
+ * and admin push rate-limiting (`max_admin_push_per_minute`).
+ */
+@JsonClass(generateAdapter = true)
+data class AppSecurityConfig(
+    @Json(name = "id") val id: Int = 1,
+    @Json(name = "allowed_release_signatures") val allowedReleaseSignatures: List<String> = emptyList(),
+    @Json(name = "max_admin_push_per_minute") val maxAdminPushPerMinute: Int = 20,
+    @Json(name = "updated_at") val updatedAt: String = ""
+)
+

@@ -19,9 +19,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -31,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
@@ -67,6 +70,7 @@ import com.example.notifications.AdminRealtimeMonitorService
 import com.example.notifications.OneSignalPushManager
 import com.example.ui.navigation.Screen
 import com.example.ui.screens.ActivationSupportLinksScreen
+import com.example.ui.screens.AdminLoginScreen
 import com.example.ui.screens.CloudinaryMediaScreen
 import com.example.ui.screens.CourseSalesManagementScreen
 import com.example.ui.screens.DashboardScreen
@@ -75,6 +79,7 @@ import com.example.ui.screens.MaxbirdWebsiteAdminScreen
 import com.example.ui.screens.NoticeManagementScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.UpdatesManagementScreen
+import com.example.ui.theme.CoralDanger
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.MyApplicationTheme
@@ -119,6 +124,12 @@ class MainActivity : ComponentActivity() {
                 val context = LocalContext.current
                 val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
                 val toastMessage by viewModel.toastMessage.collectAsStateWithLifecycle()
+                val adminSession by viewModel.adminSession.collectAsStateWithLifecycle()
+                val sessionExpiredMessage by viewModel.sessionExpiredMessage.collectAsStateWithLifecycle()
+                val isAuthLoading by viewModel.isAuthLoading.collectAsStateWithLifecycle()
+                val authError by viewModel.authError.collectAsStateWithLifecycle()
+                val isCheckingSession by viewModel.isCheckingSession.collectAsStateWithLifecycle()
+                val isAuthenticated = adminSession?.isPresent == true
 
                 val snackbarHostState = remember { SnackbarHostState() }
                 val coroutineScope = rememberCoroutineScope()
@@ -126,13 +137,14 @@ class MainActivity : ComponentActivity() {
                 val notificationPermissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
                 ) { isGranted ->
-                    if (isGranted) {
+                    if (isGranted && isAuthenticated) {
                         AdminRealtimeMonitorService.startIfEnabled(context)
                         OneSignalPushManager.syncAdminPushRegistration(context)
                     }
                 }
 
-                LaunchedEffect(Unit) {
+                LaunchedEffect(isAuthenticated) {
+                    if (!isAuthenticated) return@LaunchedEffect
                     OneSignalPushManager.syncAdminPushRegistration(context)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         val granted = ContextCompat.checkSelfPermission(
@@ -160,31 +172,71 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Directly open Admin Control Center (No PIN gate / barrier)
-                BackHandler(enabled = currentScreen != Screen.Dashboard) {
-                    viewModel.navigateTo(Screen.Dashboard)
-                }
+                if (isCheckingSession) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Slate950),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                color = NeonCyan,
+                                strokeWidth = 3.dp,
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Text(
+                                text = "অ্যাডমিন সেশন যাচাই হচ্ছে...",
+                                color = Slate200,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                } else if (!isAuthenticated) {
+                    val supabaseUrl by viewModel.supabaseUrl.collectAsStateWithLifecycle()
+                    val supabaseKey by viewModel.supabaseKey.collectAsStateWithLifecycle()
+                    AdminLoginScreen(
+                        isLoading = isAuthLoading,
+                        authError = authError,
+                        sessionExpiredMessage = sessionExpiredMessage,
+                        supabaseUrl = supabaseUrl,
+                        supabaseAnonKey = supabaseKey,
+                        onLogin = { email, password -> viewModel.loginAdmin(email, password) },
+                        onUpdateSupabaseUrl = { viewModel.updateSupabaseUrl(it) },
+                        onUpdateSupabaseAnonKey = { viewModel.updateSupabaseKey(it) },
+                        onSaveSupabaseConfig = { viewModel.saveSupabaseSettings() },
+                        onClearError = { viewModel.clearAuthError() }
+                    )
+                } else {
+                    BackHandler(enabled = currentScreen != Screen.Dashboard) {
+                        viewModel.navigateTo(Screen.Dashboard)
+                    }
 
-                Scaffold(
-                    contentWindowInsets = WindowInsets.safeDrawing,
-                    snackbarHost = { SnackbarHost(snackbarHostState) },
-                    topBar = {
-                        val isLoadingStats by viewModel.isLoadingStats.collectAsStateWithLifecycle()
-                        AdminTopHeaderBar(
-                            currentScreen = currentScreen,
-                            isLoading = isLoadingStats,
-                            onRefresh = { viewModel.refreshStats() },
-                            onNavigate = { screen -> viewModel.navigateTo(screen) }
-                        )
-                    },
-                    bottomBar = {
-                        AdminBottomNavigationBar(
-                            currentScreen = currentScreen,
-                            onNavigate = { screen -> viewModel.navigateTo(screen) }
-                        )
-                    },
-                    containerColor = Slate900
-                ) { innerPadding ->
+                    Scaffold(
+                        contentWindowInsets = WindowInsets.safeDrawing,
+                        snackbarHost = { SnackbarHost(snackbarHostState) },
+                        topBar = {
+                            val isLoadingStats by viewModel.isLoadingStats.collectAsStateWithLifecycle()
+                            AdminTopHeaderBar(
+                                currentScreen = currentScreen,
+                                isLoading = isLoadingStats,
+                                onRefresh = { viewModel.refreshStats() },
+                                onNavigate = { screen -> viewModel.navigateTo(screen) },
+                                onLogout = { viewModel.logoutAdmin() }
+                            )
+                        },
+                        bottomBar = {
+                            AdminBottomNavigationBar(
+                                currentScreen = currentScreen,
+                                onNavigate = { screen -> viewModel.navigateTo(screen) }
+                            )
+                        },
+                        containerColor = Slate900
+                    ) { innerPadding ->
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -412,6 +464,7 @@ class MainActivity : ComponentActivity() {
                                 val title by viewModel.updateTitle.collectAsStateWithLifecycle()
                                 val changelog by viewModel.updateChangelog.collectAsStateWithLifecycle()
                                 val downloadUrl by viewModel.updateDownloadUrl.collectAsStateWithLifecycle()
+                                val apkChecksumSha256 by viewModel.updateApkChecksumSha256.collectAsStateWithLifecycle()
                                 val fileSizeMb by viewModel.updateFileSizeMb.collectAsStateWithLifecycle()
                                 val buttonText by viewModel.updateButtonText.collectAsStateWithLifecycle()
                                 val isActive by viewModel.updateIsActive.collectAsStateWithLifecycle()
@@ -434,6 +487,7 @@ class MainActivity : ComponentActivity() {
                                     title = title,
                                     changelog = changelog,
                                     downloadUrl = downloadUrl,
+                                    apkChecksumSha256 = apkChecksumSha256,
                                     fileSizeMb = fileSizeMb,
                                     buttonText = buttonText,
                                     isActive = isActive,
@@ -452,6 +506,7 @@ class MainActivity : ComponentActivity() {
                                     onTitleChange = { viewModel.setUpdateTitle(it) },
                                     onChangelogChange = { viewModel.setUpdateChangelog(it) },
                                     onDownloadUrlChange = { viewModel.setUpdateDownloadUrl(it) },
+                                    onApkChecksumSha256Change = { viewModel.setUpdateApkChecksumSha256(it) },
                                     onFileSizeMbChange = { viewModel.setUpdateFileSizeMb(it) },
                                     onButtonTextChange = { viewModel.setUpdateButtonText(it) },
                                     onIsActiveChange = { viewModel.setUpdateIsActive(it) },
@@ -643,6 +698,10 @@ class MainActivity : ComponentActivity() {
                                 val isSendingOneSignalTest by viewModel.isSendingOneSignalTest.collectAsStateWithLifecycle()
                                 val isRunningSyncDiagnostics by viewModel.isRunningSyncDiagnostics.collectAsStateWithLifecycle()
                                 val syncDiagnosticResults by viewModel.syncDiagnosticResults.collectAsStateWithLifecycle()
+                                val allowedReleaseSignatures by viewModel.allowedReleaseSignatures.collectAsStateWithLifecycle()
+                                val maxAdminPushPerMinute by viewModel.maxAdminPushPerMinute.collectAsStateWithLifecycle()
+                                val isLoadingSecurityConfig by viewModel.isLoadingSecurityConfig.collectAsStateWithLifecycle()
+                                val isSavingSecurityConfig by viewModel.isSavingSecurityConfig.collectAsStateWithLifecycle()
 
                                 SettingsScreen(
                                     supabaseUrl = supabaseUrl,
@@ -674,11 +733,23 @@ class MainActivity : ComponentActivity() {
                                     syncDiagnosticResults = syncDiagnosticResults,
                                     onRunSyncDiagnostics = {
                                         viewModel.runFullSystemSyncDiagnostics()
-                                    }
+                                    },
+                                    adminEmail = adminSession?.email.orEmpty(),
+                                    adminUserId = adminSession?.userId.orEmpty(),
+                                    onLogout = { viewModel.logoutAdmin() },
+                                    allowedReleaseSignatures = allowedReleaseSignatures,
+                                    maxAdminPushPerMinute = maxAdminPushPerMinute,
+                                    isLoadingSecurityConfig = isLoadingSecurityConfig,
+                                    isSavingSecurityConfig = isSavingSecurityConfig,
+                                    onRefreshSecurityConfig = { viewModel.loadAppSecurityConfig() },
+                                    onAddReleaseSignature = { sig -> viewModel.addReleaseSignature(sig) },
+                                    onRemoveReleaseSignature = { sig -> viewModel.removeReleaseSignature(sig) },
+                                    onSaveMaxAdminPushPerMinute = { limit -> viewModel.updateMaxAdminPushPerMinute(limit) }
                                 )
                             }
                         }
                     }
+                }
                 }
             }
         }
@@ -690,7 +761,8 @@ private fun AdminTopHeaderBar(
     currentScreen: Screen,
     isLoading: Boolean,
     onRefresh: () -> Unit,
-    onNavigate: (Screen) -> Unit
+    onNavigate: (Screen) -> Unit,
+    onLogout: () -> Unit = {}
 ) {
     Surface(
         color = Slate950,
@@ -750,7 +822,7 @@ private fun AdminTopHeaderBar(
                                 )
                             }
                             Text(
-                                text = "কন্ট্রোল প্যানেল • অনলাইন",
+                                text = "কন্ট্রোল প্যানেল • Zero-Trust RLS",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = NeonCyan,
                                     fontWeight = FontWeight.Medium,
@@ -760,7 +832,7 @@ private fun AdminTopHeaderBar(
                         }
                     }
 
-                    // Dashboard Actions: Refresh & Settings
+                    // Dashboard Actions: Refresh, Settings & Logout
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -802,6 +874,22 @@ private fun AdminTopHeaderBar(
                                 contentDescription = "Settings",
                                 tint = Slate200,
                                 modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onLogout,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(CoralDanger.copy(alpha = 0.16f))
+                                .testTag("top_btn_logout")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Logout,
+                                contentDescription = "Logout",
+                                tint = CoralDanger,
+                                modifier = Modifier.size(19.dp)
                             )
                         }
                     }

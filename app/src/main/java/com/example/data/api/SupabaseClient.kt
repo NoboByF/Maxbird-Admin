@@ -7,7 +7,11 @@ import com.squareup.moshi.JsonWriter
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
@@ -15,6 +19,8 @@ import java.lang.reflect.Type
 import java.util.concurrent.TimeUnit
 
 class SupabaseClient(private val adminPreferences: AdminPreferences) {
+
+    val authManager: SupabaseAuthManager = SupabaseAuthManager(adminPreferences)
 
     /**
      * Lenient adapter factory that safely handles PostgreSQL `numeric` (e.g. `500.00`)
@@ -148,22 +154,64 @@ class SupabaseClient(private val adminPreferences: AdminPreferences) {
         .add(KotlinJsonAdapterFactory())
         .build()
 
+    /**
+     * Zero-Trust Authenticated OkHttp Client:
+     * - Always sends `apikey: <SUPABASE_ANON_KEY>` (never service_role).
+     * - Sends `Authorization: Bearer <user_access_token>` from the logged-in admin session.
+     * - Proactively refreshes the token if expired or expiring within 5 minutes.
+     * - On `401 Unauthorized`, refreshes once and retries; if refresh fails, clears the session
+     *   so the UI immediately navigates back to the Admin Login screen.
+     */
     private fun createOkHttpClient(): OkHttpClient {
         val authInterceptor = Interceptor { chain ->
             val original = chain.request()
-            val apiKey = adminPreferences.getSupabaseKey()
+            val anonKey = adminPreferences.getSupabaseAnonKey()
+            val accessToken = authManager.ensureValidAccessTokenBlocking()
 
-            val requestBuilder = original.newBuilder()
-                .header("apikey", apiKey)
-                .header("Authorization", "Bearer $apiKey")
+            // Strict Zero-Trust fail-closed guard: never execute REST/RPC calls without an
+            // authenticated admin JWT (and never allow Authorization: Bearer <SUPABASE_ANON_KEY>).
+            if (accessToken.isNullOrBlank() || accessToken == anonKey || AdminPreferences.isServiceRoleJwt(accessToken)) {
+                adminPreferences.clearAuthSession("অ্যাডমিন সেশন পাওয়া যায়নি। অনুগ্রহ করে পুনরায় লগইন করুন।")
+                return@Interceptor Response.Builder()
+                    .request(original)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(401)
+                    .message("Unauthorized - Admin session required")
+                    .body("{\"error\":\"admin_session_required\"}".toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+
+            fun buildSignedRequest(token: String) = original.newBuilder()
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $token")
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
+                .build()
 
-            chain.proceed(requestBuilder.build())
+            val firstResponse = chain.proceed(buildSignedRequest(accessToken))
+
+            if (firstResponse.code == 401) {
+                // Attempt a single synchronized token refresh & replay
+                val refreshed = authManager.refreshSessionBlocking(failedAccessToken = accessToken)
+                if (refreshed != null && refreshed.accessToken.isNotBlank() && refreshed.accessToken != anonKey) {
+                    firstResponse.close()
+                    val retryResponse = chain.proceed(buildSignedRequest(refreshed.accessToken))
+                    if (retryResponse.code == 401) {
+                        adminPreferences.clearAuthSession("অ্যাডমিন সেশনের মেয়াদ শেষ হয়েছে। অনুগ্রহ করে পুনরায় লগইন করুন।")
+                    }
+                    return@Interceptor retryResponse
+                } else {
+                    adminPreferences.clearAuthSession("অ্যাডমিন সেশনের মেয়াদ শেষ হয়েছে। অনুগ্রহ করে পুনরায় লগইন করুন।")
+                }
+            }
+
+            firstResponse
         }
 
         val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = HttpLoggingInterceptor.Level.BASIC
+            redactHeader("Authorization")
+            redactHeader("apikey")
         }
 
         return OkHttpClient.Builder()

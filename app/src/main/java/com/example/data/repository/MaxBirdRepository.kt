@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import com.example.data.model.AppSecurityConfig
 import com.example.data.model.AppUpdate
 import com.example.data.model.AppNotice
 import com.example.data.model.ActivationSupportLink
@@ -194,6 +195,23 @@ interface MaxBirdRepository {
         eventType: String = "ADMIN_TEST",
         extraData: Map<String, Any?> = emptyMap()
     ): Result<Unit> = Result.success(Unit)
+
+    // App Security Config (`public.app_security_config`, id = 1)
+    suspend fun getAppSecurityConfig(): Result<AppSecurityConfig> = Result.success(AppSecurityConfig())
+
+    suspend fun saveAllowedReleaseSignatures(signatures: List<String>): Result<AppSecurityConfig> =
+        Result.success(AppSecurityConfig(allowedReleaseSignatures = signatures))
+
+    suspend fun saveAppSecurityConfig(
+        signatures: List<String>,
+        maxAdminPushPerMinute: Int
+    ): Result<AppSecurityConfig> =
+        Result.success(
+            AppSecurityConfig(
+                allowedReleaseSignatures = signatures,
+                maxAdminPushPerMinute = maxAdminPushPerMinute
+            )
+        )
 }
 
 

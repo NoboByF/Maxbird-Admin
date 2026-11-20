@@ -18,15 +18,21 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -60,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CoursePaymentSettings
 import com.example.data.model.UpsertCoursePaymentSettingsPayload
+import com.example.data.preferences.AdminPreferences
 import com.example.notifications.OneSignalPushManager
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CardBorderGradientEnd
@@ -153,150 +160,90 @@ END;
 $$;
 """
 
-private const val SUPABASE_SCHEMA_SQL = """-- MaxBird Supabase Setup SQL Script
--- Run this in your Supabase Dashboard -> SQL Editor
+private const val SUPABASE_SCHEMA_SQL = """-- MaxBird Live Zero-Trust Authenticated RLS Reference SQL (16 Live Tables)
+-- Admin App authenticates via Supabase Email/Password JWT (`authenticated` + `public.is_admin_user() = true`).
+-- Note: `access_codes` and `activated_devices` are permanently removed from the live database.
 
--- Dynamic Payment Methods Table & Columns
-CREATE TABLE IF NOT EXISTS public.course_payment_settings (
-    id integer NOT NULL DEFAULT 1 PRIMARY KEY,
-    payment_methods_json jsonb DEFAULT '[]'::jsonb,
-    bkash_number text DEFAULT ''::text,
-    bkash_enabled boolean DEFAULT false,
-    nagad_number text DEFAULT ''::text,
-    nagad_enabled boolean DEFAULT false,
-    rocket_number text DEFAULT ''::text,
-    rocket_enabled boolean DEFAULT false,
-    upay_number text DEFAULT ''::text,
-    upay_enabled boolean DEFAULT false,
-    payment_instructions_bn text DEFAULT 'প্রদত্ত পেমেন্ট নম্বরে টাকা পাঠিয়ে আপনার প্রেরক মোবাইল নম্বর এবং Transaction ID দিয়ে সাবমিট করুন।'::text,
-    updated_at timestamp with time zone DEFAULT now()
-);
-
-ALTER TABLE public.course_payment_settings
-    ADD COLUMN IF NOT EXISTS payment_methods_json jsonb DEFAULT '[]'::jsonb,
-    ADD COLUMN IF NOT EXISTS bkash_enabled boolean DEFAULT false,
-    ADD COLUMN IF NOT EXISTS nagad_enabled boolean DEFAULT false,
-    ADD COLUMN IF NOT EXISTS rocket_enabled boolean DEFAULT false,
-    ADD COLUMN IF NOT EXISTS upay_number text DEFAULT ''::text,
-    ADD COLUMN IF NOT EXISTS upay_enabled boolean DEFAULT false;
-
--- ==========================================================
--- পুরাতন ম্যানুয়াল অ্যাক্সেস কোড সিস্টেম (access_codes ও activated_devices) সম্পূর্ণ ক্লিনআপ
--- ==========================================================
-DROP TRIGGER IF EXISTS trg_sync_device_ban ON public.devices;
-DROP FUNCTION IF EXISTS public.sync_device_ban_status();
-DROP FUNCTION IF EXISTS public.activate_device(text, text, text);
-DROP FUNCTION IF EXISTS public.activate_device(text, text, text, text);
-DROP FUNCTION IF EXISTS public.activate_device(text, text, text, text, text, text, text, text);
-DROP FUNCTION IF EXISTS public.admin_approve_device_verification(text);
-DROP TABLE IF EXISTS public.activated_devices CASCADE;
-DROP TABLE IF EXISTS public.access_codes CASCADE;
-
--- সাপোর্ট লিংক টেবিলে শুধুমাত্র service_role-এর জন্য রাইট পলিসি এবং পাবলিকের জন্য শুধুমাত্র Read পলিসি
-DROP POLICY IF EXISTS "Allow admin full access for activation support links" ON public.activation_support_links;
-DROP POLICY IF EXISTS "Service role full activation_support_links" ON public.activation_support_links;
-CREATE POLICY "Service role full activation_support_links"
-ON public.activation_support_links
-FOR ALL TO service_role
-USING (true) WITH CHECK (true);
-
--- App Updates Table
-CREATE TABLE IF NOT EXISTS app_updates (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    latest_version_name TEXT NOT NULL,
-    latest_version_code INT NOT NULL,
-    min_supported_version_code INT NOT NULL DEFAULT 1,
-    is_force_update BOOLEAN NOT NULL DEFAULT false,
-    title TEXT NOT NULL,
-    changelog TEXT NOT NULL,
-    download_url TEXT NOT NULL,
-    button_text TEXT NOT NULL DEFAULT 'এখনই আপডেট করুন',
-    is_active BOOLEAN NOT NULL DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now()
-);
-
--- App Notices Table
-CREATE TABLE IF NOT EXISTS app_notices (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    title TEXT NOT NULL,
-    description TEXT,
-    image_url TEXT NOT NULL,
-    action_url TEXT,
-    action_button_text TEXT DEFAULT 'বিস্তারিত দেখুন',
-    priority INT DEFAULT 0,
-    is_active BOOLEAN DEFAULT true,
-    show_as_popup BOOLEAN DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now()
-);
-
--- Activation Support Links Table (For Device Activation Screen Contact Buttons)
-CREATE TABLE IF NOT EXISTS activation_support_links (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    title TEXT NOT NULL,
-    subtitle TEXT,
-    icon_type TEXT NOT NULL DEFAULT 'telegram',
-    url TEXT NOT NULL,
-    color_hex TEXT,
-    is_active BOOLEAN NOT NULL DEFAULT true,
-    priority INT NOT NULL DEFAULT 0,
+-- 1. Admin Auth & Security Config Tables
+CREATE TABLE IF NOT EXISTS public.admin_users (
+    user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email TEXT,
+    role TEXT DEFAULT 'admin',
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- User Devices Table (For Hardware Telemetry & Remote Ban Control)
-CREATE TABLE IF NOT EXISTS devices (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    device_hash TEXT UNIQUE NOT NULL,
-    display_device_id TEXT NOT NULL,
-    device_model TEXT DEFAULT 'Unknown Device',
-    device_brand TEXT,
-    android_version TEXT,
-    app_version TEXT,
-    applied_code TEXT,
-    is_banned BOOLEAN DEFAULT false,
-    ban_reason TEXT,
-    status TEXT DEFAULT 'pending',
-    can_view_profiles BOOLEAN DEFAULT false,
-    last_seen TIMESTAMPTZ DEFAULT now()
+CREATE TABLE IF NOT EXISTS public.app_security_config (
+    id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    allowed_release_signatures TEXT[] NOT NULL DEFAULT '{}'::TEXT[],
+    max_admin_push_per_minute INTEGER NOT NULL DEFAULT 20,
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Enable Row Level Security (RLS)
-ALTER TABLE app_updates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE app_notices ENABLE ROW LEVEL SECURITY;
-ALTER TABLE activation_support_links ENABLE ROW LEVEL SECURITY;
-ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
+-- 2. Admin Verification RPCs (`authenticated` role -> BOOLEAN)
+CREATE OR REPLACE FUNCTION public.is_admin_user()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.admin_users WHERE user_id = auth.uid()
+    );
+$$;
 
--- Zero-Trust Security Policies (Students Read-Only, Admin via service_role Full Access)
-DROP POLICY IF EXISTS "Allow all course_payment_settings" ON public.course_payment_settings;
-DROP POLICY IF EXISTS "Public read course_payment_settings" ON public.course_payment_settings;
-CREATE POLICY "Public read course_payment_settings" ON public.course_payment_settings FOR SELECT TO anon, authenticated USING (true);
-DROP POLICY IF EXISTS "Service role full course_payment_settings" ON public.course_payment_settings;
-CREATE POLICY "Service role full course_payment_settings" ON public.course_payment_settings FOR ALL TO service_role USING (true) WITH CHECK (true);
+GRANT EXECUTE ON FUNCTION public.is_admin_user() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.check_is_admin() TO authenticated;
 
-DROP POLICY IF EXISTS "Allow admin full access to app updates" ON public.app_updates;
-DROP POLICY IF EXISTS "Service role full app_updates" ON public.app_updates;
-CREATE POLICY "Service role full app_updates" ON public.app_updates FOR ALL TO service_role USING (true) WITH CHECK (true);
+-- 3. Authenticated Admin RLS Policy Pattern (All 16 Live Tables)
+ALTER TABLE public.admin_users ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admin self read admin_users" ON public.admin_users;
+CREATE POLICY "Admin self read admin_users"
+ON public.admin_users FOR SELECT TO authenticated
+USING (user_id = auth.uid());
 
-DROP POLICY IF EXISTS "Allow full access for admin operations" ON public.app_notices;
-DROP POLICY IF EXISTS "Service role full app_notices" ON public.app_notices;
-CREATE POLICY "Service role full app_notices" ON public.app_notices FOR ALL TO service_role USING (true) WITH CHECK (true);
+ALTER TABLE public.app_security_config ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admin full app_security_config" ON public.app_security_config;
+CREATE POLICY "Admin full app_security_config"
+ON public.app_security_config FOR ALL TO authenticated
+USING (public.is_admin_user()) WITH CHECK (public.is_admin_user());
 
-DROP POLICY IF EXISTS "Allow manage admin_push_devices" ON public.admin_push_devices;
-DROP POLICY IF EXISTS "Service role only admin_push_devices" ON public.admin_push_devices;
-CREATE POLICY "Service role only admin_push_devices" ON public.admin_push_devices FOR ALL TO service_role USING (true) WITH CHECK (true);
+ALTER TABLE public.course_payment_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admin full course_payment_settings" ON public.course_payment_settings;
+CREATE POLICY "Admin full course_payment_settings"
+ON public.course_payment_settings FOR ALL TO authenticated
+USING (public.is_admin_user()) WITH CHECK (public.is_admin_user());
 
-REVOKE DELETE ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.admin_approve_device_verification(text, text) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.admin_set_device_block_status(text, boolean, text) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.admin_toggle_device_ban(text, boolean, text) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.admin_set_device_course_permissions(text, boolean, text[], text[], text[], text[]) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.admin_set_account_course_permissions(text, text, text, boolean, boolean, text[], text[], text[], text[], boolean) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.admin_approve_course_access_request(bigint, integer, boolean, jsonb, text, boolean) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.admin_approve_course_access_with_trial(text, text, numeric, boolean, jsonb, boolean, integer, integer, boolean, text) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.admin_manage_course_trial(text, text, text, integer, integer) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.admin_review_course_payment(bigint, boolean, text, integer) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.update_onesignal_config_secure(text, text) FROM PUBLIC, anon, authenticated;"""
+ALTER TABLE public.app_updates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admin full app_updates" ON public.app_updates;
+CREATE POLICY "Admin full app_updates"
+ON public.app_updates FOR ALL TO authenticated
+USING (public.is_admin_user()) WITH CHECK (public.is_admin_user());
+
+ALTER TABLE public.app_notices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admin full app_notices" ON public.app_notices;
+CREATE POLICY "Admin full app_notices"
+ON public.app_notices FOR ALL TO authenticated
+USING (public.is_admin_user()) WITH CHECK (public.is_admin_user());
+
+ALTER TABLE public.activation_support_links ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admin full activation_support_links" ON public.activation_support_links;
+CREATE POLICY "Admin full activation_support_links"
+ON public.activation_support_links FOR ALL TO authenticated
+USING (public.is_admin_user()) WITH CHECK (public.is_admin_user());
+
+ALTER TABLE public.admin_push_devices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admin full admin_push_devices" ON public.admin_push_devices;
+CREATE POLICY "Admin full admin_push_devices"
+ON public.admin_push_devices FOR ALL TO authenticated
+USING (public.is_admin_user()) WITH CHECK (public.is_admin_user());
+
+ALTER TABLE public.student_notifications ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admin full student_notifications" ON public.student_notifications;
+CREATE POLICY "Admin full student_notifications"
+ON public.student_notifications FOR ALL TO authenticated
+USING (public.is_admin_user()) WITH CHECK (public.is_admin_user());"""
 
 @Composable
 fun SettingsScreen(
@@ -321,11 +268,24 @@ fun SettingsScreen(
     onTestPushNotification: () -> Unit = {},
     isRunningSyncDiagnostics: Boolean = false,
     syncDiagnosticResults: List<com.example.ui.viewmodel.AdminViewModel.SyncDiagnosticCheckItem> = emptyList(),
-    onRunSyncDiagnostics: () -> Unit = {}
+    onRunSyncDiagnostics: () -> Unit = {},
+    adminEmail: String = "",
+    adminUserId: String = "",
+    onLogout: () -> Unit = {},
+    allowedReleaseSignatures: List<String> = emptyList(),
+    maxAdminPushPerMinute: Int = 20,
+    isLoadingSecurityConfig: Boolean = false,
+    isSavingSecurityConfig: Boolean = false,
+    onRefreshSecurityConfig: () -> Unit = {},
+    onAddReleaseSignature: (String) -> Unit = {},
+    onRemoveReleaseSignature: (String) -> Unit = {},
+    onSaveMaxAdminPushPerMinute: (Int) -> Unit = {}
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
     var appIdDraft by remember(oneSignalAppId) { mutableStateOf(oneSignalAppId) }
     var restKeyDraft by remember(oneSignalRestApiKey) { mutableStateOf(oneSignalRestApiKey) }
+    var newSignatureDraft by remember { mutableStateOf("") }
+    var maxPushDraft by remember(maxAdminPushPerMinute) { mutableStateOf(maxAdminPushPerMinute.toString()) }
 
     LazyColumn(
         modifier = Modifier
@@ -334,6 +294,431 @@ fun SettingsScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // 0A. Authenticated Admin Session & Logout Card (Zero-Trust RLS)
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.2.dp,
+                        Brush.horizontalGradient(listOf(EmeraldSuccess.copy(alpha = 0.7f), ElectricBlue.copy(alpha = 0.6f))),
+                        RoundedCornerShape(20.dp)
+                    )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(EmeraldSuccess.copy(alpha = 0.16f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.VerifiedUser,
+                                    contentDescription = "Verified Admin",
+                                    tint = EmeraldSuccess,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Authenticated Admin সেশন",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color.White,
+                                        fontSize = 15.sp
+                                    )
+                                )
+                                Text(
+                                    text = adminEmail.ifBlank { "Verified Supabase Admin" },
+                                    color = NeonCyan,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = EmeraldSuccess.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.6f))
+                        ) {
+                            Text(
+                                text = "ZERO-TRUST RLS",
+                                color = EmeraldSuccess,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    if (adminUserId.isNotBlank()) {
+                        Surface(
+                            color = Slate900,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "User UID: $adminUserId • EncryptedSharedPreferences Active",
+                                color = Slate400,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                            )
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = onLogout,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, CoralDanger.copy(alpha = 0.8f)),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = CoralDanger.copy(alpha = 0.10f),
+                            contentColor = CoralDanger
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("btn_settings_logout")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = "Logout",
+                            tint = CoralDanger,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "অ্যাডমিন অ্যাকাউন্ট থেকে লগআউট করুন",
+                            color = CoralDanger,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // 0B. App Security Config (`public.app_security_config`, id = 1) — Allowed Release Signatures
+        item {
+            val cleanedSigDraft = newSignatureDraft.trim().replace(":", "").replace(" ", "")
+            val isSigDraftValid = cleanedSigDraft.isEmpty() || Regex("^[0-9a-fA-F]{64}$").matches(cleanedSigDraft)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Slate850),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.2.dp,
+                        Brush.horizontalGradient(listOf(ElectricBlue.copy(alpha = 0.7f), NeonCyan.copy(alpha = 0.5f))),
+                        RoundedCornerShape(20.dp)
+                    )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(ElectricBlue.copy(alpha = 0.18f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Fingerprint,
+                                    contentDescription = "Release Signatures",
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(21.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "App Security Config (Release Signatures)",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color.White,
+                                        fontSize = 14.sp
+                                    )
+                                )
+                                Text(
+                                    text = "public.app_security_config (id = 1) • allowed_release_signatures",
+                                    color = Slate400,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = onRefreshSecurityConfig,
+                            enabled = !isLoadingSecurityConfig,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Slate800)
+                                .testTag("btn_refresh_security_config")
+                        ) {
+                            if (isLoadingSecurityConfig) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = NeonCyan,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh Security Config",
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "অফিশিয়াল স্টুডেন্ট APK-এর SHA-256 সাইনিং সিগনেচারগুলো এখানে যুক্ত রাখুন। অনুমোদিত সিগনেচার ছাড়া মোডিফায়েড/ক্লোন APK ব্লক হবে।",
+                        color = Slate200,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp
+                    )
+
+                    // Add New Signature Row
+                    OutlinedTextField(
+                        value = newSignatureDraft,
+                        onValueChange = { newSignatureDraft = it },
+                        label = { Text("নতুন SHA-256 Release Signature", color = Slate400, fontSize = 12.sp) },
+                        placeholder = { Text("64-char hex অথবা AA:BB:CC:... ফরম্যাট", color = Slate400, fontSize = 11.sp) },
+                        singleLine = true,
+                        isError = !isSigDraftValid,
+                        supportingText = if (!isSigDraftValid) {
+                            {
+                                Text(
+                                    text = "⛔ ৬৪ অক্ষরের SHA-256 Hex (কোলনসহ বা ছাড়া) দিন (${cleanedSigDraft.length}/64)",
+                                    color = CoralDanger,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        } else null,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonCyan,
+                            unfocusedBorderColor = Slate700,
+                            focusedContainerColor = Slate900,
+                            unfocusedContainerColor = Slate900,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_release_signature")
+                    )
+
+                    Button(
+                        onClick = {
+                            if (cleanedSigDraft.length == 64 && isSigDraftValid) {
+                                onAddReleaseSignature(newSignatureDraft.trim())
+                                newSignatureDraft = ""
+                            }
+                        },
+                        enabled = !isSavingSecurityConfig && cleanedSigDraft.length == 64 && isSigDraftValid,
+                        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("btn_add_release_signature")
+                    ) {
+                        if (isSavingSecurityConfig) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("সেভ হচ্ছে...", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        } else {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Release Signature যুক্ত করুন", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                        }
+                    }
+
+                    // Existing Allowed Signatures List
+                    if (allowedReleaseSignatures.isEmpty()) {
+                        Surface(
+                            color = Slate900,
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Slate700),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "এখনো কোনো allowed_release_signatures যুক্ত করা হয়নি।",
+                                color = Slate400,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "অনুমোদিত সিগনেচার তালিকা (${allowedReleaseSignatures.size} টি):",
+                                color = EmeraldSuccess,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            allowedReleaseSignatures.forEachIndexed { index, sig ->
+                                Surface(
+                                    color = Slate900,
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Slate700),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = "${index + 1}. $sig",
+                                            color = NeonCyan,
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            IconButton(
+                                                onClick = {
+                                                    clipboardManager.setText(AnnotatedString(sig))
+                                                    onShowToast("সিগনেচার কপি করা হয়েছে!")
+                                                },
+                                                modifier = Modifier.size(36.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ContentCopy,
+                                                    contentDescription = "Copy Signature",
+                                                    tint = Slate400,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = { onRemoveReleaseSignature(sig) },
+                                                enabled = !isSavingSecurityConfig,
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .testTag("btn_remove_release_signature_$index")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Remove Signature",
+                                                    tint = CoralDanger,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Slate700.copy(alpha = 0.5f))
+                    )
+
+                    // max_admin_push_per_minute setting (`public.app_security_config`, id = 1)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "অ্যাডমিন পুশ রেট লিমিট (max_admin_push_per_minute)",
+                            color = Slate200,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = maxPushDraft,
+                                onValueChange = { input ->
+                                    maxPushDraft = input.filter { it.isDigit() }.take(3)
+                                },
+                                label = { Text("প্রতি মিনিটে সর্বোচ্চ পুশ", color = Slate400, fontSize = 11.sp) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NeonCyan,
+                                    unfocusedBorderColor = Slate700,
+                                    focusedContainerColor = Slate900,
+                                    unfocusedContainerColor = Slate900,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("input_max_admin_push_per_minute")
+                            )
+                            Button(
+                                onClick = {
+                                    val parsed = maxPushDraft.toIntOrNull()
+                                    if (parsed != null && parsed in 1..600) {
+                                        onSaveMaxAdminPushPerMinute(parsed)
+                                    } else {
+                                        onShowToast("⚠️ ১ থেকে ৬০০ এর মধ্যে একটি সংখ্যা দিন।")
+                                    }
+                                },
+                                enabled = !isSavingSecurityConfig && (maxPushDraft.toIntOrNull() in 1..600),
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .height(52.dp)
+                                    .testTag("btn_save_max_admin_push_per_minute")
+                            ) {
+                                Text(
+                                    text = "সেভ",
+                                    color = Slate950,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 0. 1-Click Student App & Database 100% Live Sync Diagnostic Tester Card
         item {
             Card(
@@ -845,28 +1230,41 @@ fun SettingsScreen(
                         )
                     }
 
-                    // API Key
+                    // API Key (Zero-Trust Public Anon Key ONLY — service_role strictly prohibited)
                     Column {
-                        val isServiceRole = supabaseKey.contains("InJvbGUiOiJzZXJ2aWNlX3JvbGUi")
+                        val isServiceRole = AdminPreferences.isServiceRoleJwt(supabaseKey)
+                        val isValidAnonKey = supabaseKey.isNotBlank() && !isServiceRole
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Supabase Service Role Key (অ্যাডমিন)",
+                                text = "Supabase Anon Key (Public • Zero-Trust)",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
                             )
                             Surface(
-                                color = if (isServiceRole) EmeraldSuccess.copy(alpha = 0.15f) else AmberWarning.copy(alpha = 0.15f),
+                                color = when {
+                                    isServiceRole -> CoralDanger.copy(alpha = 0.18f)
+                                    isValidAnonKey -> EmeraldSuccess.copy(alpha = 0.15f)
+                                    else -> AmberWarning.copy(alpha = 0.15f)
+                                },
                                 shape = RoundedCornerShape(6.dp)
                             ) {
                                 Text(
-                                    text = if (isServiceRole) "SERVICE_ROLE সক্রিয় ✅" else "SERVICE_ROLE প্রয়োজন ⚠️",
-                                    color = if (isServiceRole) EmeraldSuccess else AmberWarning,
+                                    text = when {
+                                        isServiceRole -> "SERVICE_ROLE নিষিদ্ধ ⛔"
+                                        isValidAnonKey -> "ANON KEY + AUTH ✅"
+                                        else -> "ANON KEY প্রয়োজন ⚠️"
+                                    },
+                                    color = when {
+                                        isServiceRole -> CoralDanger
+                                        isValidAnonKey -> EmeraldSuccess
+                                        else -> AmberWarning
+                                    },
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -877,8 +1275,18 @@ fun SettingsScreen(
                         OutlinedTextField(
                             value = supabaseKey,
                             onValueChange = onKeyChange,
-                            placeholder = { Text("eyJhbGciOiJIUz...", color = Slate400, fontSize = 13.sp) },
+                            placeholder = { Text("eyJhbGciOiJIUz... (public anon key)", color = Slate400, fontSize = 13.sp) },
                             singleLine = true,
+                            isError = isServiceRole,
+                            supportingText = if (isServiceRole) {
+                                {
+                                    Text(
+                                        text = "⛔ নিরাপত্তার জন্য service_role key এখানে সেভ করা যাবে না। শুধুমাত্র public anon key দিন।",
+                                        color = CoralDanger,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            } else null,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = NeonCyan,
                                 unfocusedBorderColor = Slate700,
@@ -954,6 +1362,7 @@ fun SettingsScreen(
 
                         Button(
                             onClick = onSaveSettings,
+                            enabled = !AdminPreferences.isServiceRoleJwt(supabaseKey),
                             colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
@@ -967,7 +1376,7 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 1-Click Zero-Trust Database Security Lock SQL
+                    // Zero-Trust Security Architecture Status Banner
                     Surface(
                         color = Slate900,
                         shape = RoundedCornerShape(12.dp),
@@ -979,7 +1388,7 @@ fun SettingsScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                text = "🛡️ Service Role Key সেভ করার পর নিচের বাটনে ক্লিক করে Zero-Trust Security Lock SQL কপি করুন এবং Supabase SQL Editor-এ Run করুন। এতে স্টুডেন্ট অ্যাপের anon key দিয়ে কেউ হ্যাক বা অ্যাডমিন ফাংশন কল করতে পারবে না:",
+                                text = "🛡️ Zero-Trust Authenticated RLS সক্রিয়: প্রতিটি Supabase API ও RPC কল-এ শুধুমাত্র public anon key (`apikey`) এবং আপনার লগইন করা অ্যাডমিন JWT (`Authorization: Bearer <access_token>`) পাঠানো হয়। অ্যাপের ভেতরে কোনো `service_role` key সংরক্ষণ করা হয় না।",
                                 color = Slate200,
                                 fontSize = 11.sp,
                                 lineHeight = 16.sp
@@ -988,84 +1397,44 @@ fun SettingsScreen(
                                 onClick = {
                                     val securitySql = """
                                         -- ============================================================================
-                                        -- 100% EXACT ZERO-TRUST SECURITY LOCK (MATCHED TO LIVE SCHEMA)
+                                        -- ZERO-TRUST AUTHENTICATED ADMIN SECURITY LOCK (LIVE 16 TABLES + 13 ADMIN RPCs)
                                         -- ============================================================================
+                                        -- 1. Revoke anon/PUBLIC access from all 13 Admin RPCs; grant ONLY to authenticated
+                                        --    (each RPC internally enforces `public.is_admin_user() = true`).
+                                        REVOKE ALL ON FUNCTION public.admin_approve_device_verification(text, text) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_set_device_block_status(text, boolean, text) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_toggle_device_ban(text, boolean, text) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_set_device_course_permissions(text, boolean, text[], text[], text[], text[]) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_set_account_course_permissions(text, text, text, boolean, boolean, text[], text[], text[], text[], boolean) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_approve_course_access_request(bigint, integer, boolean, jsonb, text, boolean) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_approve_course_access_with_trial(text, text, numeric, boolean, jsonb, boolean, integer, integer, boolean, text) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_manage_course_trial(text, text, text, integer, integer) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_review_course_payment(bigint, boolean, text, integer) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_publish_app_update(text, integer, integer, boolean, text, text, text, text, text, double precision, boolean) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_set_kill_switch(boolean, boolean, text, text, text) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.notify_student_via_onesignal(text, text, text, text, text, text, jsonb) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.update_onesignal_config_secure(text, text) FROM PUBLIC, anon;
 
-                                        -- ১. সব admin_* এবং সেনসিটিভ ফাংশন থেকে PUBLIC/anon অ্যাক্সেস বাতিল (শুধুমাত্র service_role কল করতে পারবে)
-                                        REVOKE ALL ON FUNCTION public.admin_approve_device_verification(text, text) FROM PUBLIC, anon, authenticated;
-                                        REVOKE ALL ON FUNCTION public.admin_set_device_block_status(text, boolean, text) FROM PUBLIC, anon, authenticated;
-                                        REVOKE ALL ON FUNCTION public.admin_toggle_device_ban(text, boolean, text) FROM PUBLIC, anon, authenticated;
-                                        REVOKE ALL ON FUNCTION public.admin_set_device_course_permissions(text, boolean, text[], text[], text[], text[]) FROM PUBLIC, anon, authenticated;
-                                        REVOKE ALL ON FUNCTION public.admin_set_account_course_permissions(text, text, text, boolean, boolean, text[], text[], text[], text[], boolean) FROM PUBLIC, anon, authenticated;
-                                        REVOKE ALL ON FUNCTION public.admin_approve_course_access_request(bigint, integer, boolean, jsonb, text, boolean) FROM PUBLIC, anon, authenticated;
-                                        REVOKE ALL ON FUNCTION public.admin_approve_course_access_with_trial(text, text, numeric, boolean, jsonb, boolean, integer, integer, boolean, text) FROM PUBLIC, anon, authenticated;
-                                        REVOKE ALL ON FUNCTION public.admin_manage_course_trial(text, text, text, integer, integer) FROM PUBLIC, anon, authenticated;
-                                        REVOKE ALL ON FUNCTION public.admin_review_course_payment(bigint, boolean, text, integer) FROM PUBLIC, anon, authenticated;
-                                        REVOKE ALL ON FUNCTION public.update_onesignal_config_secure(text, text) FROM PUBLIC, anon, authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_approve_device_verification(text, text) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_set_device_block_status(text, boolean, text) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_toggle_device_ban(text, boolean, text) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_set_device_course_permissions(text, boolean, text[], text[], text[], text[]) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_set_account_course_permissions(text, text, text, boolean, boolean, text[], text[], text[], text[], boolean) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_approve_course_access_request(bigint, integer, boolean, jsonb, text, boolean) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_approve_course_access_with_trial(text, text, numeric, boolean, jsonb, boolean, integer, integer, boolean, text) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_manage_course_trial(text, text, text, integer, integer) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_review_course_payment(bigint, boolean, text, integer) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_set_kill_switch(boolean, boolean, text, text, text) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.notify_student_via_onesignal(text, text, text, text, text, text, jsonb) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.update_onesignal_config_secure(text, text) TO authenticated;
 
-                                        GRANT EXECUTE ON FUNCTION public.admin_approve_device_verification(text, text) TO service_role;
-                                        GRANT EXECUTE ON FUNCTION public.admin_set_device_block_status(text, boolean, text) TO service_role;
-                                        GRANT EXECUTE ON FUNCTION public.admin_toggle_device_ban(text, boolean, text) TO service_role;
-                                        GRANT EXECUTE ON FUNCTION public.admin_set_device_course_permissions(text, boolean, text[], text[], text[], text[]) TO service_role;
-                                        GRANT EXECUTE ON FUNCTION public.admin_set_account_course_permissions(text, text, text, boolean, boolean, text[], text[], text[], text[], boolean) TO service_role;
-                                        GRANT EXECUTE ON FUNCTION public.admin_approve_course_access_request(bigint, integer, boolean, jsonb, text, boolean) TO service_role;
-                                        GRANT EXECUTE ON FUNCTION public.admin_approve_course_access_with_trial(text, text, numeric, boolean, jsonb, boolean, integer, integer, boolean, text) TO service_role;
-                                        GRANT EXECUTE ON FUNCTION public.admin_manage_course_trial(text, text, text, integer, integer) TO service_role;
-                                        GRANT EXECUTE ON FUNCTION public.admin_review_course_payment(bigint, boolean, text, integer) TO service_role;
-                                        GRANT EXECUTE ON FUNCTION public.update_onesignal_config_secure(text, text) TO service_role;
-
-                                        -- ২. পেমেন্ট নাম্বার, অ্যাপ আপডেট, নোটিশ, সাপোর্ট লিংক ও অ্যাডমিন পুশ ডিভাইসে anon Write/Delete বন্ধ করা
-                                        DROP POLICY IF EXISTS "Allow all course_payment_settings" ON public.course_payment_settings;
-                                        DROP POLICY IF EXISTS "Public read course_payment_settings" ON public.course_payment_settings;
-                                        CREATE POLICY "Public read course_payment_settings" ON public.course_payment_settings FOR SELECT TO public USING (true);
-                                        DROP POLICY IF EXISTS "Service role full course_payment_settings" ON public.course_payment_settings;
-                                        CREATE POLICY "Service role full course_payment_settings" ON public.course_payment_settings FOR ALL TO service_role USING (true) WITH CHECK (true);
-
-                                        DROP POLICY IF EXISTS "Allow admin full access to app updates" ON public.app_updates;
-                                        DROP POLICY IF EXISTS "Service role full app_updates" ON public.app_updates;
-                                        CREATE POLICY "Service role full app_updates" ON public.app_updates FOR ALL TO service_role USING (true) WITH CHECK (true);
-
-                                        DROP POLICY IF EXISTS "Allow full access for admin operations" ON public.app_notices;
-                                        DROP POLICY IF EXISTS "Service role full app_notices" ON public.app_notices;
-                                        CREATE POLICY "Service role full app_notices" ON public.app_notices FOR ALL TO service_role USING (true) WITH CHECK (true);
-
-                                        DROP POLICY IF EXISTS "Allow admin full access for activation support links" ON public.activation_support_links;
-                                        DROP POLICY IF EXISTS "Service role full activation_support_links" ON public.activation_support_links;
-                                        CREATE POLICY "Service role full activation_support_links" ON public.activation_support_links FOR ALL TO service_role USING (true) WITH CHECK (true);
-
-                                        DROP POLICY IF EXISTS "Allow manage admin_push_devices" ON public.admin_push_devices;
-                                        DROP POLICY IF EXISTS "Service role full admin_push_devices" ON public.admin_push_devices;
-                                        CREATE POLICY "Service role full admin_push_devices" ON public.admin_push_devices FOR ALL TO service_role USING (true) WITH CHECK (true);
-
-                                        -- ৩. devices, enrollments ও transactions টেবিলে স্টুডেন্টদের DELETE ক্ষমতা বন্ধ করা (Tamper Trigger ইতোমধ্যে INSERT/UPDATE সুরক্ষিত রাখছে)
-                                        DROP POLICY IF EXISTS "Allow full admin operations on devices" ON public.devices;
-                                        DROP POLICY IF EXISTS "Allow student insert devices" ON public.devices;
-                                        CREATE POLICY "Allow student insert devices" ON public.devices FOR INSERT TO anon, authenticated WITH CHECK (true);
-                                        DROP POLICY IF EXISTS "Allow student update devices" ON public.devices;
-                                        CREATE POLICY "Allow student update devices" ON public.devices FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
-                                        DROP POLICY IF EXISTS "Service role full devices" ON public.devices;
-                                        CREATE POLICY "Service role full devices" ON public.devices FOR ALL TO service_role USING (true) WITH CHECK (true);
-
-                                        DROP POLICY IF EXISTS "Allow all course_access_enrollments" ON public.course_access_enrollments;
-                                        DROP POLICY IF EXISTS "Allow student read enrollments" ON public.course_access_enrollments;
-                                        CREATE POLICY "Allow student read enrollments" ON public.course_access_enrollments FOR SELECT TO anon, authenticated USING (true);
-                                        DROP POLICY IF EXISTS "Allow student insert enrollments" ON public.course_access_enrollments;
-                                        CREATE POLICY "Allow student insert enrollments" ON public.course_access_enrollments FOR INSERT TO anon, authenticated WITH CHECK (true);
-                                        DROP POLICY IF EXISTS "Allow student update enrollments" ON public.course_access_enrollments;
-                                        CREATE POLICY "Allow student update enrollments" ON public.course_access_enrollments FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
-                                        DROP POLICY IF EXISTS "Service role full enrollments" ON public.course_access_enrollments;
-                                        CREATE POLICY "Service role full enrollments" ON public.course_access_enrollments FOR ALL TO service_role USING (true) WITH CHECK (true);
-
-                                        DROP POLICY IF EXISTS "Allow all course_payment_transactions" ON public.course_payment_transactions;
-                                        DROP POLICY IF EXISTS "Allow student read payment_tx" ON public.course_payment_transactions;
-                                        CREATE POLICY "Allow student read payment_tx" ON public.course_payment_transactions FOR SELECT TO anon, authenticated USING (true);
-                                        DROP POLICY IF EXISTS "Allow student insert payment_tx" ON public.course_payment_transactions;
-                                        CREATE POLICY "Allow student insert payment_tx" ON public.course_payment_transactions FOR INSERT TO anon, authenticated WITH CHECK (true);
-                                        DROP POLICY IF EXISTS "Service role full payment_tx" ON public.course_payment_transactions;
-                                        CREATE POLICY "Service role full payment_tx" ON public.course_payment_transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
+                                        -- 2. Verify Admin Auth RPCs for `authenticated`
+                                        GRANT EXECUTE ON FUNCTION public.is_admin_user() TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.check_is_admin() TO authenticated;
                                     """.trimIndent()
                                     clipboardManager.setText(AnnotatedString(securitySql))
-                                    onShowToast("✅ Zero-Trust Security Lock SQL কপি হয়েছে! এখন Supabase SQL Editor-এ Run করুন।")
+                                    onShowToast("✅ Zero-Trust Authenticated RLS SQL কপি হয়েছে!")
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
                                 shape = RoundedCornerShape(10.dp),
@@ -1076,7 +1445,7 @@ fun SettingsScreen(
                                 Icon(Icons.Default.Security, contentDescription = null, tint = Slate950, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Zero-Trust Security Lock SQL কপি করুন",
+                                    text = "Zero-Trust Authenticated RLS SQL কপি করুন",
                                     color = Slate950,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontSize = 12.sp
@@ -1152,7 +1521,7 @@ fun SettingsScreen(
                     }
 
                     Text(
-                        text = "আপনার Supabase প্রজেক্টে পুরাতন access_codes/activated_devices ডিলিট করতে এবং devices ও অন্যান্য টেবিল সেটআপ করতে উপরের বাটন দিয়ে কপি করে Supabase SQL Editor এ রান করুন।",
+                        text = "আপনার Supabase প্রজেক্টে লাইভ Zero-Trust Authenticated Admin RLS রেফারেন্স স্ক্রিপ্ট দেখতে বা কপি করতে উপরের বাটন ব্যবহার করুন।",
                         style = MaterialTheme.typography.bodySmall.copy(color = Slate400, lineHeight = 18.sp)
                     )
 
