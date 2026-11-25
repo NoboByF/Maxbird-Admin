@@ -266,7 +266,7 @@ interface SupabaseApi {
     @POST("rest/v1/rpc/admin_set_device_block_status")
     suspend fun setDeviceBlockStatusRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+    ): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/rpc/admin_toggle_device_ban")
     suspend fun toggleDeviceBanRpc(
@@ -412,11 +412,6 @@ interface SupabaseApi {
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<okhttp3.ResponseBody>
 
-    @POST("rest/v1/rpc/admin_set_course_access_offer")
-    suspend fun setCourseAccessOfferRpcRaw(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
     @POST("rest/v1/rpc/admin_review_course_payment")
     suspend fun reviewCoursePaymentRpc(
         @Body payload: ReviewCoursePaymentRpcPayload
@@ -424,11 +419,6 @@ interface SupabaseApi {
 
     @POST("rest/v1/rpc/admin_review_course_payment")
     suspend fun reviewCoursePaymentRpcRaw(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
-    @POST("rest/v1/rpc/admin_verify_course_payment")
-    suspend fun verifyCoursePaymentRpcRaw(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<okhttp3.ResponseBody>
 
@@ -477,11 +467,6 @@ interface SupabaseApi {
         @Header("Prefer") prefer: String = "resolution=merge-duplicates,return=representation"
     ): Response<okhttp3.ResponseBody>
 
-    @POST("rest/v1/rpc/send_student_push_via_onesignal")
-    suspend fun sendStudentPushViaOneSignalRpc(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
     @POST("rest/v1/rpc/notify_student_via_onesignal")
     suspend fun notifyStudentViaOneSignalRpc(
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
@@ -492,50 +477,10 @@ interface SupabaseApi {
         @Body payload: Map<String, @JvmSuppressWildcards Any?>
     ): Response<okhttp3.ResponseBody>
 
-    // =========================================================================
-    // Secure Admin Delete & Permission Management RPCs (SECURITY DEFINER)
-    // Used when `REVOKE DELETE ON ALL TABLES FROM anon` is active on Supabase
-    // =========================================================================
-
-    @POST("rest/v1/rpc/admin_delete_device")
-    suspend fun adminDeleteDeviceRpc(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
-    @POST("rest/v1/rpc/admin_delete_app_notice")
-    suspend fun adminDeleteAppNoticeRpc(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
-    @POST("rest/v1/rpc/admin_delete_app_update")
-    suspend fun adminDeleteAppUpdateRpc(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
-    @POST("rest/v1/rpc/admin_delete_support_link")
-    suspend fun adminDeleteSupportLinkRpc(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
-    @POST("rest/v1/rpc/admin_delete_course_enrollment")
-    suspend fun adminDeleteCourseEnrollmentRpc(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
     @DELETE("rest/v1/course_access_enrollments")
     suspend fun deleteCourseAccessEnrollment(
         @Query("id") idQuery: String
     ): Response<Unit>
-
-    @POST("rest/v1/rpc/admin_set_device_can_view_profiles")
-    suspend fun adminSetDeviceCanViewProfilesRpc(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
-
-    @POST("rest/v1/rpc/admin_revoke_device_to_pending")
-    suspend fun adminRevokeDeviceToPendingRpc(
-        @Body payload: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<okhttp3.ResponseBody>
 
     // =========================================================================
     // App Security Config (`public.app_security_config`, id = 1)

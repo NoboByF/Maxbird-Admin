@@ -116,8 +116,13 @@ CREATE OR REPLACE FUNCTION public.admin_set_device_block_status(
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     UPDATE public.devices
     SET
         status = CASE WHEN p_is_banned THEN 'blocked' ELSE 'active' END,
@@ -134,15 +139,23 @@ BEGIN
        OR id::text = p_device_hash;
 END;
 $$;
+REVOKE ALL ON FUNCTION public.admin_set_device_block_status(TEXT, BOOLEAN, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_set_device_block_status(TEXT, BOOLEAN, TEXT) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.admin_approve_device_verification(
-    p_device_hash TEXT
+    p_device_hash TEXT,
+    p_student_note TEXT DEFAULT ''
 )
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 BEGIN
+    IF NOT public.is_admin_user() THEN
+        RAISE EXCEPTION 'Unauthorized: admin access required';
+    END IF;
+
     UPDATE public.devices
     SET
         status = 'active',
@@ -150,6 +163,7 @@ BEGIN
         is_blocked = false,
         ban_reason = '',
         rejection_reason = '',
+        student_note = COALESCE(NULLIF(BTRIM(p_student_note), ''), student_note),
         approved_at = now(),
         updated_at = now()
     WHERE device_hash = p_device_hash
@@ -158,6 +172,8 @@ BEGIN
        OR id::text = p_device_hash;
 END;
 $$;
+REVOKE ALL ON FUNCTION public.admin_approve_device_verification(TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_approve_device_verification(TEXT, TEXT) TO authenticated;
 """
 
 private const val SUPABASE_SCHEMA_SQL = """-- MaxBird Live Zero-Trust Authenticated RLS Reference SQL (16 Live Tables)
@@ -1397,9 +1413,9 @@ fun SettingsScreen(
                                 onClick = {
                                     val securitySql = """
                                         -- ============================================================================
-                                        -- ZERO-TRUST AUTHENTICATED ADMIN SECURITY LOCK (LIVE 16 TABLES + 13 ADMIN RPCs)
+                                        -- ZERO-TRUST AUTHENTICATED ADMIN SECURITY LOCK (LIVE 16 TABLES + 14 ADMIN RPCs)
                                         -- ============================================================================
-                                        -- 1. Revoke anon/PUBLIC access from all 13 Admin RPCs; grant ONLY to authenticated
+                                        -- 1. Revoke anon/PUBLIC access from all Admin RPCs; grant ONLY to authenticated
                                         --    (each RPC internally enforces `public.is_admin_user() = true`).
                                         REVOKE ALL ON FUNCTION public.admin_approve_device_verification(text, text) FROM PUBLIC, anon;
                                         REVOKE ALL ON FUNCTION public.admin_set_device_block_status(text, boolean, text) FROM PUBLIC, anon;
@@ -1410,9 +1426,10 @@ fun SettingsScreen(
                                         REVOKE ALL ON FUNCTION public.admin_approve_course_access_with_trial(text, text, numeric, boolean, jsonb, boolean, integer, integer, boolean, text) FROM PUBLIC, anon;
                                         REVOKE ALL ON FUNCTION public.admin_manage_course_trial(text, text, text, integer, integer) FROM PUBLIC, anon;
                                         REVOKE ALL ON FUNCTION public.admin_review_course_payment(bigint, boolean, text, integer) FROM PUBLIC, anon;
-                                        REVOKE ALL ON FUNCTION public.admin_publish_app_update(text, integer, integer, boolean, text, text, text, text, text, double precision, boolean) FROM PUBLIC, anon;
-                                        REVOKE ALL ON FUNCTION public.admin_set_kill_switch(boolean, boolean, text, text, text) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_publish_app_update(text, integer, text, text, text, text, text) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.admin_set_kill_switch(boolean, text, text, text) FROM PUBLIC, anon;
                                         REVOKE ALL ON FUNCTION public.notify_student_via_onesignal(text, text, text, text, text, text, jsonb) FROM PUBLIC, anon;
+                                        REVOKE ALL ON FUNCTION public.notify_admin_via_onesignal(text, text, text, jsonb) FROM PUBLIC, anon;
                                         REVOKE ALL ON FUNCTION public.update_onesignal_config_secure(text, text) FROM PUBLIC, anon;
 
                                         GRANT EXECUTE ON FUNCTION public.admin_approve_device_verification(text, text) TO authenticated;
@@ -1424,8 +1441,10 @@ fun SettingsScreen(
                                         GRANT EXECUTE ON FUNCTION public.admin_approve_course_access_with_trial(text, text, numeric, boolean, jsonb, boolean, integer, integer, boolean, text) TO authenticated;
                                         GRANT EXECUTE ON FUNCTION public.admin_manage_course_trial(text, text, text, integer, integer) TO authenticated;
                                         GRANT EXECUTE ON FUNCTION public.admin_review_course_payment(bigint, boolean, text, integer) TO authenticated;
-                                        GRANT EXECUTE ON FUNCTION public.admin_set_kill_switch(boolean, boolean, text, text, text) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_publish_app_update(text, integer, text, text, text, text, text) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.admin_set_kill_switch(boolean, text, text, text) TO authenticated;
                                         GRANT EXECUTE ON FUNCTION public.notify_student_via_onesignal(text, text, text, text, text, text, jsonb) TO authenticated;
+                                        GRANT EXECUTE ON FUNCTION public.notify_admin_via_onesignal(text, text, text, jsonb) TO authenticated;
                                         GRANT EXECUTE ON FUNCTION public.update_onesignal_config_secure(text, text) TO authenticated;
 
                                         -- 2. Verify Admin Auth RPCs for `authenticated`

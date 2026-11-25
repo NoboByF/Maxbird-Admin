@@ -1342,21 +1342,20 @@ SET
     apk_url = COALESCE(NULLIF(apk_url, ''), download_url, ''),
     release_notes = COALESCE(NULLIF(release_notes, ''), changelog, '');
 
--- RPC for Global Kill Switch
+-- RPC for Global Kill Switch (exact live 4-argument signature)
 CREATE OR REPLACE FUNCTION public.admin_set_kill_switch(
-    p_is_kill_switch BOOLEAN,
-    p_is_maintenance BOOLEAN DEFAULT NULL,
-    p_kill_switch_title TEXT DEFAULT 'অ্যাপ আপডেটের কাজ চলছে',
-    p_kill_switch_message TEXT DEFAULT 'অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।',
-    p_estimated_back_time TEXT DEFAULT ''
+    p_enabled BOOLEAN,
+    p_title TEXT DEFAULT 'অ্যাপ আপডেটের কাজ চলছে',
+    p_message TEXT DEFAULT 'অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।',
+    p_estimated_time TEXT DEFAULT ''
 )
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
     v_target_id UUID;
-    v_maint BOOLEAN := COALESCE(p_is_maintenance, p_is_kill_switch);
 BEGIN
     IF NOT public.is_admin_user() THEN
         RAISE EXCEPTION 'Unauthorized: admin access required';
@@ -1370,19 +1369,19 @@ BEGIN
     IF v_target_id IS NOT NULL THEN
         UPDATE public.app_updates
         SET
-            is_kill_switch = p_is_kill_switch,
-            is_maintenance = v_maint,
-            kill_switch_title = COALESCE(NULLIF(TRIM(p_kill_switch_title), ''), 'অ্যাপ আপডেটের কাজ চলছে'),
-            kill_switch_message = COALESCE(NULLIF(TRIM(p_kill_switch_message), ''), 'অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।'),
-            estimated_back_time = COALESCE(p_estimated_back_time, ''),
+            is_kill_switch = p_enabled,
+            is_maintenance = p_enabled,
+            kill_switch_title = COALESCE(NULLIF(TRIM(p_title), ''), 'অ্যাপ আপডেটের কাজ চলছে'),
+            kill_switch_message = COALESCE(NULLIF(TRIM(p_message), ''), 'অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।'),
+            estimated_back_time = COALESCE(p_estimated_time, ''),
             updated_at = NOW()
         WHERE id = v_target_id;
     END IF;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.admin_set_kill_switch(BOOLEAN, BOOLEAN, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.admin_set_kill_switch(BOOLEAN, BOOLEAN, TEXT, TEXT, TEXT) TO authenticated;
+REVOKE ALL ON FUNCTION public.admin_set_kill_switch(BOOLEAN, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_set_kill_switch(BOOLEAN, TEXT, TEXT, TEXT) TO authenticated;
 
 -- 3. Create public.student_notifications table
 CREATE TABLE IF NOT EXISTS public.student_notifications (

@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.data.api.SupabaseClient
+import com.example.data.api.SupabaseRealtimeClient
 import com.example.data.preferences.AdminPreferences
 import com.example.data.repository.MaxBirdRepository
 import com.example.data.repository.SupabaseMaxBirdRepository
@@ -26,7 +27,8 @@ import kotlinx.coroutines.launch
 
 /**
  * 24/7 Foreground & Background Real-time Monitor Service for MaxBird Admin.
- * Automatically checks Supabase every 15 seconds for:
+ * Uses Authenticated Supabase Realtime WebSocket for instant (<1s) alerts plus a 15-second
+ * REST safety polling fallback for:
  * 1. New Student Device Verification Requests (`public.devices` status = 'pending')
  * 2. New Course Access Requests (`public.course_access_enrollments` status = 'ACCESS_REQUESTED' / 'REQUESTED')
  * 3. New Course Payment / Installment Submissions (`public.course_payment_transactions` status = 'PENDING')
@@ -38,14 +40,16 @@ class AdminRealtimeMonitorService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var monitorJob: Job? = null
+    private var realtimeSyncJob: Job? = null
 
     private lateinit var adminPreferences: AdminPreferences
+    private lateinit var realtimeClient: SupabaseRealtimeClient
     private lateinit var repository: MaxBirdRepository
     private lateinit var notificationHelper: AdminNotificationHelper
 
     companion object {
         private const val FOREGROUND_NOTIFICATION_ID = 8800
-        private const val POLL_INTERVAL_MS = 15_000L // 15 seconds
+        private const val POLL_INTERVAL_MS = 15_000L // 15 seconds fallback safety poll
 
         fun startIfEnabled(context: Context) {
             val prefs = AdminPreferences(context)
@@ -74,8 +78,39 @@ class AdminRealtimeMonitorService : Service() {
         super.onCreate()
         adminPreferences = AdminPreferences(applicationContext)
         val supabaseClient = SupabaseClient(adminPreferences)
+        realtimeClient = SupabaseRealtimeClient(adminPreferences, supabaseClient.authManager)
         repository = SupabaseMaxBirdRepository(supabaseClient, adminPreferences)
         notificationHelper = AdminNotificationHelper(applicationContext)
+    }
+
+    private suspend fun checkAndUpdatePendingEvents() {
+        if (!adminPreferences.hasValidAdminSession()) {
+            realtimeClient.stop()
+            stopSelf()
+            return
+        }
+        val devices = repository.getUserDevices().getOrNull().orEmpty()
+        val enrollments = repository.getCourseAccessEnrollments().getOrNull().orEmpty()
+        val transactions = repository.getCoursePaymentTransactions().getOrNull().orEmpty()
+
+        notificationHelper.checkAndNotifyNewEvents(
+            devices = devices,
+            enrollments = enrollments,
+            transactions = transactions
+        )
+
+        val pendingDevs = devices.count { it.isPendingDevice }
+        val pendingCourses = enrollments.count { it.isAccessRequestedStatus }
+        val pendingPays = transactions.count { it.status.equals("PENDING", ignoreCase = true) }
+        val totalPending = pendingDevs + pendingCourses + pendingPays
+
+        val wsTag = if (realtimeClient.isConnected.value) "Realtime সক্রিয়" else "লাইভ মনিটর সক্রিয়"
+        val statusText = if (totalPending > 0) {
+            "অপেক্ষমান: ${pendingDevs}টি ডিভাইস • ${pendingCourses}টি কোর্স • ${pendingPays}টি পেমেন্ট"
+        } else {
+            "$wsTag • নতুন রিকোয়েস্ট বা টাকা আসলে সাথে সাথে জানাবো"
+        }
+        updateForegroundStatus(statusText)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -87,36 +122,29 @@ class AdminRealtimeMonitorService : Service() {
         notificationHelper.ensureNotificationChannels()
         startForegroundSafely("লাইভ মনিটরিং চালু আছে • নতুন রিকোয়েস্ট ও পেমেন্ট অটো-চেক হচ্ছে")
 
+        if (adminPreferences.hasValidAdminSession()) {
+            realtimeClient.start { tableName, _ ->
+                if (tableName == "devices" ||
+                    tableName == "course_access_enrollments" ||
+                    tableName == "course_payment_transactions"
+                ) {
+                    realtimeSyncJob?.cancel()
+                    realtimeSyncJob = serviceScope.launch {
+                        delay(350L)
+                        try {
+                            checkAndUpdatePendingEvents()
+                        } catch (_: Throwable) {
+                        }
+                    }
+                }
+            }
+        }
+
         if (monitorJob?.isActive != true) {
             monitorJob = serviceScope.launch {
                 while (isActive && notificationHelper.isLiveMonitorEnabled()) {
                     try {
-                        if (!adminPreferences.hasValidAdminSession()) {
-                            updateForegroundStatus("অ্যাডমিন লগইন প্রয়োজন • সেশন অ্যাক্টিভ হলে মনিটরিং চালু হবে")
-                            delay(POLL_INTERVAL_MS)
-                            continue
-                        }
-                        val devices = repository.getUserDevices().getOrNull().orEmpty()
-                        val enrollments = repository.getCourseAccessEnrollments().getOrNull().orEmpty()
-                        val transactions = repository.getCoursePaymentTransactions().getOrNull().orEmpty()
-
-                        notificationHelper.checkAndNotifyNewEvents(
-                            devices = devices,
-                            enrollments = enrollments,
-                            transactions = transactions
-                        )
-
-                        val pendingDevs = devices.count { it.isPendingDevice }
-                        val pendingCourses = enrollments.count { it.isAccessRequestedStatus }
-                        val pendingPays = transactions.count { it.status.equals("PENDING", ignoreCase = true) }
-                        val totalPending = pendingDevs + pendingCourses + pendingPays
-
-                        val statusText = if (totalPending > 0) {
-                            "অপেক্ষমান: ${pendingDevs}টি ডিভাইস • ${pendingCourses}টি কোর্স • ${pendingPays}টি পেমেন্ট"
-                        } else {
-                            "লাইভ মনিটর সক্রিয় • নতুন রিকোয়েস্ট বা টাকা আসলে সাথে সাথে জানাবো"
-                        }
-                        updateForegroundStatus(statusText)
+                        checkAndUpdatePendingEvents()
                     } catch (_: Throwable) {
                         // Ignore transient network errors and retry on next cycle
                     }
@@ -175,6 +203,10 @@ class AdminRealtimeMonitorService : Service() {
             .build()
 
     override fun onDestroy() {
+        realtimeSyncJob?.cancel()
+        if (::realtimeClient.isInitialized) {
+            realtimeClient.stop()
+        }
         monitorJob?.cancel()
         serviceScope.cancel()
         super.onDestroy()

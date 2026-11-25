@@ -116,7 +116,7 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun createAppUpdate(payload: CreateAppUpdatePayload): Result<AppUpdate> = withContext(Dispatchers.IO) {
-        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val now = formatUtcIso(System.currentTimeMillis())
         val vCode = if (payload.versionCode > 0) payload.versionCode else payload.latestVersionCode
         val vName = payload.versionName.ifBlank { payload.latestVersionName }.trim()
         val apkLink = payload.apkUrl.ifBlank { payload.downloadUrl }.trim()
@@ -188,7 +188,7 @@ class SupabaseMaxBirdRepository(
         try {
             val api = supabaseClient.getApi()
             var lastError = ""
-            for (candidate in listOf(liveSupabaseSchemaMap, fullSchemaMap, legacySchemaMap)) {
+            for (candidate in listOf(fullSchemaMap, liveSupabaseSchemaMap, legacySchemaMap)) {
                 try {
                     val res = api.createAppUpdateRaw(candidate)
                     if (res.isSuccessful) {
@@ -227,22 +227,23 @@ class SupabaseMaxBirdRepository(
                 }
             }
             // Fallback to authenticated SECURITY DEFINER RPC `admin_publish_app_update`
+            // Live DB signature: (p_version_name text, p_version_code integer, p_download_url text, p_changelog text, p_title text, p_button_text text, p_checksum_sha256 text)
             try {
                 val rpcPayload = mapOf<String, Any?>(
-                    "p_latest_version_name" to vName,
-                    "p_latest_version_code" to vCode,
-                    "p_min_supported_version_code" to minCode,
-                    "p_is_force_update" to payload.isForceUpdate,
-                    "p_title" to cleanTitle,
-                    "p_changelog" to notes,
+                    "p_version_name" to vName,
+                    "p_version_code" to vCode,
                     "p_download_url" to apkLink,
+                    "p_changelog" to notes,
+                    "p_title" to cleanTitle,
                     "p_button_text" to cleanBtn,
-                    "p_apk_checksum_sha256" to cleanChecksum,
-                    "p_file_size_mb" to payload.fileSizeMb,
-                    "p_is_active" to payload.isActive
+                    "p_checksum_sha256" to cleanChecksum
                 )
                 val rpcRes = api.adminPublishAppUpdateRpc(rpcPayload)
                 if (rpcRes.isSuccessful) {
+                    val refreshed = getAppUpdates(forceRefresh = true).getOrNull()?.firstOrNull()
+                    if (refreshed != null) {
+                        return@withContext Result.success(refreshed)
+                    }
                     val created = AppUpdate(
                         id = UUID.randomUUID().toString(),
                         versionCode = vCode,
@@ -280,7 +281,7 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun updateAppUpdate(id: String, payload: CreateAppUpdatePayload): Result<AppUpdate> = withContext(Dispatchers.IO) {
-        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val now = formatUtcIso(System.currentTimeMillis())
         val vCode = if (payload.versionCode > 0) payload.versionCode else payload.latestVersionCode
         val vName = payload.versionName.ifBlank { payload.latestVersionName }.trim()
         val apkLink = payload.apkUrl.ifBlank { payload.downloadUrl }.trim()
@@ -353,7 +354,7 @@ class SupabaseMaxBirdRepository(
         try {
             val api = supabaseClient.getApi()
             var lastError = ""
-            for (candidate in listOf(liveSupabaseSchemaMap, fullSchemaMap, legacySchemaMap)) {
+            for (candidate in listOf(fullSchemaMap, liveSupabaseSchemaMap, legacySchemaMap)) {
                 try {
                     val res = api.patchAppUpdateRaw("eq.$id", candidate)
                     if (res.isSuccessful && !res.body().isNullOrEmpty()) {
@@ -381,7 +382,7 @@ class SupabaseMaxBirdRepository(
         message: String,
         estimatedBackTime: String
     ): Result<AppUpdate> = withContext(Dispatchers.IO) {
-        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val now = formatUtcIso(System.currentTimeMillis())
         val cleanTitle = title.trim().ifBlank { "অ্যাপ আপডেটের কাজ চলছে" }
         val cleanMessage = message.trim().ifBlank {
             "অ্যাপটিকে আরও উন্নত, দ্রুত ও নিরাপদ করতে বর্তমানে সার্ভার ও সিস্টেম আপডেটের কাজ চলছে। কাজ শেষ হওয়া মাত্রই অ্যাপটি পুনরায় চালু হবে।"
@@ -392,7 +393,8 @@ class SupabaseMaxBirdRepository(
             val api = supabaseClient.getApi()
             var rpcSucceeded = false
 
-            // 1. Call RPC `admin_set_kill_switch(p_enabled, p_title, p_message, p_estimated_time)`
+            // 1. Primary: Call exact live 4-arg RPC `admin_set_kill_switch(p_enabled, p_title, p_message, p_estimated_time)`
+            var rpcErr = ""
             try {
                 val rpcPayload = mapOf<String, Any?>(
                     "p_enabled" to isEnabled,
@@ -403,14 +405,23 @@ class SupabaseMaxBirdRepository(
                 val rpcRes = api.setKillSwitchRpc(rpcPayload)
                 if (rpcRes.isSuccessful) {
                     rpcSucceeded = true
+                } else {
+                    rpcErr = try { rpcRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                rpcErr = e.message.orEmpty()
             }
 
-            // 2. Also ensure the latest row in `public.app_updates` is directly updated
+            // Read latest row from `public.app_updates`
             val currentList = getAppUpdates(forceRefresh = true).getOrNull().orEmpty()
             val latestRow = currentList.firstOrNull()
 
+            // If RPC succeeded and a row exists, return it directly without firing a redundant second UPDATE
+            if (rpcSucceeded && latestRow != null) {
+                return@withContext Result.success(latestRow)
+            }
+
+            // 2. Fallback: Direct authenticated Admin PATCH on latest row if RPC failed
             val killSwitchPatch = mapOf<String, Any?>(
                 "is_kill_switch" to isEnabled,
                 "is_maintenance" to isEnabled,
@@ -422,7 +433,7 @@ class SupabaseMaxBirdRepository(
             val killSwitchPatchWithUpdated = killSwitchPatch + ("updated_at" to now)
 
             if (latestRow != null && latestRow.id.isNotBlank()) {
-                var lastErr = ""
+                var lastErr = rpcErr
                 for (candidate in listOf(killSwitchPatchWithUpdated, killSwitchPatch)) {
                     try {
                         val patchRes = api.patchAppUpdateRaw("eq.${latestRow.id}", candidate)
@@ -438,17 +449,6 @@ class SupabaseMaxBirdRepository(
                     } catch (e: Exception) {
                         if (lastErr.isBlank()) lastErr = e.message.orEmpty()
                     }
-                }
-                if (rpcSucceeded) {
-                    val refreshed = getAppUpdates(forceRefresh = true).getOrNull()?.firstOrNull()
-                        ?: latestRow.copy(
-                            isKillSwitch = isEnabled,
-                            isMaintenance = isEnabled,
-                            killSwitchTitle = cleanTitle,
-                            killSwitchMessage = cleanMessage,
-                            estimatedBackTime = cleanBackTime
-                        )
-                    return@withContext Result.success(refreshed)
                 }
                 return@withContext Result.failure(
                     Exception("Kill Switch আপডেট ব্যর্থ: $lastErr")
@@ -505,22 +505,16 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun deleteAppUpdate(id: String): Result<Unit> = withContext(Dispatchers.IO) {
-        cachedUpdates.removeAll { it.id == id }
-
         try {
             val api = supabaseClient.getApi()
-            val delRes = try {
-                api.deleteAppUpdate("eq.$id")
-            } catch (_: Exception) {
-                null
+            val delRes = api.deleteAppUpdate("eq.$id")
+            if (delRes.isSuccessful) {
+                cachedUpdates.removeAll { it.id == id }
+                Result.success(Unit)
+            } else {
+                val err = try { delRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("আপডেট মুছে ফেলতে ব্যর্থ (HTTP ${delRes.code()}): $err"))
             }
-            if (delRes?.isSuccessful != true) {
-                try {
-                    api.adminDeleteAppUpdateRpc(mapOf("p_id" to id, "p_update_id" to id))
-                } catch (_: Exception) {
-                }
-            }
-            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -688,36 +682,42 @@ class SupabaseMaxBirdRepository(
 
     override suspend fun toggleAppNoticeStatus(id: String, isActive: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
         val index = cachedNotices.indexOfFirst { it.id == id }
+        val previous = if (index != -1) cachedNotices[index] else null
         if (index != -1) {
             cachedNotices[index] = cachedNotices[index].copy(isActive = isActive)
         }
 
         try {
             val api = supabaseClient.getApi()
-            api.updateAppNoticeStatus("eq.$id", UpdateAppNoticeStatusPayload(isActive = isActive))
-            Result.success(Unit)
+            val res = api.updateAppNoticeStatus("eq.$id", UpdateAppNoticeStatusPayload(isActive = isActive))
+            if (res.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                if (index != -1 && previous != null && index < cachedNotices.size) {
+                    cachedNotices[index] = previous
+                }
+                val err = try { res.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("নোটিশ স্ট্যাটাস আপডেট ব্যর্থ (HTTP ${res.code()}): $err"))
+            }
         } catch (e: Exception) {
+            if (index != -1 && previous != null && index < cachedNotices.size) {
+                cachedNotices[index] = previous
+            }
             Result.failure(e)
         }
     }
 
     override suspend fun deleteAppNotice(id: String): Result<Unit> = withContext(Dispatchers.IO) {
-        cachedNotices.removeAll { it.id == id }
-
         try {
             val api = supabaseClient.getApi()
-            val delRes = try {
-                api.deleteAppNotice("eq.$id")
-            } catch (_: Exception) {
-                null
+            val delRes = api.deleteAppNotice("eq.$id")
+            if (delRes.isSuccessful) {
+                cachedNotices.removeAll { it.id == id }
+                Result.success(Unit)
+            } else {
+                val err = try { delRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("নোটিশ মুছে ফেলতে ব্যর্থ (HTTP ${delRes.code()}): $err"))
             }
-            if (delRes?.isSuccessful != true) {
-                try {
-                    api.adminDeleteAppNoticeRpc(mapOf("p_id" to id, "p_notice_id" to id))
-                } catch (_: Exception) {
-                }
-            }
-            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -768,36 +768,42 @@ class SupabaseMaxBirdRepository(
 
     override suspend fun toggleActivationSupportLinkStatus(id: String, isActive: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
         val index = cachedSupportLinks.indexOfFirst { it.id == id }
+        val previous = if (index != -1) cachedSupportLinks[index] else null
         if (index != -1) {
             cachedSupportLinks[index] = cachedSupportLinks[index].copy(isActive = isActive)
         }
 
         try {
             val api = supabaseClient.getApi()
-            api.updateActivationSupportLinkStatus("eq.$id", UpdateSupportLinkStatusPayload(isActive = isActive))
-            Result.success(Unit)
+            val res = api.updateActivationSupportLinkStatus("eq.$id", UpdateSupportLinkStatusPayload(isActive = isActive))
+            if (res.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                if (index != -1 && previous != null && index < cachedSupportLinks.size) {
+                    cachedSupportLinks[index] = previous
+                }
+                val err = try { res.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("সাপোর্ট লিংক স্ট্যাটাস আপডেট ব্যর্থ (HTTP ${res.code()}): $err"))
+            }
         } catch (e: Exception) {
+            if (index != -1 && previous != null && index < cachedSupportLinks.size) {
+                cachedSupportLinks[index] = previous
+            }
             Result.failure(e)
         }
     }
 
     override suspend fun deleteActivationSupportLink(id: String): Result<Unit> = withContext(Dispatchers.IO) {
-        cachedSupportLinks.removeAll { it.id == id }
-
         try {
             val api = supabaseClient.getApi()
-            var deletedViaRpc = false
-            try {
-                val rpcRes = api.adminDeleteSupportLinkRpc(mapOf("p_id" to id, "p_link_id" to id))
-                if (rpcRes.isSuccessful) {
-                    deletedViaRpc = true
-                }
-            } catch (_: Exception) {
+            val delRes = api.deleteActivationSupportLink("eq.$id")
+            if (delRes.isSuccessful) {
+                cachedSupportLinks.removeAll { it.id == id }
+                Result.success(Unit)
+            } else {
+                val err = try { delRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("সাপোর্ট লিংক মুছে ফেলতে ব্যর্থ (HTTP ${delRes.code()}): $err"))
             }
-            if (!deletedViaRpc) {
-                api.deleteActivationSupportLink("eq.$id")
-            }
-            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -930,7 +936,7 @@ class SupabaseMaxBirdRepository(
         device: UserDevice,
         studentNote: String?
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val nowIso = formatUtcIso(System.currentTimeMillis())
         val resolvedNote = studentNote?.trim() ?: device.studentNote
 
         val idx = cachedUserDevices.indexOfFirst { matchesCachedDevice(it, device) }
@@ -951,10 +957,8 @@ class SupabaseMaxBirdRepository(
         try {
             val api = supabaseClient.getApi()
             val effectiveHash = device.effectiveDeviceHash
-            var rpcOk = false
 
-            // 1. Call official RPC `admin_approve_device_verification(p_device_hash, p_student_note)`
-            // Passing both parameters avoids PostgreSQL PGRST203 overload ambiguity between the 1-arg and 2-arg versions
+            // 1. Primary: Call exact live 2-arg RPC `admin_approve_device_verification(p_device_hash, p_student_note)`
             if (effectiveHash.isNotBlank()) {
                 try {
                     val rpcRes = api.approveDeviceVerificationRpc(
@@ -964,18 +968,13 @@ class SupabaseMaxBirdRepository(
                         )
                     )
                     if (isJsonRpcSuccess(rpcRes)) {
-                        rpcOk = true
-                    } else {
-                        val fallbackRpcRes = api.approveDeviceVerificationRpc(
-                            mapOf("p_device_hash" to effectiveHash)
-                        )
-                        if (fallbackRpcRes.isSuccessful) rpcOk = true
+                        return@withContext Result.success(Unit)
                     }
                 } catch (_: Exception) {
                 }
             }
 
-            // 2. Patch `public.devices` across all possible schema variants
+            // 2. Fallback ONLY if RPC failed: Direct authenticated Admin PATCH on `public.devices`
             val dualSchemaMap = mutableMapOf<String, Any?>(
                 "status" to "active",
                 "is_banned" to false,
@@ -1015,7 +1014,7 @@ class SupabaseMaxBirdRepository(
                 device = device,
                 candidatePayloads = listOf(dualSchemaMap, standardSchemaMap, triggerSchemaMap, minimalMap)
             )
-            if (patchResult.isSuccess || rpcOk) {
+            if (patchResult.isSuccess) {
                 Result.success(Unit)
             } else {
                 Result.failure(patchResult.exceptionOrNull() ?: Exception("অ্যাপ্রুভ ব্যর্থ হয়েছে"))
@@ -1030,7 +1029,7 @@ class SupabaseMaxBirdRepository(
         isBlocked: Boolean,
         banReason: String?
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val nowIso = formatUtcIso(System.currentTimeMillis())
         val targetStatus = if (isBlocked) "blocked" else "active"
         val cleanReason = if (isBlocked) {
             banReason?.trim()?.ifBlank { "অ্যাডমিন কর্তৃক ব্লক করা হয়েছে" } ?: "অ্যাডমিন কর্তৃক ব্লক করা হয়েছে"
@@ -1055,9 +1054,8 @@ class SupabaseMaxBirdRepository(
         try {
             val api = supabaseClient.getApi()
             val effectiveHash = device.effectiveDeviceHash
-            var rpcOk = false
 
-            // 1. Call official RPC `admin_set_device_block_status(p_device_hash, p_is_banned, p_reason)` -> RETURNS void
+            // 1. Primary: Call exact live 3-arg RPC `admin_set_device_block_status(p_device_hash, p_is_banned, p_reason)`
             if (effectiveHash.isNotBlank()) {
                 try {
                     val res = api.setDeviceBlockStatusRpc(
@@ -1067,36 +1065,24 @@ class SupabaseMaxBirdRepository(
                             "p_reason" to cleanReason
                         )
                     )
-                    if (res.isSuccessful) {
-                        rpcOk = true
-                    } else {
-                        val toggleRes = api.toggleDeviceBanRpc(
-                            mapOf(
-                                "p_device_hash" to effectiveHash,
-                                "p_is_banned" to isBlocked,
-                                "p_reason" to cleanReason
-                            )
+                    if (isJsonRpcSuccess(res)) {
+                        return@withContext Result.success(Unit)
+                    }
+                    val toggleRes = api.toggleDeviceBanRpc(
+                        mapOf(
+                            "p_device_hash" to effectiveHash,
+                            "p_is_banned" to isBlocked,
+                            "p_reason" to cleanReason
                         )
-                        if (isJsonRpcSuccess(toggleRes)) rpcOk = true
+                    )
+                    if (isJsonRpcSuccess(toggleRes)) {
+                        return@withContext Result.success(Unit)
                     }
                 } catch (_: Exception) {
                 }
-
-                if (!isBlocked) {
-                    try {
-                        val appRes = api.approveDeviceVerificationRpc(
-                            mapOf(
-                                "p_device_hash" to effectiveHash,
-                                "p_student_note" to (device.studentNote ?: "")
-                            )
-                        )
-                        if (isJsonRpcSuccess(appRes)) rpcOk = true
-                    } catch (_: Exception) {
-                    }
-                }
             }
 
-            // 2. Patch `public.devices` directly across all schema variations (no null values in Map!)
+            // 2. Fallback ONLY if RPCs failed: Direct authenticated Admin PATCH on `public.devices`
             val dualSchemaMap = mutableMapOf<String, Any?>(
                 "status" to targetStatus,
                 "is_banned" to isBlocked,
@@ -1147,7 +1133,7 @@ class SupabaseMaxBirdRepository(
                 )
             )
 
-            if (patchResult.isSuccess || rpcOk) {
+            if (patchResult.isSuccess) {
                 Result.success(Unit)
             } else {
                 Result.failure(
@@ -1161,7 +1147,7 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun revokeUserDeviceToPending(device: UserDevice): Result<Unit> = withContext(Dispatchers.IO) {
-        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val nowIso = formatUtcIso(System.currentTimeMillis())
         val idx = cachedUserDevices.indexOfFirst { matchesCachedDevice(it, device) }
         if (idx != -1) {
             val old = cachedUserDevices[idx]
@@ -1176,9 +1162,6 @@ class SupabaseMaxBirdRepository(
         }
 
         try {
-            val api = supabaseClient.getApi()
-            val cleanHash = device.effectiveDeviceHash.trim()
-
             val dualMap = mapOf<String, Any?>(
                 "status" to "pending",
                 "is_banned" to false,
@@ -1208,18 +1191,7 @@ class SupabaseMaxBirdRepository(
                 candidatePayloads = listOf(dualMap, standardMap, triggerMap, minimalMap)
             )
 
-            var rpcSucceeded = false
-            if (patchResult.isFailure && cleanHash.isNotBlank()) {
-                try {
-                    val rpcRes = api.adminRevokeDeviceToPendingRpc(mapOf("p_device_hash" to cleanHash))
-                    if (rpcRes.isSuccessful) {
-                        rpcSucceeded = true
-                    }
-                } catch (_: Exception) {
-                }
-            }
-
-            if (patchResult.isSuccess || rpcSucceeded) {
+            if (patchResult.isSuccess) {
                 Result.success(Unit)
             } else {
                 Result.failure(patchResult.exceptionOrNull() ?: Exception("পেন্ডিং করতে ব্যর্থ হয়েছে"))
@@ -1233,7 +1205,7 @@ class SupabaseMaxBirdRepository(
         device: UserDevice,
         studentNote: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val nowIso = formatUtcIso(System.currentTimeMillis())
         val trimmedNote = studentNote.trim()
         val idx = cachedUserDevices.indexOfFirst { matchesCachedDevice(it, device) }
         if (idx != -1) {
@@ -1244,11 +1216,7 @@ class SupabaseMaxBirdRepository(
         }
 
         try {
-            val dualMap = mapOf<String, Any?>(
-                "student_note" to trimmedNote,
-                "student_name" to trimmedNote,
-                "updated_at" to nowIso
-            )
+            // Only update `student_note` and `updated_at` — never overwrite `student_name`
             val standardMap = mapOf<String, Any?>(
                 "student_note" to trimmedNote,
                 "updated_at" to nowIso
@@ -1258,7 +1226,7 @@ class SupabaseMaxBirdRepository(
             )
             val patchResult = patchPublicDeviceRecord(
                 device = device,
-                candidatePayloads = listOf(dualMap, standardMap, minimalMap)
+                candidatePayloads = listOf(standardMap, minimalMap)
             )
             if (patchResult.isSuccess) {
                 Result.success(Unit)
@@ -1290,31 +1258,12 @@ class SupabaseMaxBirdRepository(
         }
 
         try {
-            val api = supabaseClient.getApi()
-            val effectiveHash = targetDevice.effectiveDeviceHash.trim()
-
             val patchResult = patchPublicDeviceRecord(
                 device = targetDevice,
                 candidatePayloads = listOf(mapOf("can_view_profiles" to canViewProfiles))
             )
 
-            var rpcSucceeded = false
-            if (patchResult.isFailure && effectiveHash.isNotBlank()) {
-                try {
-                    val rpcRes = api.adminSetDeviceCanViewProfilesRpc(
-                        mapOf(
-                            "p_device_hash" to effectiveHash,
-                            "p_can_view_profiles" to canViewProfiles
-                        )
-                    )
-                    if (rpcRes.isSuccessful) {
-                        rpcSucceeded = true
-                    }
-                } catch (_: Exception) {
-                }
-            }
-
-            if (patchResult.isSuccess || rpcSucceeded) {
+            if (patchResult.isSuccess) {
                 Result.success(Unit)
             } else {
                 Result.failure(patchResult.exceptionOrNull() ?: Exception("পারমিশন আপডেট ব্যর্থ হয়েছে"))
@@ -1328,28 +1277,28 @@ class SupabaseMaxBirdRepository(
         val target = cachedUserDevices.firstOrNull {
             it.id == deviceId || it.effectiveDeviceHash == deviceId || it.displayDeviceId == deviceId
         }
-        cachedUserDevices.removeAll {
-            it.id == deviceId || it.effectiveDeviceHash == deviceId || it.displayDeviceId == deviceId
-        }
 
         try {
             val api = supabaseClient.getApi()
             val hashToUse = target?.effectiveDeviceHash?.takeIf { it.isNotBlank() }
             val idToUse = target?.id?.takeIf { it.isNotBlank() }
-            val displayIdToUse = target?.displayDeviceId?.takeIf { it.isNotBlank() }
             var deleted = false
+            var lastError = ""
 
-            // 1. Primary: Direct REST DELETE on `public.devices`
+            // Direct authenticated Admin REST DELETE on `public.devices`
             if (hashToUse != null) {
                 try {
                     val res = api.deleteDeviceRecordByHash("eq.$hashToUse")
                     if (res.isSuccessful) deleted = true
-                } catch (_: Exception) {
+                    else lastError = "HTTP ${res.code()}: ${res.errorBody()?.string().orEmpty()}"
+                } catch (e: Exception) {
+                    lastError = e.message.orEmpty()
                 }
                 if (!deleted) {
                     try {
                         val res = api.deleteDeviceRecordByDeviceIdColumn("eq.$hashToUse")
                         if (res.isSuccessful) deleted = true
+                        else if (lastError.isBlank()) lastError = "HTTP ${res.code()}: ${res.errorBody()?.string().orEmpty()}"
                     } catch (_: Exception) {
                     }
                 }
@@ -1358,42 +1307,35 @@ class SupabaseMaxBirdRepository(
                 try {
                     val res = api.deleteDeviceRecord("eq.$idToUse")
                     if (res.isSuccessful) deleted = true
-                } catch (_: Exception) {
+                    else lastError = "HTTP ${res.code()}: ${res.errorBody()?.string().orEmpty()}"
+                } catch (e: Exception) {
+                    lastError = e.message.orEmpty()
                 }
             }
             if (!deleted) {
                 try {
                     val res = api.deleteDeviceRecordByHash("eq.$deviceId")
                     if (res.isSuccessful) deleted = true
+                    else lastError = "HTTP ${res.code()}: ${res.errorBody()?.string().orEmpty()}"
                 } catch (_: Exception) {
                     try {
                         val res = api.deleteDeviceRecord("eq.$deviceId")
                         if (res.isSuccessful) deleted = true
-                    } catch (_: Exception) {
+                        else lastError = "HTTP ${res.code()}: ${res.errorBody()?.string().orEmpty()}"
+                    } catch (e: Exception) {
+                        lastError = e.message.orEmpty()
                     }
                 }
             }
 
-            // 2. Fallback: SECURITY DEFINER RPC `admin_delete_device` if configured
-            if (!deleted) {
-                val candidateHashes = listOfNotNull(hashToUse, displayIdToUse, idToUse, deviceId.takeIf { it.isNotBlank() }).distinct()
-                for (candidate in candidateHashes) {
-                    try {
-                        val rpcRes = api.adminDeleteDeviceRpc(
-                            mapOf(
-                                "p_device_hash" to candidate,
-                                "p_device_id" to (idToUse ?: candidate)
-                            )
-                        )
-                        if (rpcRes.isSuccessful) {
-                            deleted = true
-                            break
-                        }
-                    } catch (_: Exception) {
-                    }
+            if (deleted) {
+                cachedUserDevices.removeAll {
+                    it.id == deviceId || it.effectiveDeviceHash == deviceId || it.displayDeviceId == deviceId
                 }
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("ডিভাইস মুছে ফেলতে ব্যর্থ: ${lastError.ifBlank { "অ্যাক্সেস বা আইডি পাওয়া যায়নি" }}"))
             }
-            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1427,7 +1369,7 @@ class SupabaseMaxBirdRepository(
         if (cleanHash.isBlank()) {
             return@withContext Result.failure(Exception("ডিভাইস হ্যাশ (device_hash) খালি রাখা যাবে না"))
         }
-        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val nowIso = formatUtcIso(System.currentTimeMillis())
         val idx = cachedUserDevices.indexOfFirst { it.effectiveDeviceHash == cleanHash || it.id == cleanHash }
         if (idx != -1) {
             cachedUserDevices[idx] = cachedUserDevices[idx].copy(
@@ -1495,7 +1437,7 @@ class SupabaseMaxBirdRepository(
         if (cleanHash.isBlank() || cleanPhone.isBlank()) {
             return@withContext Result.failure(Exception("ডিভাইস হ্যাশ এবং ইউজার ফোন নম্বর আবশ্যক"))
         }
-        val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val nowIso = formatUtcIso(System.currentTimeMillis())
 
         try {
             val api = supabaseClient.getApi()
@@ -1732,7 +1674,7 @@ class SupabaseMaxBirdRepository(
         payload: UpsertCoursePaymentSettingsPayload
     ): Result<CoursePaymentSettings> = withContext(Dispatchers.IO) {
         try {
-            val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+            val nowIso = formatUtcIso(System.currentTimeMillis())
             val syncedPayload = payload.copy(
                 bkashNumber = payload.bkashNumber.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
                 nagadNumber = payload.nagadNumber.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) } ?: "",
@@ -2016,9 +1958,10 @@ class SupabaseMaxBirdRepository(
                         trialHours = 0
                     )
                     val rpcRes = api.approveCourseAccessRequestRpc(freePayload)
-                    rpcSucceeded = isJsonRpcSuccess(rpcRes)
+                    if (isJsonRpcSuccess(rpcRes)) {
+                        return@withContext Result.success(Unit)
+                    }
                 } catch (_: Exception) {
-                    rpcSucceeded = false
                 }
             }
 
@@ -2063,7 +2006,7 @@ class SupabaseMaxBirdRepository(
                     programId = cleanProgramId,
                     patchMap = freeUnlockPatch
                 )
-                if (patchRes?.isSuccessful == true || rpcSucceeded) {
+                if (patchRes?.isSuccessful == true) {
                     return@withContext Result.success(Unit)
                 }
             }
@@ -2082,9 +2025,9 @@ class SupabaseMaxBirdRepository(
             // (p_student_key, p_program_id, p_total_price, p_allow_installments, p_installment_plans,
             //  p_trial_enabled, p_trial_days, p_trial_hours, p_start_trial_immediately, p_admin_note)
             val studentKeyCandidates = listOf(
-                if (payload.enrollmentId > 0L) payload.enrollmentId.toString() else "",
                 cleanAccountKey,
-                cleanPhone
+                cleanPhone,
+                if (payload.enrollmentId > 0L) payload.enrollmentId.toString() else ""
             ).filter { it.isNotBlank() }.distinct()
 
             if (cleanProgramId.isNotBlank()) {
@@ -2122,9 +2065,10 @@ class SupabaseMaxBirdRepository(
                 }
             }
 
-            // 4. If RPC succeeded and no extra phone normalization is needed, return success;
-            // otherwise sync via table PATCH so all Free Trial columns & status are guaranteed 100% synced
-            if (rpcSucceeded && !CourseAccessEnrollment.isValidBdPhone(cleanPhone)) {
+            // 4. When either RPC succeeded, PostgreSQL triggers (`trg_sync_course_enrollment_columns` +
+            // `trg_course_enrollments_onesignal_notify`) have already synced all columns & sent the push,
+            // so return immediately without issuing a redundant second PATCH.
+            if (rpcSucceeded) {
                 return@withContext Result.success(Unit)
             }
 
@@ -2452,9 +2396,9 @@ class SupabaseMaxBirdRepository(
             // 1. Call `admin_manage_course_trial(p_student_key, p_program_id, p_action, p_days, p_hours)`
             var rpcSucceeded = false
             val studentKeyCandidates = listOf(
-                if (payload.enrollmentId > 0L) payload.enrollmentId.toString() else "",
                 cleanAccountKey,
-                cleanPhone
+                cleanPhone,
+                if (payload.enrollmentId > 0L) payload.enrollmentId.toString() else ""
             ).filter { it.isNotBlank() }.distinct()
 
             if (cleanProgramId.isNotBlank()) {
@@ -2635,7 +2579,7 @@ class SupabaseMaxBirdRepository(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
-            val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+            val nowIso = formatUtcIso(System.currentTimeMillis())
 
             // 1. Primary: Call official RPC `admin_review_course_payment(p_transaction_id, p_approve, p_rejection_reason, p_custom_next_due_days)`
             var rpcSucceeded = false
@@ -2676,7 +2620,7 @@ class SupabaseMaxBirdRepository(
             }
             val targetTx = allTxs.firstOrNull { it.id == payload.transactionId }
 
-            api.patchCoursePaymentTransaction(
+            val txPatchRes = api.patchCoursePaymentTransaction(
                 idQuery = "eq.${payload.transactionId}",
                 payload = mapOf(
                     "status" to if (payload.approve) "APPROVED" else "REJECTED",
@@ -2684,6 +2628,12 @@ class SupabaseMaxBirdRepository(
                     "reviewed_at" to nowIso
                 )
             )
+            if (!txPatchRes.isSuccessful) {
+                val err = try { txPatchRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                return@withContext Result.failure(
+                    Exception("পেমেন্ট রিভিউ সেভ ব্যর্থ (HTTP ${txPatchRes.code()}): $err")
+                )
+            }
 
             val enrollmentId = targetTx?.enrollmentId?.takeIf { it > 0L }
                 ?: payload.enrollmentId?.takeIf { it > 0L }
@@ -2726,7 +2676,7 @@ class SupabaseMaxBirdRepository(
                     val nextDueIso = if (newDue > 0) {
                         val cal = Calendar.getInstance()
                         cal.add(Calendar.DAY_OF_YEAR, intervalDays)
-                        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(cal.time)
+                        formatUtcIso(cal.timeInMillis)
                     } else {
                         null
                     }
@@ -2782,7 +2732,7 @@ class SupabaseMaxBirdRepository(
                         enrollPatch["student_key"] = validPhone
                     }
 
-                    patchEnrollmentByIdOrAccount(
+                    val enrollPatchRes = patchEnrollmentByIdOrAccount(
                         enrollmentId = enrollment.id,
                         studentPhone = enrollment.effectivePhone.ifBlank { txPhone },
                         shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { txAccountKey },
@@ -2791,6 +2741,12 @@ class SupabaseMaxBirdRepository(
                         existingEnrollment = enrollment,
                         transaction = targetTx
                     )
+                    if (enrollPatchRes != null && !enrollPatchRes.isSuccessful) {
+                        val err = try { enrollPatchRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                        return@withContext Result.failure(
+                            Exception("এনরোলমেন্ট আনলক আপডেট ব্যর্থ (HTTP ${enrollPatchRes.code()}): $err")
+                        )
+                    }
                 } else {
                     val nowMillis = System.currentTimeMillis()
                     val dueIso = enrollment.nextDueDate?.takeIf { it.isNotBlank() } ?: enrollment.nextInstallmentDueAt
@@ -2809,7 +2765,7 @@ class SupabaseMaxBirdRepository(
                         "pending_installment_amount" to 0,
                         "updated_at" to nowIso
                     )
-                    patchEnrollmentByIdOrAccount(
+                    val enrollPatchRes = patchEnrollmentByIdOrAccount(
                         enrollmentId = enrollment.id,
                         studentPhone = enrollment.effectivePhone.ifBlank { txPhone },
                         shikhoAccountKey = enrollment.effectiveAccountKey.ifBlank { txAccountKey },
@@ -2818,6 +2774,12 @@ class SupabaseMaxBirdRepository(
                         existingEnrollment = enrollment,
                         transaction = targetTx
                     )
+                    if (enrollPatchRes != null && !enrollPatchRes.isSuccessful) {
+                        val err = try { enrollPatchRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                        return@withContext Result.failure(
+                            Exception("এনরোলমেন্ট আপডেট ব্যর্থ (HTTP ${enrollPatchRes.code()}): $err")
+                        )
+                    }
                 }
             }
 
@@ -2900,7 +2862,7 @@ class SupabaseMaxBirdRepository(
         adminNote: String?
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+            val nowIso = formatUtcIso(System.currentTimeMillis())
             val patchMap = mutableMapOf<String, Any?>(
                 "updated_at" to nowIso
             )
@@ -2927,7 +2889,7 @@ class SupabaseMaxBirdRepository(
                 } else if (newStatus.equals("REJECTED", ignoreCase = true) || newStatus.equals("LOCKED", ignoreCase = true)) {
                     patchMap["unlocked_at"] = null
                     patchMap["trial_enabled"] = false
-                    patchMap["trial_Ends_at".lowercase()] = null
+                    patchMap["trial_ends_at"] = null
                 }
             }
             if (!newNextDueDateIso.isNullOrBlank()) {
@@ -2978,36 +2940,17 @@ class SupabaseMaxBirdRepository(
         programId: String?
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            if (enrollmentId <= 0L) {
+                return@withContext Result.failure(Exception("সঠিক এনরোলমেন্ট আইডি পাওয়া যায়নি"))
+            }
             val api = supabaseClient.getApi()
-            var deleted = false
-            // 1. Direct REST DELETE first (`course_access_enrollments` has RLS ALL = true)
-            if (enrollmentId > 0L) {
-                try {
-                    val delRes = api.deleteCourseAccessEnrollment("eq.$enrollmentId")
-                    if (delRes.isSuccessful) deleted = true
-                } catch (_: Exception) {
-                }
-            }
-            // 2. Fallback to optional helper RPC if installed
-            if (!deleted) {
-                try {
-                    val rpcRes = api.adminDeleteCourseEnrollmentRpc(
-                        mapOf(
-                            "p_enrollment_id" to enrollmentId,
-                            "p_student_phone" to CourseAccessEnrollment.normalizeBdPhone(studentPhone),
-                            "p_program_id" to programId?.trim().orEmpty()
-                        )
-                    )
-                    if (rpcRes.isSuccessful) {
-                        deleted = true
-                    }
-                } catch (_: Exception) {
-                }
-            }
-            if (deleted) {
+            // Direct authenticated Admin REST DELETE (`course_access_enrollments` allows ALL for authenticated is_admin_user())
+            val delRes = api.deleteCourseAccessEnrollment("eq.$enrollmentId")
+            if (delRes.isSuccessful) {
                 Result.success(Unit)
             } else {
-                Result.failure(Exception("কোর্স এনরোলমেন্ট ডিলিট করা যায়নি"))
+                val err = try { delRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("কোর্স এনরোলমেন্ট ডিলিট করা যায়নি (HTTP ${delRes.code()}): $err"))
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -3103,8 +3046,7 @@ class SupabaseMaxBirdRepository(
             var syncedToTable = false
             var lastError = ""
 
-            // 1. Primary: Call `public.update_onesignal_config_secure(p_app_id, p_rest_api_key)` (SECURITY DEFINER)
-            // Required because `public.onesignal_config` has RLS blocking direct anon access (`USING (false)`).
+            // 1. Primary: Call exact live 2-arg RPC `public.update_onesignal_config_secure(p_app_id, p_rest_api_key)`
             try {
                 val primaryRpcPayload = mapOf<String, Any?>(
                     "p_app_id" to cleanAppId,
@@ -3120,23 +3062,7 @@ class SupabaseMaxBirdRepository(
                 lastError = e.message.orEmpty()
             }
 
-            // 2. Secondary fallback: alternate RPC parameter names if a custom RPC signature was used
-            if (!syncedToTable) {
-                try {
-                    val altRpcPayload = mapOf<String, Any?>(
-                        "p_onesignal_app_id" to cleanAppId,
-                        "p_onesignal_rest_api_key" to cleanRestKey,
-                        "p_is_enabled" to isEnabled
-                    )
-                    val altRes = api.updateOneSignalConfigSecureRpc(altRpcPayload)
-                    if (altRes.isSuccessful) {
-                        syncedToTable = true
-                    }
-                } catch (_: Exception) {
-                }
-            }
-
-            // 3. Tertiary fallback: Direct upsert/patch on `public.onesignal_config` (`id`, `onesignal_app_id`, `onesignal_rest_api_key`, `updated_at`)
+            // 2. Fallback: Direct authenticated Admin upsert/patch on `public.onesignal_config` (`id`, `onesignal_app_id`, `onesignal_rest_api_key`, `updated_at`)
             if (!syncedToTable) {
                 val tablePayload = mutableMapOf<String, Any?>(
                     "id" to 1,
@@ -3236,22 +3162,13 @@ class SupabaseMaxBirdRepository(
                 "p_event_type" to eventType.trim(),
                 "p_extra_data" to extraData
             )
-            // 1. Call `notify_student_via_onesignal` first (exists in live DB `2_ALL_FUNCTIONS_AND_FULL_LOGIC`)
-            try {
-                val response = api.notifyStudentViaOneSignalRpc(payload)
-                if (response.isSuccessful) {
-                    return@withContext Result.success(Unit)
-                }
-            } catch (_: Exception) {
-            }
-
-            // 2. Fallback to `send_student_push_via_onesignal` if configured
-            val sendRes = api.sendStudentPushViaOneSignalRpc(payload)
-            if (sendRes.isSuccessful) {
+            // Live DB RPC: `notify_student_via_onesignal` (7 args, authenticated only)
+            val response = api.notifyStudentViaOneSignalRpc(payload)
+            if (response.isSuccessful) {
                 Result.success(Unit)
             } else {
-                val err = try { sendRes.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
-                Result.failure(Exception("notify_student_via_onesignal HTTP ${sendRes.code()}: $err"))
+                val err = try { response.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                Result.failure(Exception("notify_student_via_onesignal HTTP ${response.code()}: $err"))
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -3308,7 +3225,7 @@ class SupabaseMaxBirdRepository(
         withContext(Dispatchers.IO) {
             try {
                 val api = supabaseClient.getApi()
-                val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+                val now = formatUtcIso(System.currentTimeMillis())
                 val cleanList = signatures.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
 
                 val patchPayload = mapOf<String, Any?>(
@@ -3346,7 +3263,7 @@ class SupabaseMaxBirdRepository(
     ): Result<AppSecurityConfig> = withContext(Dispatchers.IO) {
         try {
             val api = supabaseClient.getApi()
-            val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+            val now = formatUtcIso(System.currentTimeMillis())
             val cleanList = signatures.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
             val safeLimit = maxAdminPushPerMinute.coerceIn(1, 600)
 
