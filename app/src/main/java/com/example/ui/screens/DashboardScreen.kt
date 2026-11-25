@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.HeadsetMic
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
@@ -812,6 +813,19 @@ fun DashboardScreen(
         // 4. Admin Modules 2-Column Balanced Grid
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Featured Row: Digital HTML Book Library Manager (Cloudflare R2)
+                FeaturedModuleCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "লাইব্রেরি ম্যানেজার (HTML ডিজিটাল বই)",
+                    subtitle = "শ্রেণী → সাবজেক্ট → অধ্যায় → .html বই আপলোড, রিপ্লেস (Version +1) ও R2 সূচিপত্র কন্ট্রোল",
+                    icon = Icons.Default.MenuBook,
+                    badge = "📚 R2 LIBRARY",
+                    accentColor = PurpleRoyal,
+                    gradientStart = PurpleRoyal.copy(alpha = 0.28f),
+                    onClick = { onNavigate(Screen.LibraryManager) },
+                    testTag = "mod_card_library_manager"
+                )
+
                 // Featured Row: Maxbird Website Admin Control Panel (https://maxbird.pages.dev)
                 FeaturedModuleCard(
                     modifier = Modifier.fillMaxWidth(),

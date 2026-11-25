@@ -27,7 +27,10 @@ import com.example.data.model.UserDevice
 import com.example.data.api.SupabaseClient
 import com.example.data.preferences.AdminPreferences
 import com.squareup.moshi.Types
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -35,11 +38,104 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class SupabaseMaxBirdRepository(
     private val supabaseClient: SupabaseClient,
     private val adminPreferences: AdminPreferences
 ) : MaxBirdRepository {
+
+    companion object {
+        const val TABLE_DEVICES = "devices"
+        const val TABLE_DEVICE_SHIKHO_ACCOUNTS = "device_shikho_accounts"
+        const val TABLE_COURSE_ENROLLMENTS = "course_access_enrollments"
+        const val TABLE_COURSE_TRANSACTIONS = "course_payment_transactions"
+        const val TABLE_COURSE_SETTINGS = "course_payment_settings"
+        const val TABLE_APP_UPDATES = "app_updates"
+        const val TABLE_APP_NOTICES = "app_notices"
+        const val TABLE_SUPPORT_LINKS = "activation_support_links"
+        const val TABLE_STUDENT_NOTIFICATIONS = "student_notifications"
+        const val TABLE_APP_SECURITY_CONFIG = "app_security_config"
+
+        private const val DEFAULT_DEDUP_TTL_MS = 3_000L
+        private val fetchLock = Mutex()
+        private val inFlightRequests = mutableMapOf<String, CompletableDeferred<Result<Any?>>>()
+        private val recentCache = ConcurrentHashMap<String, Pair<Long, Any?>>()
+
+        fun invalidateTableCache(vararg keys: String) {
+            if (keys.isEmpty()) {
+                recentCache.clear()
+            } else {
+                keys.forEach { recentCache.remove(it) }
+            }
+        }
+
+        fun invalidateIfOlderThan(key: String, minTimestampMs: Long) {
+            val cached = recentCache[key] ?: return
+            if (cached.first < minTimestampMs) {
+                recentCache.remove(key, cached)
+            }
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun <T> coalescedFetch(
+        key: String,
+        forceRefresh: Boolean = false,
+        ttlMs: Long = DEFAULT_DEDUP_TTL_MS,
+        fetcher: suspend () -> Result<T>
+    ): Result<T> {
+        if (!forceRefresh) {
+            val cached = recentCache[key]
+            if (cached != null && (System.currentTimeMillis() - cached.first) < ttlMs) {
+                return Result.success(cached.second as T)
+            }
+        }
+
+        var existingDeferred: CompletableDeferred<Result<Any?>>? = null
+        var ownDeferred: CompletableDeferred<Result<Any?>>? = null
+
+        fetchLock.withLock {
+            if (!forceRefresh) {
+                val cached = recentCache[key]
+                if (cached != null && (System.currentTimeMillis() - cached.first) < ttlMs) {
+                    return Result.success(cached.second as T)
+                }
+            }
+            val current = inFlightRequests[key]
+            if (current != null && !current.isCompleted) {
+                existingDeferred = current
+            } else {
+                val created = CompletableDeferred<Result<Any?>>()
+                inFlightRequests[key] = created
+                ownDeferred = created
+            }
+        }
+
+        existingDeferred?.let { deferred ->
+            return deferred.await() as Result<T>
+        }
+
+        val deferred = ownDeferred!!
+        return try {
+            val result = fetcher()
+            if (result.isSuccess) {
+                recentCache[key] = System.currentTimeMillis() to result.getOrNull()
+            }
+            deferred.complete(result as Result<Any?>)
+            result
+        } catch (e: Throwable) {
+            val failure = Result.failure<T>(e)
+            deferred.complete(failure as Result<Any?>)
+            failure
+        } finally {
+            fetchLock.withLock {
+                if (inFlightRequests[key] === deferred) {
+                    inFlightRequests.remove(key)
+                }
+            }
+        }
+    }
 
     // Live runtime caches (100% real Supabase rows — ZERO dummy/sample data)
     private val cachedUpdates = mutableListOf<AppUpdate>()
@@ -53,7 +149,7 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun getDashboardStats(): Result<DashboardStats> = withContext(Dispatchers.IO) {
-        val realDevices = getUserDevices().getOrDefault(cachedUserDevices)
+        val realDevices = getUserDevices(forceRefresh = false).getOrDefault(cachedUserDevices)
 
         val pendingCount = realDevices.count { it.isPendingDevice }
         val activeVerifiedCount = realDevices.count { it.isActiveDevice }
@@ -88,29 +184,31 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun getAppUpdates(forceRefresh: Boolean): Result<List<AppUpdate>> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val remoteUpdates = try {
-                api.getAppUpdatesLegacyOrder()
-            } catch (_: Exception) {
-                try {
-                    api.getAppUpdates()
+        coalescedFetch(key = TABLE_APP_UPDATES, forceRefresh = forceRefresh) {
+            try {
+                val api = supabaseClient.getApi()
+                val remoteUpdates = try {
+                    api.getAppUpdatesLegacyOrder()
                 } catch (_: Exception) {
-                    api.getAppUpdatesUnordered()
+                    try {
+                        api.getAppUpdates()
+                    } catch (_: Exception) {
+                        api.getAppUpdatesUnordered()
+                    }
                 }
-            }
-            val sorted = remoteUpdates.sortedWith(
-                compareByDescending<AppUpdate> { it.effectiveVersionCode }
-                    .thenByDescending { it.updatedAt.ifBlank { it.createdAt } }
-            )
-            cachedUpdates.clear()
-            cachedUpdates.addAll(sorted)
-            Result.success(sorted)
-        } catch (e: Exception) {
-            if (cachedUpdates.isNotEmpty()) {
-                Result.success(cachedUpdates.toList())
-            } else {
-                Result.failure(e)
+                val sorted = remoteUpdates.sortedWith(
+                    compareByDescending<AppUpdate> { it.effectiveVersionCode }
+                        .thenByDescending { it.updatedAt.ifBlank { it.createdAt } }
+                )
+                cachedUpdates.clear()
+                cachedUpdates.addAll(sorted)
+                Result.success(sorted)
+            } catch (e: Exception) {
+                if (cachedUpdates.isNotEmpty()) {
+                    Result.success(cachedUpdates.toList())
+                } else {
+                    Result.failure(e)
+                }
             }
         }
     }
@@ -525,18 +623,20 @@ class SupabaseMaxBirdRepository(
     // =========================================================================
 
     override suspend fun getStudentNotifications(): Result<List<StudentNotification>> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val list = try {
-                api.getStudentNotifications()
-            } catch (_: Exception) {
-                api.getStudentNotificationsUnordered()
+        coalescedFetch(key = TABLE_STUDENT_NOTIFICATIONS) {
+            try {
+                val api = supabaseClient.getApi()
+                val list = try {
+                    api.getStudentNotifications()
+                } catch (_: Exception) {
+                    api.getStudentNotificationsUnordered()
+                }
+                cachedStudentNotifications.clear()
+                cachedStudentNotifications.addAll(list)
+                Result.success(list)
+            } catch (e: Exception) {
+                Result.failure(e)
             }
-            cachedStudentNotifications.clear()
-            cachedStudentNotifications.addAll(list)
-            Result.success(list)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 
@@ -638,17 +738,19 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun getAppNotices(forceRefresh: Boolean): Result<List<AppNotice>> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val remoteNotices = api.getAppNotices()
-            cachedNotices.clear()
-            cachedNotices.addAll(remoteNotices)
-            Result.success(remoteNotices)
-        } catch (e: Exception) {
-            if (cachedNotices.isNotEmpty()) {
-                Result.success(cachedNotices.toList())
-            } else {
-                Result.failure(e)
+        coalescedFetch(key = TABLE_APP_NOTICES, forceRefresh = forceRefresh) {
+            try {
+                val api = supabaseClient.getApi()
+                val remoteNotices = api.getAppNotices()
+                cachedNotices.clear()
+                cachedNotices.addAll(remoteNotices)
+                Result.success(remoteNotices)
+            } catch (e: Exception) {
+                if (cachedNotices.isNotEmpty()) {
+                    Result.success(cachedNotices.toList())
+                } else {
+                    Result.failure(e)
+                }
             }
         }
     }
@@ -724,17 +826,19 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun getActivationSupportLinks(forceRefresh: Boolean): Result<List<ActivationSupportLink>> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val remoteLinks = api.getActivationSupportLinks()
-            cachedSupportLinks.clear()
-            cachedSupportLinks.addAll(remoteLinks)
-            Result.success(remoteLinks)
-        } catch (e: Exception) {
-            if (cachedSupportLinks.isNotEmpty()) {
-                Result.success(cachedSupportLinks.toList())
-            } else {
-                Result.failure(e)
+        coalescedFetch(key = TABLE_SUPPORT_LINKS, forceRefresh = forceRefresh) {
+            try {
+                val api = supabaseClient.getApi()
+                val remoteLinks = api.getActivationSupportLinks()
+                cachedSupportLinks.clear()
+                cachedSupportLinks.addAll(remoteLinks)
+                Result.success(remoteLinks)
+            } catch (e: Exception) {
+                if (cachedSupportLinks.isNotEmpty()) {
+                    Result.success(cachedSupportLinks.toList())
+                } else {
+                    Result.failure(e)
+                }
             }
         }
     }
@@ -810,24 +914,26 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun getUserDevices(forceRefresh: Boolean): Result<List<UserDevice>> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val remoteDevices = try {
-                api.getDevices()
-            } catch (_: Exception) {
-                api.getDevicesUnordered()
-            }
-            val sorted = remoteDevices.sortedWith(
-                compareByDescending<UserDevice> { it.requestedAt ?: it.updatedAt ?: it.lastSeen ?: "" }
-            )
-            cachedUserDevices.clear()
-            cachedUserDevices.addAll(sorted)
-            Result.success(sorted)
-        } catch (e: Exception) {
-            if (cachedUserDevices.isNotEmpty()) {
-                Result.success(cachedUserDevices.toList())
-            } else {
-                Result.failure(e)
+        coalescedFetch(key = TABLE_DEVICES, forceRefresh = forceRefresh) {
+            try {
+                val api = supabaseClient.getApi()
+                val remoteDevices = try {
+                    api.getDevices()
+                } catch (_: Exception) {
+                    api.getDevicesUnordered()
+                }
+                val sorted = remoteDevices.sortedWith(
+                    compareByDescending<UserDevice> { it.requestedAt ?: it.updatedAt ?: it.lastSeen ?: "" }
+                )
+                cachedUserDevices.clear()
+                cachedUserDevices.addAll(sorted)
+                Result.success(sorted)
+            } catch (e: Exception) {
+                if (cachedUserDevices.isNotEmpty()) {
+                    Result.success(cachedUserDevices.toList())
+                } else {
+                    Result.failure(e)
+                }
             }
         }
     }
@@ -1343,17 +1449,20 @@ class SupabaseMaxBirdRepository(
 
     override suspend fun getDeviceShikhoAccounts(deviceHash: String?): Result<List<DeviceShikhoAccount>> =
         withContext(Dispatchers.IO) {
-            try {
-                val api = supabaseClient.getApi()
-                val cleanHash = deviceHash?.trim().orEmpty()
-                val list = if (cleanHash.isNotBlank()) {
-                    api.getDeviceShikhoAccountsByHash(deviceHashQuery = "eq.$cleanHash")
-                } else {
-                    api.getDeviceShikhoAccounts()
+            val cleanHash = deviceHash?.trim().orEmpty()
+            val cacheKey = if (cleanHash.isNotBlank()) "${TABLE_DEVICE_SHIKHO_ACCOUNTS}:$cleanHash" else TABLE_DEVICE_SHIKHO_ACCOUNTS
+            coalescedFetch(key = cacheKey) {
+                try {
+                    val api = supabaseClient.getApi()
+                    val list = if (cleanHash.isNotBlank()) {
+                        api.getDeviceShikhoAccountsByHash(deviceHashQuery = "eq.$cleanHash")
+                    } else {
+                        api.getDeviceShikhoAccounts()
+                    }
+                    Result.success(list)
+                } catch (e: Exception) {
+                    Result.failure(e)
                 }
-                Result.success(list)
-            } catch (e: Exception) {
-                Result.failure(e)
             }
         }
 
@@ -1619,54 +1728,56 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun getCoursePaymentSettings(): Result<CoursePaymentSettings> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val list = api.getCoursePaymentSettings(idQuery = "eq.1")
-            val raw = list.firstOrNull()
-            val settings = if (raw != null) {
-                val cleanBkash = raw.bkashNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
-                val cleanNagad = raw.nagadNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
-                val cleanRocket = raw.rocketNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
-                val cleanUpay = raw.upayNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
+        coalescedFetch(key = TABLE_COURSE_SETTINGS) {
+            try {
+                val api = supabaseClient.getApi()
+                val list = api.getCoursePaymentSettings(idQuery = "eq.1")
+                val raw = list.firstOrNull()
+                val settings = if (raw != null) {
+                    val cleanBkash = raw.bkashNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
+                    val cleanNagad = raw.nagadNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
+                    val cleanRocket = raw.rocketNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
+                    val cleanUpay = raw.upayNumber?.takeUnless { CoursePaymentSettings.isDummyPhoneNumber(it) }?.trim().orEmpty()
 
-                val reconciledMethods = reconcileMethodsWithLiveColumns(
-                    remoteMethods = raw.paymentMethodsJson,
-                    cleanBkash = cleanBkash,
-                    cleanNagad = cleanNagad,
-                    cleanRocket = cleanRocket
-                )
+                    val reconciledMethods = reconcileMethodsWithLiveColumns(
+                        remoteMethods = raw.paymentMethodsJson,
+                        cleanBkash = cleanBkash,
+                        cleanNagad = cleanNagad,
+                        cleanRocket = cleanRocket
+                    )
 
-                raw.copy(
-                    paymentMethodsJson = reconciledMethods,
-                    bkashNumber = cleanBkash,
-                    bkashEnabled = cleanBkash.isNotBlank(),
-                    nagadNumber = cleanNagad,
-                    nagadEnabled = cleanNagad.isNotBlank(),
-                    rocketNumber = cleanRocket,
-                    rocketEnabled = cleanRocket.isNotBlank(),
-                    upayNumber = cleanUpay,
-                    upayEnabled = cleanUpay.isNotBlank()
-                )
-            } else {
-                CoursePaymentSettings(
-                    id = 1,
-                    paymentMethodsJson = parseSavedPaymentMethodsFromPrefs() ?: emptyList(),
-                    bkashNumber = "",
-                    bkashEnabled = false,
-                    nagadNumber = "",
-                    nagadEnabled = false,
-                    rocketNumber = "",
-                    rocketEnabled = false,
-                    upayNumber = "",
-                    upayEnabled = false,
-                    paymentInstructionsBn = "প্রদত্ত পেমেন্ট নম্বরে টাকা পাঠিয়ে নিচের বক্সে আপনার প্রেরক মোবাইল নম্বর এবং Transaction ID দিয়ে সাবমিট করুন।",
-                    paymentInstructionBn = "প্রদত্ত পেমেন্ট নম্বরে টাকা পাঠিয়ে নিচের বক্সে আপনার প্রেরক মোবাইল নম্বর এবং Transaction ID দিয়ে সাবমিট করুন।",
-                    defaultCoursePrice = 1000
-                )
+                    raw.copy(
+                        paymentMethodsJson = reconciledMethods,
+                        bkashNumber = cleanBkash,
+                        bkashEnabled = cleanBkash.isNotBlank(),
+                        nagadNumber = cleanNagad,
+                        nagadEnabled = cleanNagad.isNotBlank(),
+                        rocketNumber = cleanRocket,
+                        rocketEnabled = cleanRocket.isNotBlank(),
+                        upayNumber = cleanUpay,
+                        upayEnabled = cleanUpay.isNotBlank()
+                    )
+                } else {
+                    CoursePaymentSettings(
+                        id = 1,
+                        paymentMethodsJson = parseSavedPaymentMethodsFromPrefs() ?: emptyList(),
+                        bkashNumber = "",
+                        bkashEnabled = false,
+                        nagadNumber = "",
+                        nagadEnabled = false,
+                        rocketNumber = "",
+                        rocketEnabled = false,
+                        upayNumber = "",
+                        upayEnabled = false,
+                        paymentInstructionsBn = "প্রদত্ত পেমেন্ট নম্বরে টাকা পাঠিয়ে নিচের বক্সে আপনার প্রেরক মোবাইল নম্বর এবং Transaction ID দিয়ে সাবমিট করুন।",
+                        paymentInstructionBn = "প্রদত্ত পেমেন্ট নম্বরে টাকা পাঠিয়ে নিচের বক্সে আপনার প্রেরক মোবাইল নম্বর এবং Transaction ID দিয়ে সাবমিট করুন।",
+                        defaultCoursePrice = 1000
+                    )
+                }
+                Result.success(settings)
+            } catch (e: Exception) {
+                Result.failure(e)
             }
-            Result.success(settings)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 
@@ -1753,12 +1864,14 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun getCourseAccessEnrollments(): Result<List<CourseAccessEnrollment>> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val enrollments = api.getCourseAccessEnrollments()
-            Result.success(enrollments)
-        } catch (e: Exception) {
-            Result.failure(e)
+        coalescedFetch(key = TABLE_COURSE_ENROLLMENTS) {
+            try {
+                val api = supabaseClient.getApi()
+                val enrollments = api.getCourseAccessEnrollments()
+                Result.success(enrollments)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
     }
 
@@ -2565,12 +2678,14 @@ class SupabaseMaxBirdRepository(
     }
 
     override suspend fun getCoursePaymentTransactions(): Result<List<CoursePaymentTransaction>> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val transactions = api.getCoursePaymentTransactions()
-            Result.success(transactions)
-        } catch (e: Exception) {
-            Result.failure(e)
+        coalescedFetch(key = TABLE_COURSE_TRANSACTIONS) {
+            try {
+                val api = supabaseClient.getApi()
+                val transactions = api.getCoursePaymentTransactions()
+                Result.success(transactions)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
     }
 
@@ -3206,18 +3321,20 @@ class SupabaseMaxBirdRepository(
     // =========================================================================
 
     override suspend fun getAppSecurityConfig(): Result<AppSecurityConfig> = withContext(Dispatchers.IO) {
-        try {
-            val api = supabaseClient.getApi()
-            val response = api.getAppSecurityConfig()
-            if (response.isSuccessful) {
-                val config = response.body()?.firstOrNull() ?: AppSecurityConfig()
-                Result.success(config)
-            } else {
-                val err = try { response.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
-                Result.failure(Exception("app_security_config HTTP ${response.code()}: $err"))
+        coalescedFetch(key = TABLE_APP_SECURITY_CONFIG) {
+            try {
+                val api = supabaseClient.getApi()
+                val response = api.getAppSecurityConfig()
+                if (response.isSuccessful) {
+                    val config = response.body()?.firstOrNull() ?: AppSecurityConfig()
+                    Result.success(config)
+                } else {
+                    val err = try { response.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                    Result.failure(Exception("app_security_config HTTP ${response.code()}: $err"))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
             }
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 

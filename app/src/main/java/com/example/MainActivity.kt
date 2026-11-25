@@ -75,6 +75,7 @@ import com.example.ui.screens.CloudinaryMediaScreen
 import com.example.ui.screens.CourseSalesManagementScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.DeviceManagementScreen
+import com.example.ui.screens.LibraryManagerScreen
 import com.example.ui.screens.MaxbirdWebsiteAdminScreen
 import com.example.ui.screens.NoticeManagementScreen
 import com.example.ui.screens.SettingsScreen
@@ -90,11 +91,13 @@ import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 import com.example.ui.viewmodel.AdminViewModel
+import com.example.ui.viewmodel.LibraryViewModel
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: AdminViewModel by viewModels()
+    private val libraryViewModel: LibraryViewModel by viewModels()
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -221,10 +224,21 @@ class MainActivity : ComponentActivity() {
                         snackbarHost = { SnackbarHost(snackbarHostState) },
                         topBar = {
                             val isLoadingStats by viewModel.isLoadingStats.collectAsStateWithLifecycle()
+                            val libraryUiState by libraryViewModel.uiState.collectAsStateWithLifecycle()
                             AdminTopHeaderBar(
                                 currentScreen = currentScreen,
-                                isLoading = isLoadingStats,
-                                onRefresh = { viewModel.refreshStats() },
+                                isLoading = if (currentScreen == Screen.LibraryManager) {
+                                    libraryUiState.isLoading || libraryUiState.isSaving
+                                } else {
+                                    isLoadingStats
+                                },
+                                onRefresh = {
+                                    if (currentScreen == Screen.LibraryManager) {
+                                        libraryViewModel.loadLibraryIndex(forceRefresh = true)
+                                    } else {
+                                        viewModel.refreshStats()
+                                    }
+                                },
                                 onNavigate = { screen -> viewModel.navigateTo(screen) },
                                 onLogout = { viewModel.logoutAdmin() }
                             )
@@ -261,7 +275,7 @@ class MainActivity : ComponentActivity() {
                                 DashboardScreen(
                                     stats = stats,
                                     isLoading = isLoadingStats,
-                                    onRefresh = { viewModel.loadAllData() },
+                                    onRefresh = { viewModel.loadAllData(forceRefresh = true) },
                                     onNavigate = { screen -> viewModel.navigateTo(screen) },
                                     onOpenSettings = { viewModel.navigateTo(Screen.Settings) },
                                     onShowToast = { msg -> viewModel.showToast(msg) },
@@ -359,7 +373,7 @@ class MainActivity : ComponentActivity() {
                                     isLoading = isLoadingCourseSales,
                                     isProcessingAction = isProcessingCourseSales,
                                     onRefreshAll = {
-                                        viewModel.loadCourseSalesData()
+                                        viewModel.loadCourseSalesData(forceRefresh = true)
                                         viewModel.loadUserDevices(forceRefresh = true)
                                     },
                                     onApproveAccessRequest = { payload, onSuccess ->
@@ -422,7 +436,7 @@ class MainActivity : ComponentActivity() {
                                     onFilterChange = { viewModel.setDeviceFilter(it) },
                                     onRefresh = {
                                         viewModel.loadUserDevices(forceRefresh = true)
-                                        viewModel.loadCourseSalesData()
+                                        viewModel.loadCourseSalesData(forceRefresh = true)
                                     },
                                     onApproveDevice = { device, note ->
                                         viewModel.approveUserDeviceVerification(device, note)
@@ -680,6 +694,63 @@ class MainActivity : ComponentActivity() {
                                     onClearSelectedFile = { viewModel.clearSelectedMedia() },
                                     onUploadClick = { viewModel.uploadSelectedMedia() },
                                     onRemoveHistoryItem = { item -> viewModel.removeMediaHistoryItem(item) },
+                                    onShowToast = { msg -> viewModel.showToast(msg) }
+                                )
+                            }
+
+                            Screen.LibraryManager -> {
+                                val libraryUiState by libraryViewModel.uiState.collectAsStateWithLifecycle()
+                                val libraryToast by libraryViewModel.toastEvent.collectAsStateWithLifecycle()
+
+                                LaunchedEffect(libraryToast) {
+                                    libraryToast?.let { msg ->
+                                        viewModel.showToast(msg)
+                                        libraryViewModel.consumeToast()
+                                    }
+                                }
+
+                                LibraryManagerScreen(
+                                    uiState = libraryUiState,
+                                    inspectUri = { uri -> libraryViewModel.inspectUri(uri) },
+                                    onLoadIndex = { force -> libraryViewModel.loadLibraryIndex(force) },
+                                    onSearchChange = { q -> libraryViewModel.setSearchQuery(q) },
+                                    onOpenClass = { id -> libraryViewModel.openClass(id) },
+                                    onOpenSubject = { id -> libraryViewModel.openSubject(id) },
+                                    onOpenChapter = { id -> libraryViewModel.openChapter(id) },
+                                    onNavigateToRoot = { libraryViewModel.navigateToRoot() },
+                                    onNavigateToClassLevel = { libraryViewModel.navigateToClassLevel() },
+                                    onNavigateToSubjectLevel = { libraryViewModel.navigateToSubjectLevel() },
+                                    onNavigateUp = { libraryViewModel.navigateUp() },
+                                    onSaveClass = { editId, customId, title, subtitle, badge, colorHex, isActive ->
+                                        libraryViewModel.saveClass(editId, customId, title, subtitle, badge, colorHex, isActive)
+                                    },
+                                    onToggleClassActive = { id -> libraryViewModel.toggleClassActive(id) },
+                                    onMoveClass = { id, up -> libraryViewModel.moveClass(id, up) },
+                                    onDeleteClass = { id -> libraryViewModel.deleteClass(id) },
+                                    onUploadSubjectCover = { uri, cb -> libraryViewModel.uploadSubjectCoverImage(uri, cb) },
+                                    onSaveSubject = { editId, customId, title, subtitle, coverUrl, colorHex, isActive ->
+                                        libraryViewModel.saveSubject(editId, customId, title, subtitle, coverUrl, colorHex, isActive)
+                                    },
+                                    onToggleSubjectActive = { id -> libraryViewModel.toggleSubjectActive(id) },
+                                    onMoveSubject = { id, up -> libraryViewModel.moveSubject(id, up) },
+                                    onDeleteSubject = { id -> libraryViewModel.deleteSubject(id) },
+                                    onSaveChapter = { editId, customId, num, title, subtitle, isActive ->
+                                        libraryViewModel.saveChapter(editId, customId, num, title, subtitle, isActive)
+                                    },
+                                    onToggleChapterActive = { id -> libraryViewModel.toggleChapterActive(id) },
+                                    onMoveChapter = { id, up -> libraryViewModel.moveChapter(id, up) },
+                                    onDeleteChapter = { id -> libraryViewModel.deleteChapter(id) },
+                                    onUploadSingleHtml = { uri, customId, title, desc, isActive ->
+                                        libraryViewModel.uploadSingleHtmlFile(uri, customId, title, desc, isActive)
+                                    },
+                                    onUploadMultipleHtml = { uris -> libraryViewModel.uploadMultipleHtmlFiles(uris) },
+                                    onUpdateHtmlMetadata = { fileId, title, desc, isActive ->
+                                        libraryViewModel.updateHtmlFileMetadata(fileId, title, desc, isActive)
+                                    },
+                                    onReplaceHtmlFile = { fileId, uri -> libraryViewModel.replaceHtmlFile(fileId, uri) },
+                                    onToggleHtmlActive = { fileId -> libraryViewModel.toggleHtmlFileActive(fileId) },
+                                    onMoveHtmlFile = { fileId, up -> libraryViewModel.moveHtmlFile(fileId, up) },
+                                    onDeleteHtmlFile = { fileId -> libraryViewModel.deleteHtmlFile(fileId) },
                                     onShowToast = { msg -> viewModel.showToast(msg) }
                                 )
                             }

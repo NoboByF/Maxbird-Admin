@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.HeadsetMic
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -16,6 +17,7 @@ import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.HeadsetMic
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SystemUpdate
@@ -92,6 +94,14 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.CloudUpload
     )
 
+    data object LibraryManager : Screen(
+        route = "library_manager",
+        titleEn = "Digital HTML Book Library (R2)",
+        titleBn = "লাইব্রেরি ম্যানেজার",
+        selectedIcon = Icons.Filled.MenuBook,
+        unselectedIcon = Icons.Outlined.MenuBook
+    )
+
     data object Settings : Screen(
         route = "settings",
         titleEn = "Settings",
@@ -111,6 +121,7 @@ sealed class Screen(
             Notices -> "নোটিশ"
             Updates -> "আপডেট"
             SupportLinks -> "সাপোর্ট"
+            LibraryManager -> "লাইব্রেরি"
         }
 
     companion object {

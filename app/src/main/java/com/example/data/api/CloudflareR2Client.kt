@@ -89,13 +89,14 @@ class CloudflareR2Client(private val context: Context) {
         .build()
 
     /**
-     * Uploads a local `Uri` (`.apk` or image) to Cloudflare R2 under `[folderPrefix]/[fileName]`
+     * Uploads a local `Uri` (`.apk`, `.html`, or image) to Cloudflare R2 under `targetFileKey`
      * and reports real-time upload progress (0..100).
      */
     suspend fun uploadUriToR2(
         uri: Uri,
         targetFileKey: String,
         contentTypeOverride: String? = null,
+        cacheControl: String? = null,
         onProgress: (percent: Int, uploadedBytes: Long, totalBytes: Long) -> Unit = { _, _, _ -> }
     ): Result<R2UploadResult> = withContext(Dispatchers.IO) {
         var tempFile: File? = null
@@ -179,6 +180,10 @@ class CloudflareR2Client(private val context: Context) {
                 .header("Content-Type", contentType)
                 .put(requestBody)
 
+            if (!cacheControl.isNullOrBlank()) {
+                reqBuilder.header("Cache-Control", cacheControl)
+            }
+
             signedHeaders.forEach { (k, v) -> reqBuilder.header(k, v) }
 
             httpClient.newCall(reqBuilder.build()).execute().use { response ->
@@ -209,6 +214,130 @@ class CloudflareR2Client(private val context: Context) {
                 tempFile?.delete()
             } catch (_: Exception) {
             }
+        }
+    }
+
+    /**
+     * Uploads raw UTF-8 bytes (such as `library/library_index.json`) directly to Cloudflare R2
+     * with explicit `Content-Type` and optional `Cache-Control` headers.
+     */
+    suspend fun uploadBytesToR2(
+        bytes: ByteArray,
+        targetFileKey: String,
+        contentType: String,
+        cacheControl: String? = null
+    ): Result<R2UploadResult> = withContext(Dispatchers.IO) {
+        try {
+            val cleanKey = targetFileKey.trim().trimStart('/')
+            val encodedKeyPath = encodeS3ObjectKeyPath(cleanKey)
+            val canonicalUri = "/$BUCKET_NAME/$encodedKeyPath"
+            val requestUrl = "$S3_ENDPOINT$canonicalUri"
+
+            val payloadSha256Hex = sha256Hex(bytes)
+            val now = Date()
+            val amzDate = formatAmzDate(now)
+            val dateStamp = formatDateStamp(now)
+
+            val signedHeaders = buildAwsV4Headers(
+                httpMethod = "PUT",
+                canonicalUri = canonicalUri,
+                payloadSha256Hex = payloadSha256Hex,
+                amzDate = amzDate,
+                dateStamp = dateStamp
+            )
+
+            val mediaType: MediaType? = contentType.toMediaTypeOrNull()
+            val requestBody = object : RequestBody() {
+                override fun contentType(): MediaType? = mediaType
+                override fun contentLength(): Long = bytes.size.toLong()
+                override fun writeTo(sink: BufferedSink) {
+                    sink.write(bytes)
+                    sink.flush()
+                }
+            }
+
+            val reqBuilder = Request.Builder()
+                .url(requestUrl)
+                .header("Host", S3_HOST)
+                .header("Content-Type", contentType)
+                .put(requestBody)
+
+            if (!cacheControl.isNullOrBlank()) {
+                reqBuilder.header("Cache-Control", cacheControl)
+            }
+
+            signedHeaders.forEach { (k, v) -> reqBuilder.header(k, v) }
+
+            httpClient.newCall(reqBuilder.build()).execute().use { response ->
+                val respBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception("R2 আপলোড ব্যর্থ (HTTP ${response.code}): ${respBody.take(180)}")
+                    )
+                }
+            }
+
+            val sizeBytes = bytes.size.toLong()
+            Result.success(
+                R2UploadResult(
+                    fileKey = cleanKey,
+                    publicUrl = buildPublicUrl(cleanKey),
+                    fileName = cleanKey.substringAfterLast('/'),
+                    fileSizeFormatted = formatBytesToMbOrKb(sizeBytes),
+                    sizeBytes = sizeBytes
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(Exception("R2 ডেটা সেভ ত্রুটি: ${e.message}"))
+        }
+    }
+
+    /**
+     * Fetches a UTF-8 text object (such as `library/library_index.json`) directly from R2 S3 API
+     * (bypassing CDN cache). Returns `Result.success(null)` if the object does not exist yet (HTTP 404).
+     */
+    suspend fun downloadTextObjectFromR2(fileKey: String): Result<String?> = withContext(Dispatchers.IO) {
+        try {
+            val cleanKey = fileKey.trim().trimStart('/')
+            val encodedKeyPath = encodeS3ObjectKeyPath(cleanKey)
+            val canonicalUri = "/$BUCKET_NAME/$encodedKeyPath"
+            val requestUrl = "$S3_ENDPOINT$canonicalUri"
+
+            val emptyBodySha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            val now = Date()
+            val amzDate = formatAmzDate(now)
+            val dateStamp = formatDateStamp(now)
+
+            val signedHeaders = buildAwsV4Headers(
+                httpMethod = "GET",
+                canonicalUri = canonicalUri,
+                payloadSha256Hex = emptyBodySha256,
+                amzDate = amzDate,
+                dateStamp = dateStamp
+            )
+
+            val reqBuilder = Request.Builder()
+                .url(requestUrl)
+                .header("Host", S3_HOST)
+                .header("Cache-Control", "no-cache")
+                .get()
+
+            signedHeaders.forEach { (k, v) -> reqBuilder.header(k, v) }
+
+            httpClient.newCall(reqBuilder.build()).execute().use { response ->
+                if (response.code == 404) {
+                    return@withContext Result.success(null)
+                }
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception("R2 ফাইল লোড ব্যর্থ (HTTP ${response.code}): ${body.take(180)}")
+                    )
+                }
+                Result.success(body)
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("R2 কানেকশন ত্রুটি: ${e.message}"))
         }
     }
 

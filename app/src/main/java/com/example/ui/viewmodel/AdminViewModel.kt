@@ -55,9 +55,18 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val maxbirdFirestoreClient = MaxbirdFirestoreClient(application)
     private val notificationHelper = AdminNotificationHelper(application)
 
+    companion object {
+        private const val REALTIME_DEBOUNCE_MS = 2_500L
+        private const val FALLBACK_POLL_INTERVAL_MS = 90_000L
+        private const val OVERDUE_AUTO_CHECK_COOLDOWN_MS = 300_000L
+    }
+
     // Authenticated Supabase Realtime WebSocket Connection State (9 live tables)
     val isRealtimeConnected: StateFlow<Boolean> = realtimeClient.isConnected
     private val realtimeDebounceJobs = mutableMapOf<String, Job>()
+    private var devicesLoadJob: Job? = null
+    private var courseSalesLoadJob: Job? = null
+    private var lastOverdueAutoCheckMs: Long = 0L
 
     // Zero-Trust Supabase Authenticated Admin Session State
     val adminSession: StateFlow<SupabaseAdminSession?> = AdminPreferences.sharedAdminSession
@@ -396,6 +405,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     realtimeClient.stop()
                     realtimeDebounceJobs.values.forEach { it.cancel() }
                     realtimeDebounceJobs.clear()
+                    SupabaseMaxBirdRepository.invalidateTableCache()
                     AdminRealtimeMonitorService.stop(app)
                 }
                 hadSession = hasNow
@@ -436,49 +446,58 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Subscribes to all 9 live Supabase Realtime tables over authenticated Phoenix WebSocket.
-     * Debounces rapid bursts per table and immediately syncs UI + Admin notifications.
+     * Debounces rapid bursts per table (2.5s) and coalesces with process-wide in-flight guards
+     * so multiple screens/services never send duplicate GET requests.
      */
     private fun startSupabaseRealtimeSubscription() {
         realtimeClient.start { tableName, _ ->
+            val eventReceivedAt = System.currentTimeMillis()
             viewModelScope.launch {
                 realtimeDebounceJobs[tableName]?.cancel()
                 realtimeDebounceJobs[tableName] = viewModelScope.launch {
-                    delay(450L)
+                    delay(REALTIME_DEBOUNCE_MS)
                     if (!adminPreferences.hasValidAdminSession()) return@launch
                     when (tableName) {
-                        "devices", "device_shikho_accounts" -> {
-                            val devRes = repository.getUserDevices(forceRefresh = true)
+                        "devices" -> {
+                            SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                                SupabaseMaxBirdRepository.TABLE_DEVICES,
+                                eventReceivedAt
+                            )
+                            val devRes = repository.getUserDevices(forceRefresh = false)
                             if (devRes.isSuccess) {
-                                _userDevices.value = devRes.getOrNull().orEmpty()
+                                val devices = devRes.getOrNull().orEmpty()
+                                _userDevices.value = devices
+                                updateStatsFromDevices(devices)
                             }
+                            if (_isLiveNotificationMonitorEnabled.value) {
+                                notificationHelper.checkAndNotifyNewEvents(
+                                    devices = _userDevices.value,
+                                    enrollments = _courseAccessEnrollments.value,
+                                    transactions = _coursePaymentTransactions.value
+                                )
+                            }
+                        }
+
+                        "device_shikho_accounts" -> {
+                            SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                                SupabaseMaxBirdRepository.TABLE_DEVICE_SHIKHO_ACCOUNTS,
+                                eventReceivedAt
+                            )
                             val accRes = repository.getDeviceShikhoAccounts()
                             if (accRes.isSuccess) {
                                 _deviceShikhoAccounts.value = accRes.getOrNull().orEmpty()
                             }
-                            refreshStats()
-                            if (_isLiveNotificationMonitorEnabled.value) {
-                                notificationHelper.checkAndNotifyNewEvents(
-                                    devices = _userDevices.value,
-                                    enrollments = _courseAccessEnrollments.value,
-                                    transactions = _coursePaymentTransactions.value
-                                )
-                            }
                         }
 
-                        "course_access_enrollments", "course_payment_transactions", "course_payment_settings" -> {
+                        "course_access_enrollments" -> {
+                            SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                                SupabaseMaxBirdRepository.TABLE_COURSE_ENROLLMENTS,
+                                eventReceivedAt
+                            )
                             val enrollRes = repository.getCourseAccessEnrollments()
                             if (enrollRes.isSuccess) {
                                 _courseAccessEnrollments.value = enrollRes.getOrNull().orEmpty()
                             }
-                            val txRes = repository.getCoursePaymentTransactions()
-                            if (txRes.isSuccess) {
-                                _coursePaymentTransactions.value = txRes.getOrNull().orEmpty()
-                            }
-                            if (tableName == "course_payment_settings") {
-                                val setRes = repository.getCoursePaymentSettings()
-                                setRes.getOrNull()?.let { _coursePaymentSettings.value = it }
-                            }
-                            refreshStats()
                             if (_isLiveNotificationMonitorEnabled.value) {
                                 notificationHelper.checkAndNotifyNewEvents(
                                     devices = _userDevices.value,
@@ -488,10 +507,64 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                             }
                         }
 
-                        "app_updates" -> loadAppUpdates()
-                        "app_notices" -> loadAppNotices(forceRefresh = true)
-                        "activation_support_links" -> loadActivationSupportLinks(forceRefresh = true)
-                        "student_notifications" -> loadStudentNotifications()
+                        "course_payment_transactions" -> {
+                            SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                                SupabaseMaxBirdRepository.TABLE_COURSE_TRANSACTIONS,
+                                eventReceivedAt
+                            )
+                            val txRes = repository.getCoursePaymentTransactions()
+                            if (txRes.isSuccess) {
+                                _coursePaymentTransactions.value = txRes.getOrNull().orEmpty()
+                            }
+                            if (_isLiveNotificationMonitorEnabled.value) {
+                                notificationHelper.checkAndNotifyNewEvents(
+                                    devices = _userDevices.value,
+                                    enrollments = _courseAccessEnrollments.value,
+                                    transactions = _coursePaymentTransactions.value
+                                )
+                            }
+                        }
+
+                        "course_payment_settings" -> {
+                            SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                                SupabaseMaxBirdRepository.TABLE_COURSE_SETTINGS,
+                                eventReceivedAt
+                            )
+                            val setRes = repository.getCoursePaymentSettings()
+                            setRes.getOrNull()?.let { _coursePaymentSettings.value = it }
+                        }
+
+                        "app_updates" -> {
+                            SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                                SupabaseMaxBirdRepository.TABLE_APP_UPDATES,
+                                eventReceivedAt
+                            )
+                            loadAppUpdates()
+                        }
+
+                        "app_notices" -> {
+                            SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                                SupabaseMaxBirdRepository.TABLE_APP_NOTICES,
+                                eventReceivedAt
+                            )
+                            loadAppNotices(forceRefresh = false)
+                        }
+
+                        "activation_support_links" -> {
+                            SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                                SupabaseMaxBirdRepository.TABLE_SUPPORT_LINKS,
+                                eventReceivedAt
+                            )
+                            loadActivationSupportLinks(forceRefresh = false)
+                        }
+
+                        "student_notifications" -> {
+                            SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                                SupabaseMaxBirdRepository.TABLE_STUDENT_NOTIFICATIONS,
+                                eventReceivedAt
+                            )
+                            loadStudentNotifications()
+                        }
                     }
                 }
             }
@@ -535,6 +608,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 realtimeClient.stop()
                 realtimeDebounceJobs.values.forEach { it.cancel() }
                 realtimeDebounceJobs.clear()
+                SupabaseMaxBirdRepository.invalidateTableCache()
                 AdminRealtimeMonitorService.stop(app)
                 supabaseClient.authManager.logout()
                 _currentScreen.value = Screen.Dashboard
@@ -553,10 +627,14 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         realtimeDebounceJobs.clear()
     }
 
+    /**
+     * Disconnected-only fallback safety sync (90 seconds).
+     * When Supabase Realtime WebSocket is connected, ZERO periodic REST GET polling occurs.
+     */
     private fun startInAppRealtimeMonitorLoop() {
         viewModelScope.launch {
             while (isActive) {
-                delay(15_000L)
+                delay(FALLBACK_POLL_INTERVAL_MS)
                 if (!adminPreferences.hasValidAdminSession()) continue
                 val app = getApplication<Application>()
                 if (_oneSignalAppId.value.isBlank()) {
@@ -566,11 +644,17 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 _oneSignalStatusSummary.value = OneSignalPushManager.getSubscriptionSummary(app)
+
+                // Skip REST polling completely whenever Realtime WebSocket is healthy
+                if (realtimeClient.isConnected.value) continue
+
                 if (_isLiveNotificationMonitorEnabled.value) {
                     try {
-                        val devicesRes = repository.getUserDevices()
+                        val devicesRes = repository.getUserDevices(forceRefresh = false)
                         if (devicesRes.isSuccess) {
-                            _userDevices.value = devicesRes.getOrNull().orEmpty()
+                            val devices = devicesRes.getOrNull().orEmpty()
+                            _userDevices.value = devices
+                            updateStatsFromDevices(devices)
                         }
                         val enrollmentsRes = repository.getCourseAccessEnrollments()
                         if (enrollmentsRes.isSuccess) {
@@ -579,10 +663,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                         val transactionsRes = repository.getCoursePaymentTransactions()
                         if (transactionsRes.isSuccess) {
                             _coursePaymentTransactions.value = transactionsRes.getOrNull().orEmpty()
-                        }
-                        val statsRes = repository.getDashboardStats()
-                        if (statsRes.isSuccess) {
-                            statsRes.getOrNull()?.let { _stats.value = it }
                         }
 
                         notificationHelper.checkAndNotifyNewEvents(
@@ -792,37 +872,62 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     fun navigateTo(screen: Screen) {
         _currentScreen.value = screen
         if (screen == Screen.CourseSales || screen == Screen.Settings) {
-            loadCourseSalesData()
-            loadUserDevices(forceRefresh = false)
+            loadCourseSalesData(forceRefresh = false)
+            if (_userDevices.value.isEmpty()) {
+                loadUserDevices(forceRefresh = false)
+            }
             if (screen == Screen.Settings) {
                 loadAppSecurityConfig()
             }
         } else if (screen == Screen.Devices) {
-            loadUserDevices(forceRefresh = true)
-            loadCourseSalesData()
+            loadUserDevices(forceRefresh = false)
+            if (_courseAccessEnrollments.value.isEmpty()) {
+                loadCourseSalesData(forceRefresh = false)
+            }
         } else if (screen == Screen.Updates) {
             loadAppUpdates()
         } else if (screen == Screen.Notices) {
-            loadAppNotices(forceRefresh = true)
+            loadAppNotices(forceRefresh = false)
             loadStudentNotifications()
         } else if (screen == Screen.MaxbirdWebsiteAdmin) {
             loadMaxbirdPortalSettings()
         }
     }
 
-    fun loadAllData() {
+    fun loadAllData(forceRefresh: Boolean = false) {
         if (!adminPreferences.hasValidAdminSession()) return
-        refreshStats()
-        loadUserDevices()
+        if (forceRefresh) {
+            SupabaseMaxBirdRepository.invalidateTableCache()
+        }
+        loadUserDevices(forceRefresh = forceRefresh)
         loadAppUpdates()
-        loadAppNotices()
+        loadAppNotices(forceRefresh = forceRefresh)
         loadStudentNotifications()
-        loadActivationSupportLinks()
-        loadCourseSalesData()
+        loadActivationSupportLinks(forceRefresh = forceRefresh)
+        loadCourseSalesData(forceRefresh = forceRefresh)
         loadAppSecurityConfig()
     }
 
+    private fun updateStatsFromDevices(devices: List<UserDevice>) {
+        val pendingCount = devices.count { it.isPendingDevice }
+        val activeVerifiedCount = devices.count { it.isActiveDevice }
+        val blockedRealCount = devices.count { it.isBlockedDevice }
+        _stats.value = DashboardStats(
+            totalCodes = activeVerifiedCount,
+            activeStudents = activeVerifiedCount,
+            totalDevices = devices.size,
+            blockedDevices = blockedRealCount,
+            availableSlots = pendingCount,
+            pendingVerificationDevices = pendingCount,
+            activeVerifiedDevices = activeVerifiedCount
+        )
+    }
+
     fun refreshStats() {
+        if (_userDevices.value.isNotEmpty()) {
+            updateStatsFromDevices(_userDevices.value)
+            return
+        }
         viewModelScope.launch {
             try {
                 _isLoadingStats.value = true
@@ -849,12 +954,21 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     // Real Supabase Devices (public.devices) & Shikho Accounts (public.device_shikho_accounts) Operations
     fun loadUserDevices(forceRefresh: Boolean = false) {
-        viewModelScope.launch {
+        if (!forceRefresh && devicesLoadJob?.isActive == true) return
+        devicesLoadJob = viewModelScope.launch {
             try {
                 _isLoadingDevices.value = true
+                if (forceRefresh) {
+                    SupabaseMaxBirdRepository.invalidateTableCache(
+                        SupabaseMaxBirdRepository.TABLE_DEVICES,
+                        SupabaseMaxBirdRepository.TABLE_DEVICE_SHIKHO_ACCOUNTS
+                    )
+                }
                 val result = repository.getUserDevices(forceRefresh)
                 if (result.isSuccess) {
-                    _userDevices.value = result.getOrNull() ?: emptyList()
+                    val devices = result.getOrNull() ?: emptyList()
+                    _userDevices.value = devices
+                    updateStatsFromDevices(devices)
                 }
                 val accountsResult = repository.getDeviceShikhoAccounts()
                 if (accountsResult.isSuccess) {
@@ -2102,13 +2216,26 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     // Course Sales, Installment Plans & Payment Verification Operations
     // =========================================================================
 
-    fun loadCourseSalesData() {
-        viewModelScope.launch {
+    fun loadCourseSalesData(forceRefresh: Boolean = false) {
+        if (!forceRefresh && courseSalesLoadJob?.isActive == true) return
+        courseSalesLoadJob = viewModelScope.launch {
             try {
                 _isLoadingCourseSales.value = true
-                try {
-                    repository.enforceOverdueCourseInstallments()
-                } catch (_: Throwable) {}
+                if (forceRefresh) {
+                    SupabaseMaxBirdRepository.invalidateTableCache(
+                        SupabaseMaxBirdRepository.TABLE_COURSE_ENROLLMENTS,
+                        SupabaseMaxBirdRepository.TABLE_COURSE_TRANSACTIONS,
+                        SupabaseMaxBirdRepository.TABLE_COURSE_SETTINGS
+                    )
+                }
+
+                val nowMs = System.currentTimeMillis()
+                if (nowMs - lastOverdueAutoCheckMs >= OVERDUE_AUTO_CHECK_COOLDOWN_MS) {
+                    lastOverdueAutoCheckMs = nowMs
+                    try {
+                        repository.enforceOverdueCourseInstallments()
+                    } catch (_: Throwable) {}
+                }
 
                 val enrollmentsRes = repository.getCourseAccessEnrollments()
                 if (enrollmentsRes.isSuccess) {
@@ -2150,7 +2277,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 val result = repository.approveCourseAccessRequest(payload)
                 if (result.isSuccess) {
                     // Live DB trigger `trg_course_enrollments_onesignal_notify` (AFTER UPDATE) automatically notifies the student
-                    loadCourseSalesData()
+                    loadCourseSalesData(forceRefresh = true)
                     val msg = when {
                         payload.instantFreeUnlock -> {
                             "✅ কোর্সটি সফলভাবে ফ্রি আনলক (ACTIVE) করে দেওয়া হয়েছে!"
@@ -2189,7 +2316,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 if (result.isSuccess) {
                     val cleanPhone = CourseAccessEnrollment.normalizeBdPhone(payload.studentPhone)
                     // Live DB trigger `trg_course_enrollments_onesignal_notify` (AFTER INSERT/UPDATE) automatically notifies the student
-                    loadCourseSalesData()
+                    loadCourseSalesData(forceRefresh = true)
                     val msg = when {
                         payload.status.equals("TRIAL_ACTIVE", ignoreCase = true) ||
                             (payload.trialEnabled && payload.startTrialImmediately) -> {
@@ -2225,7 +2352,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 val result = repository.manageCourseTrial(payload)
                 if (result.isSuccess) {
                     // Live DB trigger `trg_course_enrollments_onesignal_notify` (AFTER UPDATE) automatically notifies the student
-                    loadCourseSalesData()
+                    loadCourseSalesData(forceRefresh = true)
                     val msg = when (payload.action.uppercase()) {
                         "ADD_HOURS" -> "➕ ফ্রি ট্রায়ালের মেয়াদ বাড়ানো হয়েছে এবং কোর্স আনলক (TRIAL_ACTIVE) করা হয়েছে!"
                         "REDUCE_HOURS" -> "➖ ফ্রি ট্রায়ালের মেয়াদ কমানো হয়েছে!"
@@ -2258,7 +2385,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 if (result.isSuccess) {
                     // Live DB triggers `trg_course_payments_onesignal_notify` & `trg_course_enrollments_onesignal_notify`
                     // automatically notify the student on APPROVED / REJECTED payment review
-                    loadCourseSalesData()
+                    loadCourseSalesData(forceRefresh = true)
                     val msg = if (payload.approve) {
                         "✅ পেমেন্ট অনুমোদিত হয়েছে এবং শিক্ষার্থীর কোর্স আনলক (ACTIVE) করা হয়েছে!"
                     } else {
@@ -2283,7 +2410,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 _isProcessingCourseSalesAction.value = true
                 val result = repository.enforceOverdueCourseInstallments()
                 if (result.isSuccess) {
-                    loadCourseSalesData()
+                    loadCourseSalesData(forceRefresh = true)
                     showToast("✅ ওভারডিউ কিস্তি চেক ও অটো-লক সফলভাবে সম্পন্ন হয়েছে!")
                 } else {
                     showToast("⚠️ ${result.exceptionOrNull()?.message ?: "ওভারডিউ চেক ব্যর্থ হয়েছে"}")
@@ -2342,7 +2469,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                             "next_due_date" to newDueIso
                         )
                     )
-                    loadCourseSalesData()
+                    loadCourseSalesData(forceRefresh = true)
                     showToast("✅ কিস্তির মেয়াদ +$extraDays দিন বাড়ানো হয়েছে!")
                 } else {
                     showToast("⚠️ ${result.exceptionOrNull()?.message ?: "মেয়াদ বাড়াতে ব্যর্থ হয়েছে"}")
@@ -2369,7 +2496,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 if (result.isSuccess) {
                     val isUnlocked = newStatus.equals("ACTIVE", ignoreCase = true)
                     // Live DB trigger `trg_course_enrollments_onesignal_notify` (AFTER UPDATE) automatically notifies the student
-                    loadCourseSalesData()
+                    loadCourseSalesData(forceRefresh = true)
                     val msg = if (isUnlocked) {
                         "✅ কোর্সটি আনলক (ACTIVE) করা হয়েছে!"
                     } else {

@@ -49,7 +49,8 @@ class AdminRealtimeMonitorService : Service() {
 
     companion object {
         private const val FOREGROUND_NOTIFICATION_ID = 8800
-        private const val POLL_INTERVAL_MS = 15_000L // 15 seconds fallback safety poll
+        private const val FALLBACK_POLL_INTERVAL_MS = 90_000L // 90s fallback ONLY when Realtime WebSocket is disconnected
+        private const val REALTIME_DEBOUNCE_MS = 2_500L
 
         fun startIfEnabled(context: Context) {
             val prefs = AdminPreferences(context)
@@ -83,13 +84,32 @@ class AdminRealtimeMonitorService : Service() {
         notificationHelper = AdminNotificationHelper(applicationContext)
     }
 
-    private suspend fun checkAndUpdatePendingEvents() {
+    private suspend fun checkAndUpdatePendingEvents(
+        changedTable: String? = null,
+        eventReceivedAt: Long = 0L
+    ) {
         if (!adminPreferences.hasValidAdminSession()) {
             realtimeClient.stop()
             stopSelf()
             return
         }
-        val devices = repository.getUserDevices().getOrNull().orEmpty()
+        if (eventReceivedAt > 0L) {
+            when (changedTable) {
+                "devices" -> SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                    SupabaseMaxBirdRepository.TABLE_DEVICES,
+                    eventReceivedAt
+                )
+                "course_access_enrollments" -> SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                    SupabaseMaxBirdRepository.TABLE_COURSE_ENROLLMENTS,
+                    eventReceivedAt
+                )
+                "course_payment_transactions" -> SupabaseMaxBirdRepository.invalidateIfOlderThan(
+                    SupabaseMaxBirdRepository.TABLE_COURSE_TRANSACTIONS,
+                    eventReceivedAt
+                )
+            }
+        }
+        val devices = repository.getUserDevices(forceRefresh = false).getOrNull().orEmpty()
         val enrollments = repository.getCourseAccessEnrollments().getOrNull().orEmpty()
         val transactions = repository.getCoursePaymentTransactions().getOrNull().orEmpty()
 
@@ -104,7 +124,7 @@ class AdminRealtimeMonitorService : Service() {
         val pendingPays = transactions.count { it.status.equals("PENDING", ignoreCase = true) }
         val totalPending = pendingDevs + pendingCourses + pendingPays
 
-        val wsTag = if (realtimeClient.isConnected.value) "Realtime সক্রিয়" else "লাইভ মনিটর সক্রিয়"
+        val wsTag = if (realtimeClient.isConnected.value) "Realtime সক্রিয়" else "ফলব্যাক মনিটর সক্রিয়"
         val statusText = if (totalPending > 0) {
             "অপেক্ষমান: ${pendingDevs}টি ডিভাইস • ${pendingCourses}টি কোর্স • ${pendingPays}টি পেমেন্ট"
         } else {
@@ -120,7 +140,7 @@ class AdminRealtimeMonitorService : Service() {
         }
 
         notificationHelper.ensureNotificationChannels()
-        startForegroundSafely("লাইভ মনিটরিং চালু আছে • নতুন রিকোয়েস্ট ও পেমেন্ট অটো-চেক হচ্ছে")
+        startForegroundSafely("Realtime মনিটরিং চালু আছে • নতুন রিকোয়েস্ট ও পেমেন্ট সাথে সাথে জানানো হবে")
 
         if (adminPreferences.hasValidAdminSession()) {
             realtimeClient.start { tableName, _ ->
@@ -128,11 +148,15 @@ class AdminRealtimeMonitorService : Service() {
                     tableName == "course_access_enrollments" ||
                     tableName == "course_payment_transactions"
                 ) {
+                    val eventTime = System.currentTimeMillis()
                     realtimeSyncJob?.cancel()
                     realtimeSyncJob = serviceScope.launch {
-                        delay(350L)
+                        delay(REALTIME_DEBOUNCE_MS)
                         try {
-                            checkAndUpdatePendingEvents()
+                            checkAndUpdatePendingEvents(
+                                changedTable = tableName,
+                                eventReceivedAt = eventTime
+                            )
                         } catch (_: Throwable) {
                         }
                     }
@@ -142,13 +166,27 @@ class AdminRealtimeMonitorService : Service() {
 
         if (monitorJob?.isActive != true) {
             monitorJob = serviceScope.launch {
+                // Brief initial delay so foreground UI startup shares the coalesced cache (zero duplicate GETs)
+                delay(REALTIME_DEBOUNCE_MS)
+                try {
+                    checkAndUpdatePendingEvents()
+                } catch (_: Throwable) {
+                }
+
+                // Fallback polling loop: runs every 90s ONLY when Realtime WebSocket is disconnected
                 while (isActive && notificationHelper.isLiveMonitorEnabled()) {
+                    delay(FALLBACK_POLL_INTERVAL_MS)
+                    if (!adminPreferences.hasValidAdminSession()) {
+                        realtimeClient.stop()
+                        stopSelf()
+                        break
+                    }
+                    if (realtimeClient.isConnected.value) continue
                     try {
                         checkAndUpdatePendingEvents()
                     } catch (_: Throwable) {
                         // Ignore transient network errors and retry on next cycle
                     }
-                    delay(POLL_INTERVAL_MS)
                 }
             }
         }
